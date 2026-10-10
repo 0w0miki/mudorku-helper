@@ -357,9 +357,15 @@
 
   function selectPerson(id) {
     const st = MH.store.state;
-    if (!st.selectedPersonId) { st.selectedPersonId = id; MH.store.touch('选择人物'); return; }
     if (st.selectedPersonId === id) return;
     st.selectedPersonId = id;
+    // 「选人」的意图就是接下来要标这个人的候选。若左键还停在「标 X」，
+    // 自动切回候选模式 —— 否则用户以为已经切到候选了，结果继续在盘上打 X。
+    if (st.phase === 'play' && st.settings.leftMode === 'x') {
+      MH.store.setSettings({ leftMode: 'candidate' });
+      MH.toast('已切回「左键＝候选」', 'ok');
+      return;
+    }
     MH.store.touch('选择人物');
   }
 

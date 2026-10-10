@@ -603,6 +603,39 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const sb = await p.locator('.sidebar').boundingBox();
   await p.screenshot({ path: '/tmp/mh-e2e-people24.png', clip: { x: sb.x, y: sb.y, width: sb.width, height: Math.min(sb.height, 560) } });
 
+  // 20) 标 X 模式下点另一个人 → 自动切回候选
+  if (await p.locator('.snipper-panel').isVisible()) { await p.click('.snipper-tab'); await p.waitForTimeout(200); }
+  await p.click('[data-act="left-mode"][data-mode="x"]');
+  await p.locator('.cell[data-k="5,1"]').click();
+  await p.waitForTimeout(150);
+  const asX = await p.evaluate(() => window.MH.core.xSource(window.MH.store.state, '5,1'));
+  ok(asX === 'user', '标 X 模式下左键确实在标 X：' + asX);
+
+  await p.click('.plist li:nth-child(8)');           // 点另一个人
+  await p.waitForTimeout(200);
+  const switched = await p.evaluate(() => ({
+    mode: window.MH.store.state.settings.leftMode,
+    // 分段控件的高亮也要跟着变，否则用户看不出模式已变
+    activeText: (document.querySelector('[data-act="left-mode"].active') || {}).textContent,
+    picked: window.MH.store.state.selectedPersonId,
+  }));
+  ok(switched.mode === 'candidate', '换人后左键模式自动回到候选：' + switched.mode);
+  ok(/候选/.test(switched.activeText || ''), '分段控件高亮跟着切：' + switched.activeText);
+
+  await p.locator('.cell[data-k="6,2"]').click();
+  await p.waitForTimeout(150);
+  const after = await p.evaluate(pid => ({
+    cand: (window.MH.store.state.play.candidates[pid] || []).includes('6,2'),
+    x: window.MH.core.xSource(window.MH.store.state, '6,2'),
+  }), switched.picked);
+  ok(after.cand && after.x === null, '接着左键标的是候选而不是 X：' + JSON.stringify(after));
+
+  // 点回当前人物自己不该改模式
+  await p.click('[data-act="left-mode"][data-mode="x"]');
+  await p.click('.plist li.active');
+  await p.waitForTimeout(150);
+  ok((await p.evaluate(() => window.MH.store.state.settings.leftMode)) === 'x', '点当前人物自己不改模式');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

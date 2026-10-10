@@ -1434,3 +1434,60 @@ test('摘录窗：收起面板只有左侧标签一个入口（标题栏不再�
   assert.equal(q(doc, '#snipper').classList.contains('collapsed'), false, '再点展开');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 左键模式与选人的联动
+
+test('点另一个人时自动切回「左键＝候选」（避免继续误标 X）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  clickSel(dom, '#tabPlay');
+  const st = win.MH.store.state;
+  const [a, b] = st.people.map(p => p.id);
+
+  // 切到标 X 模式，并在盘上标一个 X
+  clickSel(dom, '[data-act="left-mode"][data-mode="x"]');
+  assert.equal(win.MH.store.state.settings.leftMode, 'x');
+  pointer(dom, 'pointerdown', cellEl(dom, 3, 3));
+  pointer(dom, 'pointerup');
+  assert.equal(win.MH.core.xSource(win.MH.store.state, '3,3'), 'user', '此时左键确实在标 X');
+
+  // 点另一个人 → 模式自动回到候选，并且左键点下去是标候选
+  clickSel(dom, '.plist li[data-id="' + b + '"]');
+  assert.equal(win.MH.store.state.selectedPersonId, b, '切换了当前人物');
+  assert.equal(win.MH.store.state.settings.leftMode, 'candidate', '自动切回候选模式');
+  pointer(dom, 'pointerdown', cellEl(dom, 4, 4));
+  pointer(dom, 'pointerup');
+  assert.ok(win.MH.store.state.play.candidates[b].includes('4,4'), '左键点下去标的是候选');
+  assert.equal(win.MH.core.xSource(win.MH.store.state, '4,4'), null, '不再标 X');
+  dom.window.close();
+});
+
+test('点当前人物自己不会悄悄改掉左键模式', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  clickSel(dom, '#tabPlay');
+  const st = win.MH.store.state;
+  const a = st.people[0].id;
+  clickSel(dom, '[data-act="left-mode"][data-mode="x"]');
+
+  clickSel(dom, '.plist li[data-id="' + a + '"]');   // 点的就是当前人物
+  assert.equal(win.MH.store.state.settings.leftMode, 'x', '同一个人保持原模式');
+
+  clickSel(dom, '.plist li[data-id="' + st.people[1].id + '"]');
+  assert.equal(win.MH.store.state.settings.leftMode, 'candidate', '换人才切回候选');
+  dom.window.close();
+});
+
+test('准备阶段选人不会动左键模式（那里用不上）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  clickSel(dom, '#tabPlay');
+  clickSel(dom, '[data-act="left-mode"][data-mode="x"]');       // 游玩阶段设成标 X
+  clickSel(dom, '[data-act="phase"][data-phase="prep"]');        // 回到准备阶段
+  const st = win.MH.store.state;
+  assert.equal(st.settings.leftMode, 'x', '模式跟着存档留在 X');
+  clickSel(dom, '[data-act="select-person"][data-id="' + st.people[1].id + '"]');   // 准备阶段的人物条
+  assert.equal(win.MH.store.state.selectedPersonId, st.people[1].id, '切换了人物');
+  assert.equal(win.MH.store.state.settings.leftMode, 'x', '准备阶段选人不动模式');
+  dom.window.close();
+});
