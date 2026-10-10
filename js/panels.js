@@ -177,6 +177,8 @@
     const d = MH.ui.draft;
     const n = Core.peopleCount(st.rows, st.cols);
     return '' +
+      bgCard(st) +
+
       '<section class="card">' +
       '<h2>地图</h2>' +
       '<div class="grid2">' +
@@ -212,8 +214,6 @@
       (d && d.kind === 'item' ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('item', st) + '</ul>' +
       '</section>' +
-
-      bgCard(st) +
 
       '<section class="card">' +
       '<h2>存档</h2>' +
