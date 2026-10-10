@@ -383,7 +383,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const cbb2 = await p.locator('#board').boundingBox();
   await p.screenshot({ path: '/tmp/mh-e2e-cand.png', clip: { x: cbb2.x - 8, y: cbb2.y - 8, width: cbb2.width + 16, height: cbb2.height + 16 } });
 
-  // 17) 摘录窗改进：箭头图标 / 卡片缩放拖拽排序
+  // 17) 摘录窗改进：箭头图标 / 卡片缩放拖拽排序 / 多卡片可滚动
   // 上一节可能把面板收起了（会持久化），先归一成展开态再测
   if (await p.locator('.snipper-panel').isHidden()) { await p.click('.snipper-tab'); await p.waitForTimeout(200); }
   ok(await p.locator('.snipper-panel').isVisible(), '面板处于展开态');
@@ -427,6 +427,9 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     };
   });
   ok(pinInfo.n === 8, '8 张卡片都渲染出来');
+  ok(pinInfo.scrollable, '卡片区可滚动（不再被面板裁掉）');
+  ok(pinInfo.lastVisible && pinInfo.panelInside, '滚到底能完整看到最后一张：' + JSON.stringify(pinInfo));
+
   // 卡片缩放
   const zid = await p.getAttribute('.snipper-pin:first-child', 'data-id');
   const zw0 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);

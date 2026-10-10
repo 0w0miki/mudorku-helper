@@ -593,14 +593,18 @@ kbd {
   pointer-events: none;
 }
 
+/* 卡片区：能伸缩 + 自己滚动。之前写死 max-height 46%，父级高度不确定时
+   百分比失效，卡片会顶出面板被 overflow:hidden 裁掉 —— 这就是「下面的卡片
+   看不到」的原因。改成 flex:1 1 auto + min-height:0，多了就自己滚。 */
 .snipper-pins {
-  flex: none;
-  max-height: 46%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overscroll-behavior: contain;
 }
 .snipper-pins:empty { display: none; }
 .snipper-pin {
@@ -609,6 +613,7 @@ kbd {
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
+  flex: none;   /* 列方向弹性容器默认会压缩子项：卡片会被压扁，必须显式关掉 */
 }
 .snipper-pin.dragging { opacity: .55; }
 .snipper-pin-body {
