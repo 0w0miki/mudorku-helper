@@ -22,6 +22,8 @@
   const MAX_SIDE = 1600;                           // 截取位图最长边上限（控制存档体积）
   const MIN_SIDE = 8;                              // 太小的框视为误拖，不生成卡片
 
+  const CHEV = '<svg class="snipper-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
+
   const S = {
     collapsed: false,
     img: null,        // 当前页的位图（HTMLImageElement）
@@ -56,14 +58,15 @@
     wrap.className = 'snipper';
     wrap.id = 'snipper';
     wrap.innerHTML =
-      '<button class="snipper-tab" type="button" data-snip="toggle" title="展开 / 收起 PDF 摘录">📌<span class="snipper-badge" data-snip="badge"></span></button>' +
+      '<button class="snipper-tab" type="button" data-snip="toggle" title="展开 / 收起 PDF 摘录">' + CHEV +
+        '<span class="snipper-badge" data-snip="badge"></span></button>' +
       '<div class="snipper-panel">' +
         '<div class="snipper-head">' +
           '<b>PDF 摘录</b>' +
           '<span class="muted" data-snip="status"></span>' +
           '<span class="grow"></span>' +
           '<button class="ghost sm" type="button" data-snip="import">导入 PDF</button>' +
-          '<button class="ghost sm" type="button" data-snip="toggle" title="收起">✕</button>' +
+          '<button class="ghost sm icon" type="button" data-snip="toggle" title="收起面板">' + CHEV + '</button>' +
         '</div>' +
         '<div class="snipper-stage" data-snip="stage">' +
           '<div class="snipper-empty">导入一份 PDF（可以和地图不是同一页），<br>然后在页面上<b>拖一个矩形</b>把它截下来。</div>' +

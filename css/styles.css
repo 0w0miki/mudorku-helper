@@ -510,6 +510,18 @@ kbd {
   line-height: 1;
 }
 .snipper-tab:hover { background: var(--accent-soft); }
+.snipper-chev {
+  width: 16px; height: 16px; display: block;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .15s ease;
+}
+/* 展开时箭头指右（点一下收回去），收起时指左（点一下拉出来） */
+.snipper:not(.collapsed) > .snipper-tab .snipper-chev { transform: rotate(180deg); }
+.snipper-head .icon, .snipper-cap .icon {
+  width: 24px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 
 .snipper-badge {
   position: absolute;

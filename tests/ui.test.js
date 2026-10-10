@@ -1169,3 +1169,22 @@ test('候选格高亮与关联填色可以叠加，互不覆盖', async () => {
   assert.ok(/rgba\(22, ?163, ?74/.test(cell.style.background), '填色没被顶掉：' + cell.style.background);
   dom.window.close();
 });
+
+// ------------------------------------------------------------ PDF 摘录窗：本轮四项改进
+
+test('摘录窗：收起按钮是箭头图标（不再是 📌），展开/收起会转向', async () => {
+  const { dom, doc } = await boot();
+  const tab = q(doc, '#snipper .snipper-tab');
+  assert.ok(tab.querySelector('svg.snipper-chev'), 'tab 里是箭头 SVG');
+  assert.ok(!/📌/.test(tab.textContent), '不再有 📌');
+  assert.ok(q(doc, '#snipper [data-snip="toggle"] svg.snipper-chev'), '头部收起按钮也是箭头');
+  // 头部的「折叠缩略图」按钮同样是箭头
+  assert.ok(q(doc, '#snipper [data-snip="fold-stage"] svg.snipper-chev'));
+  dom.window.close();
+});
+
+
+
+
+
+

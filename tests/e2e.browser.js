@@ -383,6 +383,21 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const cbb2 = await p.locator('#board').boundingBox();
   await p.screenshot({ path: '/tmp/mh-e2e-cand.png', clip: { x: cbb2.x - 8, y: cbb2.y - 8, width: cbb2.width + 16, height: cbb2.height + 16 } });
 
+  // 17) 摘录窗改进：箭头图标
+  // 上一节可能把面板收起了（会持久化），先归一成展开态再测
+  if (await p.locator('.snipper-panel').isHidden()) { await p.click('.snipper-tab'); await p.waitForTimeout(200); }
+  ok(await p.locator('.snipper-panel').isVisible(), '面板处于展开态');
+  const tabSvg = await p.innerHTML('.snipper-tab');
+  ok(!/📌/.test(tabSvg) && /snipper-chev/.test(tabSvg), '收起按钮已换成箭头图标');
+  const chevOpen = await p.evaluate(() => getComputedStyle(document.querySelector('.snipper-tab .snipper-chev')).transform);
+  await p.click('.snipper-tab');
+  await p.waitForTimeout(200);
+  const chevShut = await p.evaluate(() => getComputedStyle(document.querySelector('.snipper-tab .snipper-chev')).transform);
+  ok(chevOpen !== chevShut && await p.locator('.snipper-panel').isHidden(), '箭头会转向且能收起');
+  await p.click('.snipper-tab');
+  await p.waitForTimeout(200);
+  ok(await p.locator('.snipper-panel').isVisible(), '再点箭头又展开');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
