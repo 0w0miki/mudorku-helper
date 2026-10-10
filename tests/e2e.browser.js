@@ -344,6 +344,45 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const pins2 = await p.locator('.snipper-pin').count();
   ok(pins2 >= 1, '刷新后摘录卡片仍在：' + pins2 + ' 张');
 
+  // 16) 悬停人物时顶出他自己的候选格
+  await p.click('#tabPlay');
+  const candInfo = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    const [a, b] = s.people.map(x => x.id);
+    s.play.candidates[a] = ['1,1', '1,3', '3,3'];
+    s.play.candidates[b] = ['1,1', '2,2'];
+    window.MH.render();
+    return { a: a, color: s.people[0].color };
+  });
+  await p.hover('.cell[data-k="3,3"] .cands i[data-person="' + candInfo.a + '"]');
+  await p.waitForTimeout(150);
+  const candHl = await p.evaluate(a => {
+    const cls = k => document.querySelector('.cell[data-k="' + k + '"]').className;
+    const shared = document.querySelector('.cell[data-k="1,1"]');
+    const chips = [...shared.querySelectorAll('.cands i')].map(i => ({
+      pid: i.dataset.person, on: i.classList.contains('on'),
+      opacity: parseFloat(getComputedStyle(i).opacity),
+    }));
+    const cell = document.querySelector('.cell[data-k="3,3"]');
+    return {
+      mine: ['1,1', '1,3', '3,3'].map(k => cls(k).includes('hl-cand')),
+      other: cls('2,2').includes('hl-cand'),
+      shadow: getComputedStyle(cell).boxShadow,
+      ringVar: cell.style.getPropertyValue('--cand-ring'),
+      myChip: chips.filter(c => c.pid === a)[0],
+      otherChips: chips.filter(c => c.pid !== a),
+    };
+  }, candInfo.a);
+  ok(candHl.mine.every(Boolean), '悬停人物时自己的候选格全部顶出：' + JSON.stringify(candHl.mine));
+  ok(candHl.other === false, '别人独有的候选格不受影响');
+  ok(candHl.ringVar === candInfo.color && /inset/.test(candHl.shadow),
+     '候选格描边用本人颜色：' + candHl.ringVar + ' / ' + candHl.shadow);
+  ok(candHl.myChip && candHl.myChip.on && candHl.myChip.opacity === 1, '本人候选标签点亮');
+  ok(candHl.otherChips.length > 0 && candHl.otherChips.every(c => !c.on && c.opacity < 0.5),
+     '同格里别人的候选淡下去：' + JSON.stringify(candHl.otherChips));
+  const cbb2 = await p.locator('#board').boundingBox();
+  await p.screenshot({ path: '/tmp/mh-e2e-cand.png', clip: { x: cbb2.x - 8, y: cbb2.y - 8, width: cbb2.width + 16, height: cbb2.height + 16 } });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

@@ -276,6 +276,15 @@ button.block { display: block; width: 100%; text-align: center; }
   padding: 0 2px; border-radius: 3px;
   background: var(--pc); color: #fff;
 }
+/* 悬停人物时：他的候选格用内描边顶出来，同格里其它人的候选淡下去 */
+.cell.hl-cand { box-shadow: inset 0 0 0 3px var(--cand-ring, #0b1220); }
+.cell.hl-cand .cands i { opacity: .38; }
+.cell.hl-cand .cands i.on {
+  opacity: 1; transform: scale(1.3);
+  box-shadow: 0 0 0 2px #fff, 0 1px 5px rgba(15, 23, 42, .45);
+}
+.cands i { transition: transform .08s ease-out, opacity .08s linear; }
+
 .cands i.more { background: #94a3b8; }
 .cands i.mid { font-size: calc(var(--cell) * .2); }
 .cands i.small { font-size: calc(var(--cell) * .16); }

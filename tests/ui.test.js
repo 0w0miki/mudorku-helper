@@ -1099,3 +1099,73 @@ test('PDF 摘录窗：没有 localStorage 时也不报错（file:// 场景）', 
   dom.window.close();
 });
 
+
+test('悬停人物时，他自己的候选格被顶出来（同格别人的候选淡下去）', async () => {
+  const { dom, doc } = await boot();
+  clickSel(dom, '#tabPlay');
+  const st = dom.window.MH.store.state;
+  const [a, b] = st.people.map(p => p.id);
+
+  // A 在 (0,0)(0,1) 标候选；B 在 (0,1)(2,2) 标候选
+  st.play.candidates[a] = ['0,0', '0,1'];
+  st.play.candidates[b] = ['0,1', '2,2'];
+  dom.window.MH.render();
+
+  // 悬停 A 的候选小标签
+  const chipA = q(doc, '.cell[data-k="0,0"] .cands i[data-person="' + a + '"]');
+  assert.ok(chipA, 'A 的候选标签应存在');
+  pointer(dom, 'pointermove', chipA);
+
+  assert.ok(msgEl(dom, '0,0').classList.contains('hl-cand'), 'A 的候选格 (0,0) 被顶出');
+  assert.ok(msgEl(dom, '0,1').classList.contains('hl-cand'), 'A 的候选格 (0,1) 被顶出');
+  assert.equal(msgEl(dom, '2,2').classList.contains('hl-cand'), false, 'B 独有的候选格不受影响');
+  // 共格时只点亮 A 的标签
+  assert.ok(q(dom, '.cell[data-k="0,1"] .cands i[data-person="' + a + '"]').classList.contains('on'));
+  assert.equal(q(dom, '.cell[data-k="0,1"] .cands i[data-person="' + b + '"]').classList.contains('on'), false);
+  // 描边颜色取被悬停人物的颜色
+  assert.equal(q(doc, '.cell[data-k="0,0"]').style.getPropertyValue('--cand-ring'), st.people[0].color);
+
+  // 移开后清除
+  pointer(dom, 'pointermove', cellEl(dom, 4, 4));
+  assert.equal(msgEl(dom, '0,0').classList.contains('hl-cand'), false);
+  assert.equal(q(dom, '.cell[data-k="0,1"] .cands i[data-person="' + a + '"]').classList.contains('on'), false);
+  dom.window.close();
+});
+
+test('悬停侧栏人物条同样会顶出候选格', async () => {
+  const { dom, doc } = await boot();
+  clickSel(dom, '#tabPlay');
+  const st = dom.window.MH.store.state;
+  const b = st.people[1].id;
+  st.play.candidates[b] = ['3,3'];
+  dom.window.MH.render();
+
+  pointer(dom, 'pointermove', q(doc, '.plist li[data-id="' + b + '"]'));
+  assert.ok(msgEl(dom, '3,3').classList.contains('hl-cand'), '从侧栏悬停也会顶出候选');
+  pointer(dom, 'pointerleave', q(doc, '.sidebar'));
+  assert.equal(msgEl(dom, '3,3').classList.contains('hl-cand'), false, '移出侧栏后清除');
+  dom.window.close();
+});
+
+test('候选格高亮与关联填色可以叠加，互不覆盖', async () => {
+  const { dom, doc } = await boot();
+  // A 关联一个含 (0,0) 的区域，同时 A 在 (0,0) 有候选
+  clickSel(dom, '[data-act="new-region"]');
+  pointer(dom, 'pointerdown', cellEl(dom, 0, 0)); pointer(dom, 'pointerup');
+  clickSel(dom, '[data-act="draft-save"]');
+  const rid = dom.window.MH.store.state.regions[0].id;
+  pickLink(dom, 'region', rid);
+
+  clickSel(dom, '#tabPlay');
+  const st = dom.window.MH.store.state;
+  const a = st.selectedPersonId;
+  st.play.candidates[a] = ['0,0'];
+  dom.window.MH.render();
+
+  pointer(dom, 'pointermove', q(doc, '.cell[data-k="0,0"] .cands i'));
+  const cell = msgEl(dom, '0,0');
+  assert.ok(cell.classList.contains('hl-pos'), '关联填色仍在');
+  assert.ok(cell.classList.contains('hl-cand'), '候选描边同时在');
+  assert.ok(/rgba\(22, ?163, ?74/.test(cell.style.background), '填色没被顶掉：' + cell.style.background);
+  dom.window.close();
+});

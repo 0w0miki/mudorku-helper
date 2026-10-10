@@ -25,6 +25,7 @@
     gridSig: '',
     outlineSig: '',
     prevHl: new Map(),
+    prevCand: new Set(),
     press: null,
     painting: false,
     paintMode: 'add',
@@ -220,6 +221,7 @@
       const draft = MH.ui.draft;
       this.baseBg = new Map();
       this.prevHl = new Map();
+      this.prevCand = new Set();
 
       for (const [k, el] of this.cellEls) {
         const item = Core.itemAt(st, k);
@@ -332,8 +334,11 @@
         outNext.set(id, cls);
       };
 
+      // 悬停人物时，他自己的候选格要单独顶出来（和关联填色叠加，互不冲突）
+      const candSet = new Set();
       const hoverPid = MH.ui.hoverPersonId;
       if (hoverPid) {
+        for (const k of (st.play.candidates[hoverPid] || [])) candSet.add(k);
         const p = Core.person(st, hoverPid);
         if (p) {
           for (const link of p.links) {
@@ -371,12 +376,23 @@
         for (const id of Core.regionsAt(st, MH.ui.hoverCell)) markOutline(id, 'hl');
       }
 
-      const touched = new Set([...this.prevHl.keys(), ...next.keys()]);
+      // 候选描边用被悬停人物的颜色，一眼能对上是"谁的候选"
+      const hoverPerson = hoverPid ? Core.person(st, hoverPid) : null;
+      const candRing = hoverPerson ? hoverPerson.color : '#0b1220';
+      const touched = new Set([...this.prevHl.keys(), ...next.keys(), ...candSet, ...this.prevCand]);
       for (const k of touched) {
         const el = this.cellEls.get(k);
         if (!el) continue;
         const v = next.get(k);
+        const isCand = candSet.has(k);
         el.classList.remove('hl-region', 'hl-pos', 'hl-neg');
+        el.classList.toggle('hl-cand', isCand);
+        if (isCand) el.style.setProperty('--cand-ring', candRing);
+        else el.style.removeProperty('--cand-ring');
+        // 同一格里可能有多人的候选，只把被悬停那个人的小标签点亮
+        for (const i of el.querySelectorAll('.cands i')) {
+          i.classList.toggle('on', isCand && i.dataset.person === hoverPid);
+        }
         if (v) {
           el.style.background = v.bg;
           el.classList.add('hl-' + v.cls);
@@ -385,6 +401,7 @@
         }
       }
       this.prevHl = next;
+      this.prevCand = candSet;
 
       for (const [id, path] of this.outlineEls) {
         const cls = outNext.get(id);

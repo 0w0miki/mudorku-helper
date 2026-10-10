@@ -15,10 +15,5 @@
     "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
     "pdfjs-dist": "^6.4.299"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }
