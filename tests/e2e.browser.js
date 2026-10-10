@@ -254,6 +254,96 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   st = await S();
   ok(st.bg.kind === 'pdf' && st.bg.w > 0, '导入 PDF 渲染成底图：' + st.bg.w + 'x' + st.bg.h);
 
+  // 14) 底图卡片顺序 + 自动裁切 + 图片与网格绑定缩放
+  await p.click('#tabPrep');
+  const order = await p.$$eval('.sidebar .card h2', els => els.map(e => e.textContent.trim().split(' ')[0]));
+  ok(order[0].startsWith('底图'), '底图卡片在所有卡片最前：' + order.join(' → '));
+
+  // 摆一个「已对齐、四周有余量」的确定状态。
+  // 注意：不能用「生成地图」按钮——此时盘面已有内容会弹 confirm，Playwright 默认自动取消。
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(6, 8), 'e2e 底图'));
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  const setAligned = () => p.evaluate(() => {
+    const s = window.MH.store.state;
+    s.settings.cellSize = 40; s.bg.scale = 1;
+    window.MurdokuCore.setGridOffset(s, 20, 15);
+    window.MH.store.setSettings({}); window.MH.render();
+  });
+  await setAligned();
+  let pre = await S();
+  ok(pre.bg.bound !== true && pre.settings.cellSize === 40 && pre.rows === 6 && pre.cols === 8,
+     '底图就位且网格 8×6 / 每格 40px');
+
+  await p.click('#btnZoomIn');                       // 未绑定：只动格子
+  let mid = await S();
+  ok(mid.settings.cellSize !== pre.settings.cellSize && mid.bg.scale === pre.bg.scale && mid.grid.x === pre.grid.x,
+     '未绑定时缩放只动格子：cell ' + pre.settings.cellSize + '→' + mid.settings.cellSize + '，底图与偏移不动');
+
+  await setAligned();
+  pre = await S();
+  await p.click('[data-act="bg-crop"]');
+  await p.waitForFunction(() => window.MH.store.state.bg && window.MH.store.state.bg.bound === true, null, { timeout: 15000 });
+  let post = await S();
+  ok(post.bg.w < pre.bg.w && post.bg.h < pre.bg.h,
+     '自动裁切生效：底图 ' + pre.bg.w + '×' + pre.bg.h + ' → ' + post.bg.w + '×' + post.bg.h);
+  ok(post.bg.bound === true && post.settings.cellSize === pre.settings.cellSize, '裁完标记 bound 且格子大小不变');
+  // 对齐不变：裁切矩形必须 = 网格外框 + 边距，且网格在新图里的偏移 = 原图坐标 - 裁掉的左上角。
+  // 边距不当成常量写死，而是从实际裁切结果反推，这样以后调 CROP_MARGIN 也不会误报。
+  const cell = post.settings.cellSize;
+  const gx0 = pre.grid.x / pre.bg.scale, gy0 = pre.grid.y / pre.bg.scale;   // 网格左上角（原图像素）
+  const gw = 8 * cell, gh = 6 * cell;
+  const margin = (post.bg.w - gw) / 2;
+  const cx = Math.max(0, Math.floor(gx0 - margin));
+  const cy = Math.max(0, Math.floor(gy0 - margin));
+  const expW = Math.min(400, Math.ceil(gx0 + gw + margin)) - cx;
+  const expH = Math.min(300, Math.ceil(gy0 + gh + margin)) - cy;
+  ok(margin >= 0, '反推出的裁切边距合理：' + margin + 'px');
+  ok(post.bg.w === expW && post.bg.h === expH,
+     '裁切范围 = 网格外框 + 边距：实得 ' + post.bg.w + '×' + post.bg.h + '，应为 ' + expW + '×' + expH);
+  ok(post.grid.x === Math.round(gx0 - cx) && post.grid.y === Math.round(gy0 - cy),
+     '裁切后网格偏移 = 原图坐标 - 裁掉的左上角（对齐按构造不变）：' + post.grid.x + ',' + post.grid.y);
+
+  // 绑定后：格子 / 底图缩放 / 网格偏移同倍
+  const z0 = await S();
+  await p.click('#btnZoomIn');
+  const z1 = await S();
+  const k = z1.settings.cellSize / z0.settings.cellSize;
+  ok(Math.abs(z1.bg.scale / z0.bg.scale - k) < 0.02,
+     '绑定缩放：底图同倍 (' + z0.bg.scale.toFixed(3) + '→' + z1.bg.scale.toFixed(3) + '，k=' + k.toFixed(3) + ')');
+  ok(z0.grid.x === 0 || Math.abs(z1.grid.x / z0.grid.x - k) < 0.06, '绑定缩放：网格偏移同倍');
+  await p.click('#btnZoomOut');
+  const z2 = await S();
+  ok(z2.settings.cellSize === z0.settings.cellSize && Math.abs(z2.bg.scale - z0.bg.scale) < 1e-6 && z2.grid.x === z0.grid.x,
+     '缩回后精确还原裁切态');
+  const cbb = await p.locator('#board').boundingBox();
+  await p.screenshot({ path: '/tmp/mh-e2e-crop.png', clip: { x: cbb.x - 8, y: cbb.y - 8, width: cbb.width + 16, height: cbb.height + 16 } });
+
+  // 15) PDF 摘录悬浮窗：导入 → 拖框截取 → 徽标 → 收起 → 刷新后仍在
+  ok(await p.locator('#snipper').count() === 1, 'PDF 摘录悬浮窗已挂载');
+  await p.setInputFiles('#snipper input[data-snip="file"]',
+    { name: 'map.pdf', mimeType: 'application/pdf', buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'map.pdf')) });
+  await p.waitForFunction(() => {
+    const img = document.querySelector('#snipper img.snipper-img');
+    return !!img && img.complete && img.naturalWidth > 0;
+  }, null, { timeout: 30000 });
+  const sbox = await p.locator('#snipper img.snipper-img').boundingBox();
+  await p.mouse.move(sbox.x + 40, sbox.y + 40);
+  await p.mouse.down();
+  await p.mouse.move(sbox.x + 240, sbox.y + 190, { steps: 8 });
+  await p.mouse.up();
+  await p.waitForTimeout(400);
+  const pins = await p.locator('.snipper-pin').count();
+  ok(pins >= 1, '拖框截取生成摘录卡片：' + pins + ' 张');
+  ok(((await p.locator('.snipper-badge').textContent()) || '').trim() === String(pins), '角标显示张数');
+  await p.click('.snipper-head [data-snip="toggle"]');
+  await p.waitForTimeout(250);
+  ok(!(await p.locator('.snipper-panel').isVisible()), '📌 可收起悬浮窗');
+  await p.screenshot({ path: '/tmp/mh-e2e-snipper.png' });
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(700);
+  const pins2 = await p.locator('.snipper-pin').count();
+  ok(pins2 >= 1, '刷新后摘录卡片仍在：' + pins2 + ' 张');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

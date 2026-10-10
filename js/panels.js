@@ -1018,5 +1018,8 @@
   };
 
   MH.panels = P;
+  // 右侧「PDF 摘录」悬浮窗（js/snipper.js）复用同一套 pdf.js 加载与渲染
+  MH.ensurePdfLib = ensurePdfLib;
+  MH.renderPdfPage = renderPdfPage;
   MH.registerRenderer(st => P.render(st));
 })();

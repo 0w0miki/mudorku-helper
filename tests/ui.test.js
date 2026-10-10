@@ -1016,3 +1016,86 @@ test('有底图时格子底为半透明（让底图透出来），没有底图�
   assert.ok(tintAt >= 0 && veilAt > tintAt, '区域底色在白纱之上（两层）：' + withRegion);
   dom.window.close();
 });
+
+// ------------------------------------------------------------ PDF 摘录悬浮窗（右侧）
+
+test('PDF 摘录窗：挂载在右侧，初始只有导入入口', async () => {
+  const { dom, doc, errors } = await boot();
+  assert.ok(q(doc, '#snipper'), '悬浮窗应已挂载');
+  assert.ok(q(doc, '#snipper [data-snip="stage"]'), '有舞台区');
+  assert.ok(q(doc, '#snipper [data-snip="import"]'), '有导入按钮');
+  const file = q(doc, '#snipper [data-snip="file"]');
+  assert.ok(file, '有隐藏的文件输入');
+  assert.match(file.getAttribute('accept'), /pdf/i, '接受 PDF');
+  assert.match(q(doc, '#snipper .snipper-empty').textContent, /拖一个矩形/, '给出操作提示');
+  assert.equal(q(doc, '#snipper .snipper-pin'), null, '初始没有卡片');
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test('PDF 摘录窗：可收起 / 展开', async () => {
+  const { dom, doc } = await boot();
+  const panel = q(doc, '#snipper');
+  assert.equal(panel.classList.contains('collapsed'), false, '默认展开');
+
+  clickSel(dom, '#snipper [data-snip="toggle"]');
+  assert.equal(panel.classList.contains('collapsed'), true, '点一下收起');
+
+  clickSel(dom, '#snipper [data-snip="toggle"]');
+  assert.equal(panel.classList.contains('collapsed'), false, '再点展开');
+  dom.window.close();
+});
+
+// 注意：jsdom 在 file:// 下属 opaque origin，没有 localStorage。
+// 所以持久化那一段没法在这里断言，改为直接注入 state 验证渲染与交互
+// （render / 删除 / 清空 与持久化走的是同一条路径）。
+test('PDF 摘录窗：卡片渲染、可单张删除、可清空', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.confirm = () => true;
+  win.MurdokuSnipper.state.pins = [
+    { id: 'p1', page: 2, w: 40, h: 30, url: 'data:image/png;base64,AAA' },
+    { id: 'p2', page: 3, w: 20, h: 20, url: 'data:image/png;base64,BBB' },
+  ];
+  win.MurdokuSnipper.render();
+
+  const cards = qa(doc, '#snipper .snipper-pin');
+  assert.equal(cards.length, 2, '两张卡片');
+  assert.match(cards[0].textContent, /第 2 页/, '卡片标出页码');
+  assert.equal(q(doc, '#snipper [data-snip="badge"]').textContent, '2', '角标显示张数');
+
+  clickSel(dom, '#snipper [data-snip="pin-del"][data-id="p1"]');
+  assert.equal(qa(doc, '#snipper .snipper-pin').length, 1, '删掉一张');
+  assert.equal(win.MurdokuSnipper.state.pins[0].id, 'p2', '删的是指定的那张');
+
+  clickSel(dom, '#snipper [data-snip="clear"]');
+  assert.equal(qa(doc, '#snipper .snipper-pin').length, 0, '清空');
+  assert.equal(q(doc, '#snipper [data-snip="badge"]').hidden, true, '角标跟着隐藏');
+  dom.window.close();
+});
+
+test('PDF 摘录窗：与棋盘状态完全隔离', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [
+    { id: 'x', page: 1, w: 10, h: 10, url: 'data:image/png;base64,CCC' },
+  ];
+  win.MurdokuSnipper.render();
+  assert.equal(qa(doc, '#snipper .snipper-pin').length, 1);
+  assert.equal(win.MH.store.state.bg, null, '摘录卡片不写进棋盘状态');
+  dom.window.close();
+});
+
+test('PDF 摘录窗：没有 localStorage 时也不报错（file:// 场景）', async () => {
+  const { dom, doc, errors } = await boot();
+  const win = dom.window;
+  // 先确认这个环境确实没有 localStorage，否则这条测试就没意义了
+  assert.equal(win.localStorage, undefined, 'jsdom 在 file:// 下确实没有 localStorage');
+
+  clickSel(dom, '#snipper [data-snip="toggle"]');          // 会尝试写盘
+  win.MurdokuSnipper.state.pins = [{ id: 'z', page: 1, w: 5, h: 5, url: 'data:image/png;base64,DDD' }];
+  win.MurdokuSnipper.render();
+  assert.deepEqual(errors, [], '无 localStorage 也不该有运行期报错');
+  dom.window.close();
+});
+

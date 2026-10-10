@@ -474,6 +474,131 @@ kbd {
   border-radius: 5px; padding: 0 4px; font-size: 12px; font-family: ui-monospace, monospace;
 }
 
+/* ------------------------------------------------------------ PDF 摘录悬浮窗（右侧） */
+
+.snipper {
+  position: fixed;
+  top: 60px;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  pointer-events: none;   /* 只有子元素接管点击，别挡住下面的棋盘 */
+}
+.snipper > * { pointer-events: auto; }
+
+/* 收起时的窄标签 */
+.snipper-tab {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  background: var(--panel);
+  border-radius: var(--radius) 0 0 var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px 7px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.snipper-tab:hover { background: var(--accent-soft); }
+
+.snipper-badge {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.snipper-panel {
+  width: 300px;
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.snipper.collapsed .snipper-panel { display: none; }
+
+.snipper-head,
+.snipper-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  flex: none;
+}
+.snipper-head { border-bottom: 1px solid var(--line); }
+.snipper-foot { border-top: 1px solid var(--line); }
+
+.snipper-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 110px;
+  overflow: auto;
+  padding: 8px;
+  background:
+    repeating-conic-gradient(#eef2f7 0 25%, #ffffff 0 50%) 50% / 16px 16px;
+}
+.snipper-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 26px 8px;
+  text-align: center;
+}
+.snipper-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.snipper-sel {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(37, 99, 235, .14);
+  pointer-events: none;
+}
+
+.snipper-pins {
+  flex: none;
+  max-height: 46%;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.snipper-pins:empty { display: none; }
+.snipper-pin {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.snipper-pin img { display: block; width: 100%; height: auto; }
+.snipper-pin figcaption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------------ 窄屏 */
 
 @media (max-width: 900px) {
@@ -482,4 +607,5 @@ kbd {
   .sidebar { flex: none; width: auto; }
   .viewport { max-height: 70vh; }
   .brand { display: none; }
+  .snipper-panel { width: min(300px, 78vw); }
 }
