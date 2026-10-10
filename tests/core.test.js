@@ -901,3 +901,108 @@ test('格子尺寸范围放宽到 12–160（对齐底图需要）', () => {
   assert.equal(st.settings.cellSize, C.CELL_MAX);
   assert.equal(C.deserialize({ rows: 3, cols: 3, settings: { cellSize: 1 } }).settings.cellSize, C.CELL_MIN);
 });
+
+// ------------------------------------------------------------ 裁切与绑定缩放
+
+test('setCellSize：没裁切过只动格子，底图与网格偏移不动', () => {
+  const st = C.createState(4, 4);
+  st.settings.cellSize = 40;
+  C.setBackground(st, { kind: 'image', name: 'm', w: 800, h: 600, scale: 0.5 });
+  C.setGridOffset(st, 30, 20);
+  const r = C.setCellSize(st, 80);
+  assert.equal(r.ok, true);
+  assert.equal(st.settings.cellSize, 80);
+  assert.equal(st.bg.scale, 0.5, '未绑定：底图缩放不该动');
+  assert.deepEqual(st.grid, { x: 30, y: 20 }, '未绑定：网格偏移不该动（对齐阶段需要这个自由度）');
+});
+
+test('setCellSize：裁切过（bound）时格子 / 底图 / 网格偏移同倍变化', () => {
+  const st = C.createState(4, 4);
+  st.settings.cellSize = 40;
+  C.setBackground(st, { kind: 'image', name: 'm', w: 800, h: 600, scale: 0.5, bound: true });
+  C.setGridOffset(st, 30, 20);
+  C.setCellSize(st, 80);                       // k = 2
+  assert.equal(st.settings.cellSize, 80);
+  assert.equal(st.bg.scale, 1);
+  assert.deepEqual(st.grid, { x: 60, y: 40 });
+  C.setCellSize(st, 40);                       // k = 0.5，应原样回到起点
+  assert.equal(st.bg.scale, 0.5);
+  assert.deepEqual(st.grid, { x: 30, y: 20 });
+});
+
+test('setCellSize：夹到 CELL_MIN/MAX，同值时不改动', () => {
+  const st = C.createState(3, 3);
+  st.settings.cellSize = 40;
+  C.setBackground(st, { kind: 'image', name: 'm', w: 400, h: 400, scale: 1, bound: true });
+  assert.equal(C.setCellSize(st, 40).changed, false, '同值直接返回不改动');
+  C.setCellSize(st, 1e6);
+  assert.equal(st.settings.cellSize, C.CELL_MAX);
+  C.setCellSize(st, -5);
+  assert.equal(st.settings.cellSize, C.CELL_MIN);
+});
+
+test('gridCropRect：把网格外框换算成图片坐标', () => {
+  const st = C.createState(2, 3);              // 3 列 × 2 行 → 网格 150×100（cell 50）
+  st.settings.cellSize = 50;
+  C.setBackground(st, { kind: 'image', name: 'm', w: 1000, h: 800, scale: 0.5 });
+  C.setGridOffset(st, 100, 60);                // 图片坐标 (200,120) 起
+  const r = C.gridCropRect(st, 0);
+  assert.deepEqual({ x: r.x, y: r.y, w: r.w, h: r.h }, { x: 200, y: 120, w: 300, h: 200 });
+  assert.equal(r.gridX, 0, '无边距时网格正好贴住新图左上角');
+  assert.equal(r.gridY, 0);
+  assert.equal(r.scale, 0.5, '裁切不该改变底图缩放');
+});
+
+test('gridCropRect：边距按屏幕像素给，换算进图片坐标', () => {
+  const st = C.createState(2, 2);
+  st.settings.cellSize = 50;                   // 网格 100×100
+  C.setBackground(st, { kind: 'image', name: 'm', w: 1000, h: 1000, scale: 0.5 });
+  C.setGridOffset(st, 200, 200);               // 图片坐标 (400,400)
+  const r = C.gridCropRect(st, 20);            // 屏幕 20px → 图片 40px
+  assert.equal(r.x, 360);
+  assert.equal(r.y, 360);
+  assert.equal(r.w, 280, '100 网格 + 两侧各 40 图片边距');
+  assert.equal(r.h, 280);
+  assert.equal(r.gridX, 20, '裁完后网格距新图左边 20 屏幕 px');
+  assert.equal(r.gridY, 20);
+});
+
+test('gridCropRect：不越出图片边界，且裁切前后对齐关系不变', () => {
+  const st = C.createState(2, 2);
+  st.settings.cellSize = 50;
+  C.setBackground(st, { kind: 'image', name: 'm', w: 200, h: 200, scale: 1 });
+  C.setGridOffset(st, 0, 0);                   // 网格贴住图片左上角
+  const r = C.gridCropRect(st, 40);
+  assert.deepEqual({ x: r.x, y: r.y, w: r.w, h: r.h }, { x: 0, y: 0, w: 140, h: 140 });
+  assert.equal(r.gridX, 0);
+  assert.equal(r.gridY, 0);
+
+  // 按 gridCropRect 的结果重建状态：网格应当仍在原来的画面位置
+  const before = C.boardLayout(st);
+  const st2 = C.createState(2, 2);
+  st2.settings.cellSize = 50;
+  C.setBackground(st2, { kind: 'image', name: 'm', w: r.w, h: r.h, scale: r.scale, bound: true });
+  C.setGridOffset(st2, r.gridX, r.gridY);
+  const after = C.boardLayout(st2);
+  assert.equal(after.gridW, before.gridW);
+  assert.equal(after.gridH, before.gridH);
+  assert.equal(after.gridLeft, 0, '网格现在贴着新图左上角');
+});
+
+test('gridCropRect：没有底图、或裁出来过小时返回 null', () => {
+  const st = C.createState(3, 3);
+  assert.equal(C.gridCropRect(st, 10), null, '没有底图');
+  C.setBackground(st, { kind: 'image', name: 'm', w: 4, h: 4, scale: 1 });
+  assert.equal(C.gridCropRect(st, 0), null, '裁出来太小，视为不可裁');
+});
+
+test('bound 随存档往返，缺省为 false', () => {
+  const st = C.createState(3, 3);
+  C.setBackground(st, { kind: 'image', name: 'm', w: 300, h: 300, scale: 1, bound: true });
+  assert.equal(C.deserialize(JSON.parse(C.serialize(st))).bg.bound, true);
+
+  const st2 = C.createState(3, 3);
+  C.setBackground(st2, { kind: 'image', name: 'm', w: 300, h: 300, scale: 1 });
+  assert.equal(C.deserialize(JSON.parse(C.serialize(st2))).bg.bound, false, '默认不是绑定态');
+});
+

@@ -269,6 +269,8 @@
       scale: clampNum(raw.scale, BG_SCALE_MIN, BG_SCALE_MAX, 1),
       opacity: clampNum(raw.opacity, BG_OPACITY_MIN, 1, 0.85),
       visible: raw.visible !== false,
+      // 裁切过之后置 true：图片与网格已对齐，之后缩放要三者同倍变化
+      bound: raw.bound === true,
       page: Math.max(1, Math.round(clampNum(raw.page, 1, 999, 1))),
       pages: Math.max(1, Math.round(clampNum(raw.pages, 1, 999, 1))),
     };
@@ -313,6 +315,61 @@
   function nudgeGrid(state, dx, dy) {
     const g = state.grid || (state.grid = { x: 0, y: 0 });
     return setGridOffset(state, g.x + dx, g.y + dy);
+  }
+
+  /**
+   * 设置每格像素（缩放）。
+   *
+   * 底图**裁切过**之后会带 `bound` 标记：此时图片与网格已经对齐，缩放必须把
+   * 格子、底图缩放、网格偏移三者同倍变化，否则对齐会散掉。没裁切过（还在对齐
+   * 阶段）则只动格子、底图保持不动 —— 那正是「对齐」需要的自由度。
+   */
+  function setCellSize(state, cell) {
+    const prev = state.settings.cellSize;
+    const next = clampInt(cell, CELL_MIN, CELL_MAX, prev);
+    if (next === prev) return { ok: false, changed: false, cellSize: prev };
+    state.settings.cellSize = next;
+    const b = state.bg;
+    if (b && b.bound) {
+      const k = next / prev;
+      b.scale = clampNum(b.scale * k, BG_SCALE_MIN, BG_SCALE_MAX, b.scale);
+      if (state.grid) {
+        state.grid.x = Math.round(clampNum(state.grid.x * k, -GRID_LIMIT, GRID_LIMIT, state.grid.x));
+        state.grid.y = Math.round(clampNum(state.grid.y * k, -GRID_LIMIT, GRID_LIMIT, state.grid.y));
+      }
+    }
+    return { ok: true, changed: true, cellSize: next };
+  }
+
+  /**
+   * 按网格外框算出底图该裁到哪儿（全部用【图片像素】坐标）。
+   * 网格现在在屏幕坐标 (grid.x, grid.y)，除以底图缩放即得图片坐标。
+   * margin 是希望四周多留的边距（屏幕 px）。
+   *
+   * @returns {{x,y,w,h,scale,gridX,gridY}|null} 裁切矩形 + 裁切后网格该摆在哪
+   */
+  function gridCropRect(state, margin) {
+    const b = state.bg;
+    if (!b) return null;
+    const s = b.scale || 1;
+    const cell = state.settings.cellSize;
+    const gx = state.grid ? state.grid.x : 0;
+    const gy = state.grid ? state.grid.y : 0;
+    const m = Math.max(0, Number(margin) || 0) / s;
+    const x0 = gx / s, y0 = gy / s;
+    const x1 = (gx + state.cols * cell) / s, y1 = (gy + state.rows * cell) / s;
+    const cx = Math.max(0, Math.floor(x0 - m));
+    const cy = Math.max(0, Math.floor(y0 - m));
+    const cx2 = Math.min(b.w, Math.ceil(x1 + m));
+    const cy2 = Math.min(b.h, Math.ceil(y1 + m));
+    const w = cx2 - cx, h = cy2 - cy;
+    if (w < 8 || h < 8) return null;
+    return {
+      x: cx, y: cy, w, h, scale: s,
+      // 裁切后网格左上角在新图里的屏幕坐标（对齐关系按构造保持不变）
+      gridX: Math.round((x0 - cx) * s),
+      gridY: Math.round((y0 - cy) * s),
+    };
   }
 
   /** 画布布局：底图锚在 (0,0)，网格按 offset 摆放；画布尺寸取两者并集 */
@@ -1062,6 +1119,7 @@
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
     normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
+    setCellSize, gridCropRect,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,

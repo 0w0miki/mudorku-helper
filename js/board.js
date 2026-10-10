@@ -576,7 +576,7 @@
         // 两个方向取平均，拖起来比较跟手
         const cell = Math.round((w / MH.store.state.cols + h / MH.store.state.rows) / 2);
         const st2 = MH.store.state;
-        MH.store.preview(s => { s.settings.cellSize = Core.clampInt(cell, Core.CELL_MIN, Core.CELL_MAX, s.settings.cellSize); });
+        MH.store.preview(s => { Core.setCellSize(s, cell); });
         this.applyLayout(st2);
       });
       window.addEventListener('pointerup', this._onHandleUp = () => {

@@ -131,6 +131,7 @@
       '<button class="ghost sm" data-act="bg-import" ' + (MH.ui.bgBusy ? 'disabled' : '') + '>更换</button>' +
       '<button class="ghost sm" data-act="bg-toggle">' + (b.visible ? '隐藏' : '显示') + '</button>' +
       '<button class="ghost sm" data-act="bg-fit">适应窗口</button>' +
+      '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分；裁完图片与网格绑定，缩放一起变">✂ 裁切到网格</button>' +
       '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
       '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
@@ -522,6 +523,66 @@
     return Math.max(Core.BG_SCALE_MIN, Math.min(Core.BG_SCALE_MAX, Math.min(1, availW / w, availH / h)));
   }
 
+  /** 裁切时四周多留的边距（屏幕 px）——留一点是为了不把网格线切掉 */
+  const CROP_MARGIN = 16;
+
+  function loadDataUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('底图数据读取失败，请重新导入'));
+      img.src = url;
+    });
+  }
+
+  /**
+   * 按网格外框把底图四周多余部分裁掉，并进入「绑定缩放」状态。
+   *
+   * 裁切不改变对齐关系：新图原点挪到裁切矩形左上角，网格偏移同步减去该位移
+   * （gridCropRect 里算好的 gridX/gridY），所以画面上网格相对底图的位置一模一样。
+   * 裁完把 bg.bound 置 true —— 之后缩放会让格子、底图、网格偏移同倍变化。
+   */
+  async function cropBackground() {
+    const st = MH.store.state;
+    const b = st.bg;
+    if (!b) { MH.toast('还没有底图', 'warn'); return; }
+    if (!MH.store.bgData) { MH.toast('底图数据不在内存里，请重新导入', 'warn'); return; }
+    const rect = Core.gridCropRect(st, CROP_MARGIN);
+    if (!rect) { MH.toast('网格还没有对齐，无法裁切', 'warn'); return; }
+    if (rect.x === 0 && rect.y === 0 && rect.w === b.w && rect.h === b.h) {
+      MH.store.commit('绑定缩放', s => { Core.updateBackground(s, { bound: true }); return { ok: true }; });
+      MH.toast('底图已经是最小范围，已改为绑定缩放', 'ok');
+      return;
+    }
+    MH.ui.bgBusy = true; MH.render();
+    try {
+      const img = await loadDataUrl(MH.store.bgData);
+      const cv = document.createElement('canvas');
+      cv.width = rect.w; cv.height = rect.h;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, rect.w, rect.h);
+      ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+      let url = cv.toDataURL('image/png');
+      if (url.length > 1_200_000) url = cv.toDataURL('image/jpeg', 0.9);
+      MH.store.setBgData(url);
+      MH.store.commit('裁切底图', s => {
+        Core.updateBackground(s, {
+          w: rect.w, h: rect.h, srcW: rect.w, srcH: rect.h,
+          bound: true,
+        });
+        Core.setGridOffset(s, rect.gridX, rect.gridY);
+        return { ok: true };
+      });
+      MH.ui.aligning = false;
+      MH.toast('已裁到网格范围（' + rect.w + '×' + rect.h + '），之后缩放图片和网格会一起变', 'ok');
+    } catch (e) {
+      MH.toast('裁切失败：' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      MH.ui.bgBusy = false; MH.render();
+    }
+  }
+
   async function switchPdfPage(dir) {
     const st = MH.store.state;
     const keep = MH.ui.pdfFile;
@@ -654,11 +715,9 @@
     'left-mode'(el) { MH.store.setSettings({ leftMode: el.dataset.mode }); },
     zoom(el) {
       const st = MH.store.state;
-      const next = Core.clampInt(
-        st.settings.cellSize + Number(el.dataset.dir) * Core.CELL_STEP,
-        Core.CELL_MIN, Core.CELL_MAX, st.settings.cellSize
-      );
-      if (next !== st.settings.cellSize) MH.store.setSettings({ cellSize: next });
+      const next = st.settings.cellSize + Number(el.dataset.dir) * Core.CELL_STEP;
+      // 走 Core.setCellSize：底图裁切过（bound）时它会连带缩放底图与网格偏移
+      MH.store.live(s => Core.setCellSize(s, next));
     },
     'toggle-live'() {
       const st = MH.store.state;
@@ -688,6 +747,7 @@
         return { ok: true };
       });
     },
+    'bg-crop'() { cropBackground(); },
     'bg-remove'() {
       if (!confirm('移除底图？（网格与题目内容不受影响）')) return;
       MH.store.setBgData(null);
@@ -796,7 +856,7 @@
       const meta = t.parentNode && t.parentNode.querySelector('.meta');
       if (meta) meta.textContent = Math.round(v * 100) + '%';
     } else if (t.id === 'cellSize') {
-      MH.store.setSettings({ cellSize: Core.clampInt(t.value, Core.CELL_MIN, Core.CELL_MAX, Core.CELL_DEFAULT) });
+      MH.store.live(s => Core.setCellSize(s, t.value));
     }
   }
 
