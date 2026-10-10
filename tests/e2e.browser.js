@@ -636,6 +636,69 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForTimeout(150);
   ok((await p.evaluate(() => window.MH.store.state.settings.leftMode)) === 'x', '点当前人物自己不改模式');
 
+  // 21) 行列候选提示：网格外侧显示每行/列有哪些人
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(8, 10), 'e2e 提示'));
+  await p.click('#tabPlay');
+  await p.waitForTimeout(200);
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    const ids = st.people.map(x => x.id);
+    C.setCandidate(st, ids[0], '0,1', true);
+    C.setCandidate(st, ids[0], '0,3', true);
+    C.setCandidate(st, ids[1], '0,2', true);
+    C.setCandidate(st, ids[1], '3,4', true);
+    C.setCandidate(st, ids[2], '3,5', true);
+    C.placePerson(st, ids[3], '7,0');
+    window.MH.render();
+  });
+  await p.waitForTimeout(300);
+  const hg = await p.evaluate(() => {
+    const cellBox = (r, c) => document.querySelector(`.cell[data-k="${r},${c}"]`).getBoundingClientRect();
+    const rh = [...document.querySelectorAll('.row-head')].map(e => e.getBoundingClientRect());
+    const ch = [...document.querySelectorAll('.col-head')].map(e => e.getBoundingClientRect());
+    const board = document.querySelector('#board').getBoundingClientRect();
+    return {
+      rows: rh.length, cols: ch.length,
+      r3: Math.round(rh[3].top - cellBox(3, 0).top) + '/' + Math.round(rh[3].height - cellBox(3, 0).height),
+      c4: Math.round(ch[4].left - cellBox(0, 4).left) + '/' + Math.round(ch[4].width - cellBox(0, 4).width),
+      inside: document.querySelector('.row-heads').getBoundingClientRect().left >= board.left - 1
+        && document.querySelector('.col-heads').getBoundingClientRect().top >= board.top - 1,
+      row0: [...document.querySelectorAll('.row-head')][0].textContent.trim(),
+      col3: [...document.querySelectorAll('.col-head')][3].textContent.trim(),
+      row7: [...document.querySelectorAll('.row-head')][7].textContent.trim(),
+      done: !!document.querySelector('.row-head i.done'),
+    };
+  });
+  ok(hg.rows === 8 && hg.cols === 10, '行列各一条提示：' + hg.rows + '×' + hg.cols);
+  ok(hg.r3 === '0/0' && hg.c4 === '0/0', '提示条与格子严格对齐（行 Δtop/Δh=' + hg.r3 + '，列 Δleft/Δw=' + hg.c4 + '）');
+  ok(hg.inside, '提示条在画布内，没被裁掉');
+  ok(hg.row0 === 'AB', '第 0 行显示候选 A B：' + hg.row0);
+  ok(hg.col3 === 'A', '第 3 列显示候选 A：' + hg.col3);
+  ok(hg.row7 === 'D' && hg.done, '已确定的人用实心标出：' + hg.row7);
+
+  const hc = await p.locator('.cell[data-k="3,5"]').boundingBox();
+  await p.mouse.move(hc.x + 5, hc.y + 5);
+  await p.waitForTimeout(200);
+  const hHot = await p.evaluate(() => ({
+    r: [...document.querySelectorAll('.row-head')].findIndex(e => e.classList.contains('hot')),
+    c: [...document.querySelectorAll('.col-head')].findIndex(e => e.classList.contains('hot')),
+    n: document.querySelectorAll('.head.hot').length,
+  }));
+  ok(hHot.n === 2 && hHot.r === 3 && hHot.c === 5, '悬停格子点亮它所在行列：' + JSON.stringify(hHot));
+
+  const bw1 = await p.evaluate(() => Math.round(document.querySelector('#board').getBoundingClientRect().width));
+  await p.click('[data-act="toggle-heads"]');
+  await p.waitForTimeout(250);
+  const hOff = await p.evaluate(() => ({
+    shown: getComputedStyle(document.querySelector('.row-heads')).display,
+    w: Math.round(document.querySelector('#board').getBoundingClientRect().width),
+  }));
+  ok(hOff.shown === 'none' && hOff.w < bw1, '关掉后隐藏且画布不留空间：' + bw1 + ' → ' + hOff.w);
+  await p.click('[data-act="toggle-heads"]');
+  await p.waitForTimeout(250);
+  ok(await p.evaluate(() => getComputedStyle(document.querySelector('.row-heads')).display) === 'flex', '再开回来');
+  await p.screenshot({ path: '/tmp/mh-e2e-heads.png' });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

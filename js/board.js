@@ -47,6 +47,12 @@
 
       this.bgEl = els.bgLayer;
       this.gridBox = els.gridBox;
+      this.rowHeadsEl = els.rowHeads;
+      this.colHeadsEl = els.colHeads;
+      this.headCornerEl = els.headCorner;
+      this.rowHeadEls = [];
+      this.colHeadEls = [];
+      this.hotHead = null;
       this.handleEl = els.alignHandle;
       this.imgEl = null;
 
@@ -103,6 +109,7 @@
       if (gridSig !== this.gridSig) {
         this.buildGrid(st);
         this.buildCells(st);
+        this.buildHeads(st);
         this.gridSig = gridSig;
         this.outlineSig = null;
       }
@@ -129,6 +136,10 @@
       this.gridBox.style.top = L.gridTop + 'px';
       this.gridBox.style.width = L.gridW + 'px';
       this.gridBox.style.height = L.gridH + 'px';
+      // 表头贴在网格外侧：行标题在左边，列标题在上边，靠 CSS 变量定位
+      this.gridBox.style.setProperty('--headw', L.headW + 'px');
+      this.gridBox.style.setProperty('--headh', L.headH + 'px');
+      this.boardEl.classList.toggle('has-heads', L.headW > 0);
       this.handleEl.style.left = (L.gridLeft + L.gridW) + 'px';
       this.handleEl.style.top = (L.gridTop + L.gridH) + 'px';
       this.boardEl.classList.toggle('aligning', !!MH.ui.aligning);
@@ -167,6 +178,62 @@
         outer.setAttribute('width', st.cols);
         outer.setAttribute('height', st.rows);
       }
+    },
+
+    /** 每行/列一条提示条（数量只随行列数变，内容在 paintHeads 里填） */
+    buildHeads(st) {
+      if (!this.rowHeadsEl || !this.colHeadsEl) return;
+      this.rowHeadsEl.innerHTML = '';
+      this.colHeadsEl.innerHTML = '';
+      this.rowHeadEls = [];
+      this.colHeadEls = [];
+      for (let r = 0; r < st.rows; r++) {
+        const d = document.createElement('div');
+        d.className = 'head row-head';
+        d.dataset.r = String(r);
+        d.title = '第 ' + (r + 1) + ' 行';
+        this.rowHeadsEl.appendChild(d);
+        this.rowHeadEls.push(d);
+      }
+      for (let c = 0; c < st.cols; c++) {
+        const d = document.createElement('div');
+        d.className = 'head col-head';
+        d.dataset.c = String(c);
+        d.title = '第 ' + (c + 1) + ' 列';
+        this.colHeadsEl.appendChild(d);
+        this.colHeadEls.push(d);
+      }
+      this.hotHead = null;
+    },
+
+    /** 把每行/每列的人物候选写进提示条（已确定的人用实心标出） */
+    paintHeads(st) {
+      if (!this.rowHeadEls || !this.rowHeadEls.length) return;
+      const esc = MH.esc;
+      const LP = Core.linePeople(st);
+      const fill = (el, info, axis, i) => {
+        if (!el) return;
+        const items = [];
+        if (info.placed) {
+          const p = Core.person(st, info.placed);
+          if (p) items.push({ label: p.label, color: p.color, done: true });
+        }
+        for (const pid of info.cands) {
+          const p = Core.person(st, pid);
+          if (p) items.push({ label: p.label, color: p.color, done: false });
+        }
+        const max = Core.HEAD_LABELS;
+        const shown = items.slice(0, max);
+        const rest = items.length - shown.length;
+        el.innerHTML = shown.map(it =>
+          '<i class="' + (it.done ? 'done' : '') + '" style="--pc:' + esc(it.color) + '">' + esc(it.label) + '</i>'
+        ).join('') + (rest > 0 ? '<i class="more">+' + rest + '</i>' : '');
+        el.classList.toggle('none', items.length === 0);
+        const all = items.map(it => it.label + (it.done ? '（已确定）' : '')).join(' ');
+        el.title = '第 ' + (i + 1) + (axis === 'r' ? ' 行' : ' 列') + '：' + (all || '没有候选');
+      };
+      LP.rows.forEach((info, r) => fill(this.rowHeadEls[r], info, 'r', r));
+      LP.cols.forEach((info, c) => fill(this.colHeadEls[c], info, 'c', c));
     },
 
     buildCells(st) {
@@ -219,6 +286,7 @@
     paint() {
       const st = MH.store.state;
       const draft = MH.ui.draft;
+      this.paintHeads(st);
       this.baseBg = new Map();
       this.prevHl = new Map();
       this.prevCand = new Set();
@@ -379,6 +447,22 @@
       // 候选描边用被悬停人物的颜色，一眼能对上是"谁的候选"
       const hoverPerson = hoverPid ? Core.person(st, hoverPid) : null;
       const candRing = hoverPerson ? hoverPerson.color : '#0b1220';
+      // 鼠标在哪一格，就把那一行/列的提示条点亮 —— 「当前行列」一眼可辨
+      const hk = MH.ui.hoverCell;
+      const hot = hk ? { r: +String(hk).split(',')[0], c: +String(hk).split(',')[1] } : null;
+      const was = this.hotHead;
+      if (was && (!hot || was.r !== hot.r || was.c !== hot.c)) {
+        const rr = this.rowHeadEls[was.r], cc = this.colHeadEls[was.c];
+        if (rr) rr.classList.remove('hot');
+        if (cc) cc.classList.remove('hot');
+      }
+      if (hot) {
+        const rr = this.rowHeadEls[hot.r], cc = this.colHeadEls[hot.c];
+        if (rr) rr.classList.add('hot');
+        if (cc) cc.classList.add('hot');
+      }
+      this.hotHead = hot;
+
       const touched = new Set([...this.prevHl.keys(), ...next.keys(), ...candSet, ...this.prevCand]);
       for (const k of touched) {
         const el = this.cellEls.get(k);

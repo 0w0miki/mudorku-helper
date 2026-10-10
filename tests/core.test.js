@@ -805,14 +805,17 @@ test('导入时重复/含 X 的编号仍会被替换成默认编号', () => {
 test('boardLayout：底图锚在原点，画布尺寸取底图与网格的并集', () => {
   const st = C.createState(6, 8);            // 8 列 × 6 行
   st.settings.cellSize = 50;                 // 网格 400×300
+  // 准备阶段没有行列提示表头，headW/headH 为 0
   assert.deepEqual(C.boardLayout(st), {
     cell: 50, gridW: 400, gridH: 300, bgW: 0, bgH: 0,
+    headW: 0, headH: 0,
     bgLeft: 0, bgTop: 0, gridLeft: 0, gridTop: 0, width: 400, height: 300,
   });
 
   C.setBackground(st, { kind: 'image', name: 'm.png', w: 400, h: 300, scale: 1 });
   assert.deepEqual(C.boardLayout(st), {
     cell: 50, gridW: 400, gridH: 300, bgW: 400, bgH: 300,
+    headW: 0, headH: 0,
     bgLeft: 0, bgTop: 0, gridLeft: 0, gridTop: 0, width: 400, height: 300,
   });
 
@@ -1006,3 +1009,95 @@ test('bound 随存档往返，缺省为 false', () => {
   assert.equal(C.deserialize(JSON.parse(C.serialize(st2))).bg.bound, false, '默认不是绑定态');
 });
 
+
+// ------------------------------------------------------------ 行列候选提示
+
+test('linePeople：统计每行/每列有哪些人的候选，以及是否已有确定的人', () => {
+  const st = C.createState(5, 5);
+  const [a, b, c] = st.people.map(p => p.id);
+  C.setCandidate(st, a, '0,1', true);
+  C.setCandidate(st, a, '0,3', true);      // a 在第 0 行两格
+  C.setCandidate(st, b, '0,2', true);
+  C.setCandidate(st, b, '2,3', true);
+  C.setCandidate(st, c, '4,4', true);
+
+  const lp = C.linePeople(st);
+  assert.deepEqual(lp.rows[0].cands, [a, b], '第 0 行有 a、b 的候选');
+  assert.deepEqual(lp.rows[2].cands, [b]);
+  assert.deepEqual(lp.rows[1].cands, [], '没有候选的行是空的');
+  assert.deepEqual(lp.cols[3].cands, [a, b], '第 3 列有 a、b 的候选');
+  assert.deepEqual(lp.cols[4].cands, [c]);
+  // 同一个人在同一行只算一次
+  assert.equal(lp.rows[0].cands.length, 2, '去重');
+
+  // 放人会清掉该人自己的候选（既有设计），所以第 0 行只剩 b
+  C.placePerson(st, a, '1,1');
+  const lp2 = C.linePeople(st);
+  assert.equal(lp2.rows[1].placed, a, '第 1 行已有确定的人');
+  assert.equal(lp2.cols[1].placed, a, '第 1 列已有确定的人');
+  assert.deepEqual(lp2.rows[0].cands, [b], '该人被确定后他自己的候选被清掉，只剩别人');
+  assert.equal(lp2.cols[1].cands.indexOf(a), -1, '确定的那一列也不再把他算作候选');
+});
+
+test('行列提示只在游玩阶段显示，且可以关掉', () => {
+  const st = C.createState(6, 6);
+  assert.equal(C.headsVisible(st), false, '准备阶段不显示');
+  assert.deepEqual(C.headSize(st), { w: 0, h: 0 });
+
+  st.phase = 'play';
+  assert.equal(C.headsVisible(st), true, '游玩阶段显示');
+  const h = C.headSize(st);
+  assert.ok(h.w >= 46 && h.h >= 26, '表头有合理尺寸：' + JSON.stringify(h));
+
+  st.settings.showHeads = false;
+  assert.equal(C.headsVisible(st), false, '关掉后不显示');
+  assert.equal(C.boardLayout(st).headW, 0, '关掉后画布不留表头空间');
+});
+
+test('有表头时画布为它在左上留出空间，底图与网格整体平移（相对关系不变）', () => {
+  const st = C.createState(6, 8);
+  st.settings.cellSize = 50;
+  C.setBackground(st, { kind: 'image', name: 'm.png', w: 400, h: 300, scale: 1 });
+  C.setGridOffset(st, 30, 20);
+  const before = C.boardLayout(st);
+
+  st.phase = 'play';
+  const after = C.boardLayout(st);
+  const hw = after.headW, hh = after.headH;
+  assert.ok(hw > 0 && hh > 0, '游玩阶段表头有尺寸');
+  assert.equal(after.gridLeft, before.gridLeft + hw, '网格右移一个表头宽');
+  assert.equal(after.gridTop, before.gridTop + hh, '网格下移一个表头高');
+  assert.equal(after.bgLeft, before.bgLeft + hw, '底图同样右移，相对网格不变');
+  assert.equal(after.bgTop, before.bgTop + hh);
+  assert.equal(after.gridLeft - after.bgLeft, before.gridLeft - before.bgLeft, '两者相对偏移不变');
+  assert.equal(after.width, before.width + hw, '画布宽加上表头');
+  assert.equal(after.height, before.height + hh, '画布高加上表头');
+});
+
+test('表头尺寸随格子大小缩放但有上下限', () => {
+  const st = C.createState(6, 6);
+  st.phase = 'play';
+  st.settings.cellSize = 12;
+  const small = C.headSize(st);
+  st.settings.cellSize = 160;
+  const big = C.headSize(st);
+  st.settings.cellSize = 30;
+  const mid = C.headSize(st);
+  assert.ok(small.w >= 46 && big.w <= 96, '宽度夹在 46–96：' + small.w + ' / ' + big.w);
+  assert.ok(small.h >= 26 && big.h <= 60, '高度夹在 26–60：' + small.h + ' / ' + big.h);
+  assert.ok(big.w > mid.w && mid.w >= small.w, '随格子变大而变宽');
+});
+
+test('行列提示开关跟着存档往返', () => {
+  const st = C.createState(6, 6);
+  st.phase = 'play';
+  st.settings.showHeads = false;
+  const back = C.deserialize(C.serialize(st));
+  assert.equal(back.settings.showHeads, false, '关掉的状态能存下来');
+  st.settings.showHeads = true;
+  assert.equal(C.deserialize(C.serialize(st)).settings.showHeads, true, '默认开启');
+  // 老存档里没有这个字段 → 按开启处理
+  const raw = JSON.parse(C.serialize(st));
+  delete raw.settings.showHeads;
+  assert.equal(C.deserialize(raw).settings.showHeads, true, '缺字段时默认开启');
+});

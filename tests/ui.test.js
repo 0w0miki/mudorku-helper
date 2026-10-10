@@ -1491,3 +1491,89 @@ test('准备阶段选人不会动左键模式（那里用不上）', async () =>
   assert.equal(win.MH.store.state.settings.leftMode, 'x', '准备阶段选人不动模式');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 行列候选提示
+
+test('游玩模式：网格外侧显示每行/每列有哪些候选的人', async () => {
+  const { dom, doc, errors } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  const ids = st.people.map(p => p.id);
+  C.setCandidate(st, ids[0], '0,1', true);
+  C.setCandidate(st, ids[0], '0,3', true);
+  C.setCandidate(st, ids[1], '0,2', true);
+  C.setCandidate(st, ids[2], '4,5', true);
+  C.placePerson(st, ids[3], '3,3');
+  clickSel(dom, '#tabPlay');
+
+  const rowHeads = qa(doc, '.row-head');
+  const colHeads = qa(doc, '.col-head');
+  assert.equal(rowHeads.length, 6, '每行一条');
+  assert.equal(colHeads.length, 6, '每列一条');
+  assert.equal(rowHeads[0].textContent, 'AB', '第 0 行有 A、B 的候选');
+  assert.equal(rowHeads[1].textContent, '', '第 1 行没有候选');
+  assert.equal(colHeads[3].textContent, 'D', '第 3 列有已确定的 D');
+  assert.ok(colHeads[3].querySelector('i.done'), '已确定的人用实心样式标出');
+  assert.equal(rowHeads[3].textContent, 'D', '第 3 行也是已确定的 D');
+  assert.equal(colHeads[5].textContent, 'C', '第 5 列有 C 的候选');
+  assert.ok(q(doc, '.head-corner'), '左上角有转角块');
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test('行列提示最多显示 4 个，多出来的折成 +N', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  st.people.forEach((p, i) => C.setCandidate(st, p.id, '0,' + i, true));   // 6 个人都在第 0 行
+  clickSel(dom, '#tabPlay');
+
+  const head = q(doc, '.row-head');
+  const chips = head.querySelectorAll('i');
+  assert.equal(chips.length, 5, '4 个标签 + 1 个 +N（共 ' + chips.length + '）');
+  assert.equal(chips[chips.length - 1].className, 'more');
+  assert.equal(chips[chips.length - 1].textContent, '+2', '6 个人 → +2');
+  assert.match(head.title, /第 1 行/, 'title 里是完整信息');
+  dom.window.close();
+});
+
+test('行列提示：准备阶段不显示，游玩阶段可关掉', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  const board = q(doc, '#board');
+  assert.equal(board.classList.contains('has-heads'), false, '准备阶段不占表头空间');
+
+  clickSel(dom, '#tabPlay');
+  assert.equal(q(doc, '#board').classList.contains('has-heads'), true, '游玩阶段显示');
+  assert.ok(qa(doc, '.row-head').length > 0, '有行提示');
+
+  clickSel(dom, '[data-act="toggle-heads"]');
+  assert.equal(win.MH.store.state.settings.showHeads, false, '开关关掉');
+  assert.equal(q(doc, '#board').classList.contains('has-heads'), false, '不再占空间');
+
+  clickSel(dom, '[data-act="toggle-heads"]');
+  assert.equal(win.MH.store.state.settings.showHeads, true, '还能开回来');
+  assert.equal(q(doc, '#board').classList.contains('has-heads'), true);
+  dom.window.close();
+});
+
+test('悬停格子时点亮它所在的行与列提示', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  clickSel(dom, '#tabPlay');
+  pointer(dom, 'pointermove', cellEl(dom, 3, 5));
+  const hotRows = qa(doc, '.row-head.hot');
+  const hotCols = qa(doc, '.col-head.hot');
+  assert.equal(hotRows.length, 1, '只有一行点亮：' + hotRows.length);
+  assert.equal(hotRows[0].dataset.r, '3', '点亮的是第 3 行');
+  assert.equal(hotCols.length, 1, '只有一列点亮');
+  assert.equal(hotCols[0].dataset.c, '5', '点亮的是第 5 列');
+
+  pointer(dom, 'pointermove', cellEl(dom, 0, 0));
+  assert.equal(qa(doc, '.row-head.hot').length, 1, '移动后仍然只有一行');
+  assert.equal(q(doc, '.row-head.hot').dataset.r, '0', '换成第 0 行');
+  assert.equal(q(doc, '.col-head.hot').dataset.c, '0', '列也跟着换');
+  dom.window.close();
+});

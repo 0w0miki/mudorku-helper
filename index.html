@@ -46,6 +46,10 @@
       <div class="board" id="board">
         <div class="bg-layer" id="bgLayer" hidden></div>
         <div class="grid-box" id="gridBox">
+          <!-- 行列提示：贴在网格外侧，显示这一行/列有哪些人的候选（游玩阶段才有） -->
+          <div class="heads row-heads" id="rowHeads"></div>
+          <div class="heads col-heads" id="colHeads"></div>
+          <div class="heads head-corner" id="headCorner"></div>
           <div class="cells" id="cells"></div>
           <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
             <path class="grid-lines" vector-effect="non-scaling-stroke"></path>
@@ -100,6 +104,7 @@
 
     <h2>② 游玩阶段</h2>
     <p class="hint">左侧人物是<b>紧凑网格</b>：角标显示候选数，已确定的整格填成本人颜色并带 ✓；点格子切换当前人物，操作只显示当前这一个。人多也不会拉成长条。<br>左键若正处在「<b>标 X</b>」模式，<b>点另一个人会自动切回「候选」</b>（选人就是要标他的候选）；点当前人物自己则保持原模式。</p>
+    <p class="hint">网格<b>外侧</b>的行、列提示条显示这一行/列都有谁的候选（<b>实心</b>＝已确定），鼠标在哪一格对应行列就点亮；可在工具卡里关掉。</p>
     <ul>
       <li><b>左键点一下</b>＝给当前人物标注候选；再点一次取消。</li>
       <li><b>按住左键拖动</b>＝连续标注一片格子（起点格决定方向：空白格开始是「加候选」，已有候选的格子开始是「擦除」）。整段拖动算<b>一次撤销</b>。</li>

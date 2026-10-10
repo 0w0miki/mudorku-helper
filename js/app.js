@@ -80,7 +80,7 @@
     },
 
     boot() {
-      const ids = ['board', 'cells', 'overlay', 'regionLayer', 'draftOutline', 'ringLayer', 'gridBox', 'bgLayer', 'alignHandle', 'viewport', 'sidebar', 'toast', 'fileInput', 'bgFileInput'];
+      const ids = ['board', 'cells', 'overlay', 'regionLayer', 'draftOutline', 'ringLayer', 'gridBox', 'bgLayer', 'alignHandle', 'rowHeads', 'colHeads', 'headCorner', 'viewport', 'sidebar', 'toast', 'fileInput', 'bgFileInput'];
       for (const id of ids) MH.els[id] = document.getElementById(id);
 
       MH.store = new StoreNS.Store('murdoku-helper.v1', undefined);

@@ -194,6 +194,80 @@ button.block { display: block; width: 100%; text-align: center; }
   gap: 0;
 }
 
+/* ------------------------------------------------------------ 行列候选提示
+   贴在网格外侧：行标题在左、列标题在上。画布已经为它们留出 --headw/--headh
+   的空间（见 Core.boardLayout），所以这里用负偏移即可。 */
+.grid-box { --headw: 0px; --headh: 0px; }
+.heads { position: absolute; z-index: 2; display: none; }
+.board.has-heads .heads { display: flex; }
+
+.row-heads {
+  left: calc(var(--headw) * -1);
+  top: 0;
+  width: var(--headw);
+  height: 100%;
+  flex-direction: column;
+}
+.col-heads {
+  left: 0;
+  top: calc(var(--headh) * -1);
+  width: 100%;
+  height: var(--headh);
+  flex-direction: row;
+}
+.head-corner {
+  left: calc(var(--headw) * -1);
+  top: calc(var(--headh) * -1);
+  width: var(--headw);
+  height: var(--headh);
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: #f8fafc;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 1px 2px;
+  overflow: hidden;
+  background: #f8fafc;
+  transition: background-color .1s linear;
+}
+.head.none { background: #f1f5f9; }
+.row-head {
+  width: var(--headw);
+  height: var(--cell);
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+}
+.col-head {
+  width: var(--cell);
+  height: var(--headh);
+  border-bottom: 1px solid var(--line-strong);
+  border-right: 1px solid var(--line);
+}
+.head i {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  padding: 0 3px;
+  border-radius: 4px;
+  color: var(--pc);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px currentColor;
+  max-width: 100%;
+  overflow: hidden;
+}
+/* 已确定的人：实心，和候选区分开 */
+.head i.done { background: var(--pc); color: #fff; box-shadow: none; }
+.head i.more { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.head.none i { display: none; }
+/* 鼠标所在的行/列：整条点亮 */
+.head.hot { background: var(--accent-soft); }
+
 .cell {
   position: relative;
   width: var(--cell);

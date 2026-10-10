@@ -309,6 +309,7 @@
       '</div>' +
       '<p class="hint">左键点按＝候选（可多处）· <b>按住拖动＝连续标注一片</b> · 右键＝切换 X<br>长按 0.7 秒＝确定该人物并在同行列标 X（仅「左键＝候选」模式；标 X 模式不长按放人）</p>' +
       '<label class="check"><input type="checkbox" data-act="toggle-live" ' + (st.settings.liveValidate ? 'checked' : '') + '> 实时检查冲突</label>' +
+      '<label class="check"><input type="checkbox" data-act="toggle-heads" ' + (st.settings.showHeads !== false ? 'checked' : '') + '> 行列候选提示（网格外侧显示每行/列有哪些人）</label>' +
       '</section>' +
 
       '<section class="card">' +
@@ -750,6 +751,10 @@
     'toggle-live'() {
       const st = MH.store.state;
       MH.store.setSettings({ liveValidate: !st.settings.liveValidate });
+    },
+    'toggle-heads'() {
+      const st = MH.store.state;
+      MH.store.setSettings({ showHeads: st.settings.showHeads === false });
     },
     undo() { const r = MH.store.undo(); MH.toast(r.message, r.ok ? 'ok' : 'warn'); },
     redo() { const r = MH.store.redo(); MH.toast(r.message, r.ok ? 'ok' : 'warn'); },

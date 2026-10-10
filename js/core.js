@@ -25,6 +25,9 @@
   const CELL_STEP = 6;
 
   // 底图（衬在网格下方的图片 / PDF 页面）
+  const HEAD_W_MAX = 96, HEAD_W_MIN = 46;   // 行标题条宽度（随格子大小缩放）
+  const HEAD_H_MAX = 60, HEAD_H_MIN = 26;   // 列标题条高度
+  const HEAD_LABELS = 4;                    // 一条里最多显示几个人，多出来的折成 +N
   const BG_SCALE_MIN = 0.1;
   const BG_SCALE_MAX = 4;
   const BG_OPACITY_MIN = 0.1;
@@ -229,7 +232,7 @@
       regions: [], // {id,name,color,cells:string[]}
       items: [],   // {id,name,color,occupiable,cells:string[]}
       selectedPersonId: people.length ? people[0].id : null,
-      settings: { cellSize: CELL_DEFAULT, liveValidate: true, leftMode: 'candidate' },
+      settings: { cellSize: CELL_DEFAULT, liveValidate: true, leftMode: 'candidate', showHeads: true },
       // 衬在网格下方的底图（图片或 PDF 页面渲染结果）与网格在画布中的偏移
       bg: null,
       grid: { x: 0, y: 0 },
@@ -373,6 +376,49 @@
   }
 
   /** 画布布局：底图锚在 (0,0)，网格按 offset 摆放；画布尺寸取两者并集 */
+  /** 行列提示表头是否显示：只有游玩阶段才有候选可提示 */
+  function headsVisible(state) {
+    return state.phase === 'play' && state.settings.showHeads !== false;
+  }
+
+  /** 行列提示表头占用的空间（隐藏时为 0）；随格子大小缩放，免得小格子时显得离谱 */
+  function headSize(state) {
+    if (!headsVisible(state)) return { w: 0, h: 0 };
+    const cell = state.settings.cellSize;
+    return {
+      w: Math.round(Math.min(HEAD_W_MAX, Math.max(HEAD_W_MIN, cell * 1.25))),
+      h: Math.round(Math.min(HEAD_H_MAX, Math.max(HEAD_H_MIN, cell * 0.78))),
+    };
+  }
+
+  /**
+   * 每行 / 每列都有哪些人的候选，以及该行是否已经有确定的人。
+   * @returns {{rows:Array<{cands:string[],placed:string|null}>, cols:Array<...>}}
+   */
+  function linePeople(state) {
+    const rows = [], cols = [];
+    for (let r = 0; r < state.rows; r++) rows.push({ cands: [], placed: null });
+    for (let c = 0; c < state.cols; c++) cols.push({ cands: [], placed: null });
+    const split = k => {
+      const i = String(k).indexOf(',');
+      return [Number(String(k).slice(0, i)), Number(String(k).slice(i + 1))];
+    };
+    for (const p of state.people) {
+      const at = state.play.placed[p.id];
+      if (at) {
+        const [r, c] = split(at);
+        if (rows[r]) rows[r].placed = p.id;
+        if (cols[c]) cols[c].placed = p.id;
+      }
+      for (const k of state.play.candidates[p.id] || []) {
+        const [r, c] = split(k);
+        if (rows[r] && rows[r].cands.indexOf(p.id) < 0) rows[r].cands.push(p.id);
+        if (cols[c] && cols[c].cands.indexOf(p.id) < 0) cols[c].cands.push(p.id);
+      }
+    }
+    return { rows, cols };
+  }
+
   function boardLayout(state) {
     const cell = state.settings.cellSize;
     const gridW = state.cols * cell;
@@ -384,11 +430,15 @@
     const minY = Math.min(0, gy);
     const maxX = Math.max(bg.w, gx + gridW);
     const maxY = Math.max(bg.h, gy + gridH);
+    // 表头挂在网格左上角外侧，所以画布要在左/上多留出这一条，
+    // 并且底图与网格整体平移同样距离 —— 两者的相对关系保持不变
+    const head = headSize(state);
     return {
       cell, gridW, gridH, bgW: bg.w, bgH: bg.h,
-      bgLeft: minX < 0 ? -minX : 0, bgTop: minY < 0 ? -minY : 0,
-      gridLeft: gx - minX, gridTop: gy - minY,
-      width: Math.max(maxX - minX, 1), height: Math.max(maxY - minY, 1),
+      headW: head.w, headH: head.h,
+      bgLeft: (minX < 0 ? -minX : 0) + head.w, bgTop: (minY < 0 ? -minY : 0) + head.h,
+      gridLeft: gx - minX + head.w, gridTop: gy - minY + head.h,
+      width: Math.max(maxX - minX, 1) + head.w, height: Math.max(maxY - minY, 1) + head.h,
     };
   }
 
@@ -1103,6 +1153,7 @@
       st.settings.cellSize = clampInt(raw.settings.cellSize, CELL_MIN, CELL_MAX, CELL_DEFAULT);
       st.settings.liveValidate = raw.settings.liveValidate !== false;
       st.settings.leftMode = raw.settings.leftMode === 'x' ? 'x' : 'candidate';
+      st.settings.showHeads = raw.settings.showHeads !== false;
     }
     st.bg = normalizeBg(raw.bg);
     if (raw.grid && typeof raw.grid === 'object') setGridOffset(st, raw.grid.x, raw.grid.y);
@@ -1119,7 +1170,7 @@
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
     normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
-    setCellSize, gridCropRect,
+    setCellSize, gridCropRect, headsVisible, headSize, linePeople, HEAD_LABELS,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,
