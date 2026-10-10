@@ -277,7 +277,8 @@
       st.people.map(p => {
         const at = st.play.placed[p.id];
         const cnt = Core.personCandidateCount(st, p.id);
-        const title = (p.label || '') + (p.name ? ' ' + p.name : '') + ' · ' + stateOf(st, p);
+        // 人物只有编号（label），没有单独的姓名字段
+        const title = (p.label || '') + ' · ' + stateOf(st, p);
         return '<li class="' + (sel && p.id === sel.id ? 'active ' : '') + (at ? 'placed' : '') + '"' +
           ' data-act="select-person" data-id="' + esc(p.id) + '" data-hover-person="' + esc(p.id) + '"' +
           ' style="--pc:' + esc(p.color) + '" title="' + esc(title) + '">' +
@@ -291,7 +292,6 @@
       '<div class="pnow">' +
       (sel
         ? '<span class="chip sm" style="--pc:' + esc(sel.color) + '">' + esc(sel.label) + '</span>' +
-          '<b>' + (esc(sel.name) || '未命名') + '</b>' +
           '<span class="muted">' + esc(stateOf(st, sel)) + '</span>' +
           '<span class="grow"></span>' +
           (st.play.placed[sel.id] ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(sel.id) + '">取消确定</button>' : '') +

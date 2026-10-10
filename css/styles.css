@@ -520,7 +520,6 @@ button.occ.blocked { border-color: #fecaca; background: #fef2f2; color: #b91c1c;
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin: 8px 0 2px; font-size: 13px;
 }
-.pnow b { font-weight: 600; }
 .grow { flex: 1; }
 
 .seg.wide { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

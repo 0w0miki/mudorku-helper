@@ -1577,3 +1577,30 @@ test('悬停格子时点亮它所在的行与列提示', async () => {
   assert.equal(q(doc, '.col-head.hot').dataset.c, '0', '列也跟着换');
   dom.window.close();
 });
+
+test('游玩模式：人物旁边不会再出现凭空的「未命名」', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  C.setCandidate(st, st.people[0].id, '0,0', true);
+  C.placePerson(st, st.people[1].id, '2,3');
+  clickSel(dom, '#tabPlay');
+
+  // 人物对象本身就没有 name 字段，身份是编号
+  assert.deepEqual(Object.keys(st.people[0]).sort(), ['color', 'id', 'label', 'links'], '人物没有 name 字段');
+  assert.equal(st.people[0].name, undefined);
+
+  assert.equal(q(doc, '.pnow').textContent.includes('未命名'), false,
+    '当前人物行不该出现「未命名」：' + q(doc, '.pnow').textContent);
+  const titles = qa(doc, '.plist li').map(li => li.title);
+  assert.equal(titles.some(t => t.includes('未命名')), false, '格子的 tooltip 也不该有：' + titles[0]);
+
+  // 选到已确定的人时，那一行显示的是编号 + 状态
+  clickSel(dom, '.plist li:nth-child(2)');
+  const now = q(doc, '.pnow').textContent;
+  assert.match(now, /B/, '显示编号');
+  assert.match(now, /确定/, '显示状态');
+  assert.equal(/未命名/.test(now), false);
+  dom.window.close();
+});
