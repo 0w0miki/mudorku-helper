@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murdoku 助手 · 类 N 皇后谜题辅助</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand">Murdoku 助手</div>
+  <div class="tabs">
+    <button id="tabPrep" data-act="phase" data-phase="prep" class="active">① 地图准备</button>
+    <button id="tabPlay" data-act="phase" data-phase="play">② 游玩</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="zoomctl" role="group" aria-label="棋盘缩放">
+    <svg class="zoom-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="10.5" cy="10.5" r="6.5"></circle>
+      <path d="M15.6 15.6 L20.5 20.5"></path>
+    </svg>
+    <button class="ghost icon" id="btnZoomOut" data-act="zoom" data-dir="-1" title="缩小棋盘">−</button>
+    <input type="range" id="cellSize" min="22" max="72" step="2" value="44" aria-label="棋盘缩放">
+    <button class="ghost icon" id="btnZoomIn" data-act="zoom" data-dir="1" title="放大棋盘">+</button>
+  </div>
+  <button id="btnUndo" class="ghost" data-act="undo" disabled>↶ 撤销</button>
+  <button id="btnRedo" class="ghost" data-act="redo" disabled>↷ 重做</button>
+  <button class="ghost" data-act="export">导出</button>
+  <button class="ghost" data-act="import">导入</button>
+  <button class="ghost danger" data-act="reset-all">重置</button>
+  <button class="ghost" data-act="help">帮助</button>
+  <input type="file" id="fileInput" accept="application/json,.json" hidden>
+</header>
+
+<main class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <section class="board-area">
+    <div class="board-head">
+      <span class="phase-name" id="boardPhase">① 地图准备</span>
+      <span class="muted" id="boardHint">选择人物以设置关联 · 悬停格子查看所在区域</span>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="board" id="board">
+        <div class="cells" id="cells"></div>
+        <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+          <path class="grid-lines" vector-effect="non-scaling-stroke"></path>
+          <rect class="grid-outer" x="0" y="0" width="1" height="1" vector-effect="non-scaling-stroke"></rect>
+          <g id="regionLayer"></g>
+          <path class="draft-outline" id="draftOutline" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div class="ring-layer" id="ringLayer"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<div class="modal" id="helpModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h1>怎么用</h1>
+      <button class="ghost" data-act="close-modal" data-modal="helpModal">关闭</button>
+    </div>
+
+    <h2>① 地图准备阶段</h2>
+    <ol>
+      <li>填好行 / 列后点「生成地图」。人物数量 = <b>min(行, 列)</b>，标签按 A–Z 顺序并<b>跳过 X</b>。</li>
+      <li>点「＋ 新建区域」→ 在棋盘上单击格子切换选中（按住拖动可连续刷选）→ 填名称 → 保存。<b>区域必须四连通</b>，外轮廓会自动加粗显示。<b>一个格子只属于一个区域</b>，重复选中的格子会从原区域移过来。</li>
+      <li>点「＋ 新建物品」→ 同样选格子 → 填名称 → 选择<b>可占据</b>（人可以放在这些格子上）或<b>不可占据</b>（人不能放上去，游玩阶段会固定标红色 ✕）。<b>一个格子也只能放一个物品</b>。</li>
+      <li>人物编号默认按 A–Z 跳过 X 生成；选中人物后点「<b>改名</b>」可以改成 1–4 个字符的任意编号（不能重复、不能含 X），棋盘上的圆形标记会自动缩小字号适配。</li>
+      <li>在「人物」里点选一个人物，然后用<b>下拉框</b>选用要关联的区域或物品（选中的即建立关联，<b>默认正相关</b>）。已关联的条目上，点标签可在<b>正相关 / 负相关</b>之间切换，点 × 取消关联。</li>
+      <li>关联只是<b>相关性提示</b>——用来在悬停时高亮、辅助推理，<b>不是必须满足的规则</b>，「检查」不会因为关联不符而报错。</li>
+      <li>列表里点色块可换颜色，点「编辑」可继续增删该区域/物品的格子。</li>
+    </ol>
+
+    <h2>② 游玩阶段</h2>
+    <ul>
+      <li><b>左键点一下</b>＝给当前人物标注候选；再点一次取消。</li>
+      <li><b>按住左键拖动</b>＝连续标注一片格子（起点格决定方向：空白格开始是「加候选」，已有候选的格子开始是「擦除」）。整段拖动算<b>一次撤销</b>。</li>
+      <li><b>右键</b>＝切换该格的 ✕（表示这个格子不能放人）。也可以把左键模式切换成「标 X」，此时<b>拖动可以连续标 X</b>，并且<b>不会长按放人</b>。</li>
+      <li><b>长按 0.7 秒</b>→ 出现圆形进度条，走满后把当前人物确定在该格，并自动在<b>同一行、同一列（除当前格）标上 ✕</b>。仅在「左键＝候选」模式下有效。</li>
+      <li>鼠标停在一个格子上 → 高亮它<b>所在的区域</b>。</li>
+      <li>鼠标停在<b>人物</b>上（棋盘上的圆形标记、候选小标签，或左侧人物条）→ 高亮该人物关联的区域与物品；<b>负相关用红色</b>，正相关用绿色。</li>
+      <li>左侧「检查」实时列出真正的规则冲突：同行同列、放在 ✕ 或不可占据物品上、无处可放、唯一候选撞车等，点问题可以定位到格子。</li>
+    </ul>
+
+    <h2>其他</h2>
+    <ul>
+      <li>撤销 / 重做：<kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd>（Windows：<kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>）。</li>
+      <li>所有改动会自动保存在浏览器本地；用「导出 / 导入 JSON」备份或分享题目。</li>
+      <li>顶栏 <b>🔍 − 滑块 +</b> 三件套都在调同一个「棋盘缩放」（每格显示的像素大小，22–72px）：<b>−</b> / <b>+</b> 按钮按 6px 步进、到极限自动禁用，也可以直接拖中间那条；大棋盘可以在棋盘区域滚动查看。</li>
+    </ul>
+  </div>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script src="js/board.js"></script>
+<script src="js/panels.js"></script>
+</body>
+</html>

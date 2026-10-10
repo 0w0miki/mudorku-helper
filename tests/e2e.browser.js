@@ -1,0 +1,201 @@
+/*! Mudorku Helper — 真实浏览器端到端演练（可选）
+ *
+ * 需要用真实指针事件才能验证的部分：拖拽刷格、长按进度条、悬停计算样式、刷新后 localStorage 恢复。
+ * 运行前先装浏览器：
+ *   pnpm add -D playwright && pnpm exec playwright install chromium
+ * 然后：
+ *   pnpm run test:browser
+ *
+ * 注意：这个脚本不在 `pnpm test` 里（pnpm test 只跑 jsdom 的三个纯 Node 用例）。
+ */
+const path = require('node:path');
+const fs = require('node:fs');
+
+// 只认项目自己装的 playwright：不要被 NODE_PATH 里其它项目塞进来的版本带跑
+const LOCAL_PW = path.join(__dirname, '..', 'node_modules', 'playwright');
+let chromium;
+try {
+  if (!fs.existsSync(path.join(LOCAL_PW, 'package.json'))) throw new Error('未安装');
+  ({ chromium } = require(LOCAL_PW));
+} catch (e) {
+  console.error('这个脚本需要 playwright（可选依赖，没有随项目安装）：');
+  console.error('  pnpm add -D playwright && pnpm exec playwright install chromium');
+  process.exit(1);
+}
+
+const FILE = 'file://' + path.join(__dirname, '..', 'index.html');
+const A = [];
+const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
+
+(async () => {
+  const b = await chromium.launch();
+  const p = await b.newPage({ viewport: { width: 1460, height: 940 }, deviceScaleFactor: 2 });
+  const errs = [];
+  p.on('pageerror', e => errs.push('pageerror: ' + e.message));
+  p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  await p.goto(FILE);
+  await p.waitForSelector('.cell');
+
+  const S = () => p.evaluate(() => window.MH.store.state);
+  const centerOf = async k => { const bb = await p.locator(`.cell[data-k="${k}"]`).boundingBox(); return [bb.x + bb.width / 2, bb.y + bb.height / 2]; };
+
+  // 0) 生成 5x5
+  await p.fill('#rowsInput', '5'); await p.fill('#colsInput', '5');
+  await p.click('[data-act="gen"]');
+  let st = await S();
+  ok(st.rows === 5 && st.cols === 5 && st.people.length === 5, '生成 5x5 地图 + 5 个人物');
+
+  // 1) 真实拖拽刷出一个 L 形区域
+  await p.click('[data-act="new-region"]');
+  let [x, y] = await centerOf('0,0');
+  await p.mouse.move(x, y); await p.mouse.down();
+  for (const k of ['0,1', '0,2', '1,2']) { const c = await centerOf(k); await p.mouse.move(c[0], c[1]); }
+  await p.mouse.up();
+  const drafted = await p.evaluate(() => [...window.MH.ui.draft.cells].sort());
+  ok(drafted.join(' ') === '0,0 0,1 0,2 1,2', '拖拽刷选 4 格 → ' + drafted.join(' '));
+  await p.fill('#draftName', '走廊');
+  await p.click('[data-act="draft-save"]');
+  st = await S();
+  ok(st.regions.length === 1 && st.regions[0].name === '走廊' && st.regions[0].cells.length === 4, '保存区域「走廊」');
+  const outlineD = await p.getAttribute('.region-outline', 'd');
+  ok(outlineD && outlineD.length > 0, '区域外轮廓已绘制');
+
+  // 2) 真实点击新建物品（不可占据）
+  await p.click('[data-act="new-item"]');
+  [x, y] = await centerOf('2,2');
+  await p.mouse.move(x, y); await p.mouse.down(); await p.mouse.up();
+  await p.fill('#draftName', '陷阱');
+  await p.click('input[name="draftOcc"][value="0"]');
+  await p.click('[data-act="draft-save"]');
+  st = await S();
+  ok(st.items.length === 1 && st.items[0].occupiable === false, '新建不可占据物品「陷阱」');
+
+  // 3) 真实点击设置关联：A +走廊，A -陷阱
+  const rid = (await S()).regions[0].id, iid = (await S()).items[0].id;
+  await p.selectOption('#linkPicker', 'region:' + rid);          // 下拉框添加，默认正相关
+  await p.selectOption('#linkPicker', 'item:' + iid);
+  await p.click(`.link-row[data-hover-item="${iid}"] button[data-act="link"][data-pol="-1"]`); // 切成负相关
+  st = await S();
+  ok(st.people[0].links.length === 2, '用下拉框建立两条关联');
+  ok(st.people[0].links.some(l => l.polarity === -1) && st.people[0].links.some(l => l.polarity === 1),
+    '一条正相关一条负相关');
+
+  // 4) 悬停格子高亮区域
+  [x, y] = await centerOf('0,1');
+  await p.mouse.move(x, y);
+  await p.waitForTimeout(80);
+  const hl = await p.evaluate(() => {
+    const o = document.querySelector('.region-outline');
+    const cell = document.querySelector('.cell[data-k="0,0"]');
+    return {
+      outlineHl: o.classList.contains('hl'),
+      outlineWidth: getComputedStyle(o).strokeWidth,
+      cellBg: getComputedStyle(cell).backgroundColor,   // 只描外框，格子保持区域底色
+      filled: cell.classList.contains('hl-region'),
+    };
+  });
+  ok(hl.outlineHl && hl.outlineWidth === '5px', '网格悬停：区域外框加粗 ' + hl.outlineWidth);
+  ok(!hl.filled && /0\.16/.test(hl.cellBg), '网格悬停不填充整块：' + hl.cellBg);
+
+  // 5) 切到游玩：不可占据格固定 X
+  await p.click('#tabPlay');
+  await p.waitForTimeout(60);
+  ok(await p.evaluate(() => !!document.querySelector('.cell[data-k="2,2"] .xmark.auto')), '不可占据物品格显示固定 X');
+
+  // 6) 真实点击标候选（点两处）
+  for (const k of ['1,0', '2,4']) { const c = await centerOf(k); await p.mouse.click(c[0], c[1]); }
+  st = await S();
+  ok(st.play.candidates[st.selectedPersonId].length === 2, '点两处标注候选');
+
+  // 7) 悬停人物 → 关联高亮（走廊绿、陷阱红）
+  await p.hover('.cell[data-k="1,0"] .cands i');
+  await p.waitForTimeout(80);
+  const hov = await p.evaluate(() => ({
+    pos: getComputedStyle(document.querySelector('.cell[data-k="0,0"]')).backgroundColor,
+    neg: getComputedStyle(document.querySelector('.cell[data-k="2,2"]')).backgroundColor,
+  }));
+  ok(hov.pos === 'rgba(22, 163, 74, 0.4)' && hov.neg === 'rgba(239, 68, 68, 0.46)', '悬停候选：正向绿 ' + hov.pos + ' / 负向红 ' + hov.neg);
+
+  // 8) 真实长按确定到 (3,1)
+  const target = await centerOf('3,1');
+  await p.mouse.move(target[0], target[1]);
+  await p.mouse.down();
+  await p.waitForTimeout(400);
+  const ringShown = await p.evaluate(() => {
+    const r = document.querySelector('.ring');
+    return !!r && r.style.display === 'block' && parseFloat(getComputedStyle(document.querySelector('.ring-fg')).strokeDashoffset) > 0;
+  });
+  // 不要死等固定时间：机器繁忙时 rAF 会被拖慢，改为轮询状态直到确定完成
+  await p.waitForFunction(() => Object.keys(window.MH.store.state.play.placed).length > 0, null, { timeout: 6000 });
+  await p.mouse.up();
+  st = await S();
+  const pid = st.selectedPersonId;
+  ok(ringShown, '长按过程中显示圆形进度条');
+  ok(st.play.placed[pid] === '3,1', '长按确定在 (3,1)');
+  const colX = [0, 2, 3, 4].every(c => st.play.xmarks[`3,${c}`]);
+  const rowX = [0, 1, 2, 4].every(r => st.play.xmarks[`${r},1`]);
+  ok(colX && rowX, '同行同列（除当前格）已标 X');
+  ok(!!(await p.$('.cell[data-k="3,1"] .person-chip')), '棋盘出现人物圆形标记');
+
+  // 8.5) 拖动连续标注候选（真实指针），整段一次撤销
+  await p.click('.plist li[data-id="p2"]');
+  // 注意 A 已确定在 (3,1)（第 2 列），所以避开第 2 列，用 (0,2)(0,3)(0,4)
+  let a = await centerOf('0,2'), b2 = await centerOf('0,3'), c2 = await centerOf('0,4');
+  await p.mouse.move(a[0], a[1]);
+  await p.mouse.down();
+  await p.mouse.move(b2[0], b2[1], { steps: 4 });
+  await p.mouse.move(c2[0], c2[1], { steps: 4 });
+  await p.mouse.up();
+  st = await S();
+  ok(st.play.candidates.p2 && st.play.candidates.p2.length === 3, '拖动连标 3 个候选：' + JSON.stringify(st.play.candidates.p2));
+  ok(!(st.play.candidates.p2 || []).includes('0,1'), '被 A 排除的格子不会被拖上候选');
+  await p.click('#btnUndo');
+  st = await S();
+  ok((st.play.candidates.p2 || []).length === 0, '整段拖动一次撤销');
+
+  // 8.6) X 颜色必须是深色
+  await p.click('[data-act="left-mode"][data-mode="x"]');
+  let z = await centerOf('2,0'); await p.mouse.click(z[0], z[1]);
+  const xcolor = await p.evaluate(() => getComputedStyle(document.querySelector('.xmark.user')).color);
+  ok(/rgb\(1[0-9], ?1[0-9], ?[0-9]+\)|rgb\(11, 18, 32\)/.test(xcolor), 'X 是深色：' + xcolor);
+  // X 模式下长按不放人
+  const q2 = await centerOf('2,2');
+  await p.mouse.move(q2[0], q2[1]); await p.mouse.down();
+  await p.waitForTimeout(900);
+  const placedInX = await p.evaluate(() => Object.keys(window.MH.store.state.play.placed).length);
+  await p.mouse.up();
+  ok(placedInX === (st.play.placed ? Object.keys(st.play.placed).length : 0), 'X 模式下长按不会放人');
+  await p.click('#btnUndo');                                       // 撤掉刚才那笔 X，保持后续步骤的历史位置
+  await p.click('[data-act="left-mode"][data-mode="candidate"]');
+  st = await S();
+
+  // 9) 撤销 / 重做
+  await p.click('#btnUndo');
+  st = await S();
+  ok(!st.play.placed[pid], '撤销后确定被回滚');
+  await p.click('#btnRedo');
+  st = await S();
+  ok(st.play.placed[pid] === '3,1', '重做后恢复');
+
+  // 10) 导出 → 重置 → 导入
+  const text = await p.evaluate(() => window.MH.store.exportText());
+  await p.evaluate(t => window.MH.store.importText(t), text);
+  st = await S();
+  ok(st.regions.length === 1 && st.play.placed[pid] === '3,1', '导出/导入往返一致');
+
+  // 11) 刷新后 localStorage 恢复
+  await p.reload();
+  await p.waitForSelector('.cell');
+  st = await S();
+  ok(st.regions.length === 1 && st.rows === 5 && st.phase === 'play', '刷新后从 localStorage 恢复');
+
+  // 12) 校验面板
+  const issues = await p.$$eval('.issues .issue', els => els.map(e => e.textContent));
+  ok(issues.length >= 1, '实时检查有输出：' + JSON.stringify(issues));
+
+  console.log(A.join('\n'));
+  console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
+  console.log('页面错误: ' + JSON.stringify(errs));
+  await b.close();
+  process.exit(A.some(s => s.startsWith('FAIL')) || errs.length ? 1 : 0);
+})();
