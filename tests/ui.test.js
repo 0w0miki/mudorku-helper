@@ -1184,7 +1184,96 @@ test('摘录窗：收起按钮是箭头图标（不再是 📌），展开/收�
 });
 
 
+test('摘录窗：每张卡片可缩放（± / 点百分比还原）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 240, h: 160, url: 'data:image/png;base64,AAA' }];
+  win.MurdokuSnipper.render();
 
+  const imgW = () => q(doc, '#snipper .snipper-pin-body img').style.width;
+  const pct = () => q(doc, '#snipper .snip-pct').textContent;
+  assert.equal(pct(), '100%', '默认 100%');
+  assert.equal(imgW(), '100%');
 
+  clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
+  assert.equal(pct(), '125%');
+  assert.equal(imgW(), '125%', '图片跟着变宽');
+  clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
+  assert.equal(pct(), '156%');
+  clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="-1"]');
+  assert.equal(pct(), '125%');
 
+  clickSel(dom, '#snipper .snip-pct');
+  assert.equal(pct(), '100%', '点百分比还原');
+  assert.equal(win.MurdokuSnipper.state.pins[0].zoom, 1, '缩放值记在卡片上');
+  dom.window.close();
+});
 
+test('摘录窗：卡片缩放有上下限并夹住', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 240, h: 160, url: 'data:image/png;base64,AAA' }];
+  win.MurdokuSnipper.render();
+  for (let i = 0; i < 30; i++) clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="-1"]');
+  assert.equal(q(doc, '#snipper .snip-pct').textContent, '50%', '最小 50%');
+  for (let i = 0; i < 40; i++) clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
+  assert.equal(q(doc, '#snipper .snip-pct').textContent, '400%', '最大 400%');
+  dom.window.close();
+});
+
+test('摘录窗：卡片视口内按住拖动会平移（记录滚动位置）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 240, h: 160, url: 'data:image/png;base64,AAA', zoom: 2 }];
+  win.MurdokuSnipper.render();
+  const body = q(doc, '#snipper .snipper-pin-body');
+  assert.ok(body, '卡片有可拖动的视口');
+
+  pointer(dom, 'pointerdown', body, { clientX: 200, clientY: 100 });
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 150, clientY: 80 }));
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+  // jsdom 不做真实布局（scrollLeft 恒为 0），所以断言模块记录的平移量
+  const sc = win.MurdokuSnipper.state.scroll.p1;
+  assert.equal(sc.x, 50, '水平位移：往左拖 50px → 内容右移 50');
+  assert.equal(sc.y, 20, '垂直位移：往上拖 20px → 内容下移 20');
+  dom.window.close();
+});
+
+test('摘录窗：拖标题栏可调整卡片顺序', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [
+    { id: 'a', page: 1, w: 10, h: 10, url: 'data:image/png;base64,AAA' },
+    { id: 'b', page: 1, w: 10, h: 10, url: 'data:image/png;base64,BBB' },
+    { id: 'c', page: 1, w: 10, h: 10, url: 'data:image/png;base64,CCC' },
+  ];
+  win.MurdokuSnipper.render();
+  const order = () => qa(doc, '#snipper .snipper-pin').map(e => e.dataset.id).join(',');
+  assert.equal(order(), 'a,b,c');
+
+  const cap = q(doc, '#snipper .snipper-pin[data-id="a"] .snipper-cap');
+  assert.ok(cap, '卡片有拖拽手柄区');
+  pointer(dom, 'pointerdown', cap, { clientX: 10, clientY: 5 });
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 400 }));
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+  assert.equal(order(), 'b,c,a', '拖到下方后顺序变化');
+  assert.deepEqual(win.MurdokuSnipper.state.pins.map(p => p.id), ['b', 'c', 'a'], '数据顺序同步');
+  dom.window.close();
+});
+
+test('摘录窗：点标题栏里的按钮不会误触发排序', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [
+    { id: 'a', page: 1, w: 10, h: 10, url: 'data:image/png;base64,AAA' },
+    { id: 'b', page: 1, w: 10, h: 10, url: 'data:image/png;base64,BBB' },
+  ];
+  win.MurdokuSnipper.render();
+  const cap = q(doc, '#snipper .snipper-pin[data-id="a"] .snipper-cap');
+  const btn = cap.querySelector('[data-snip="pin-del"]');
+  pointer(dom, 'pointerdown', btn, { clientX: 10, clientY: 5 });
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 400 }));
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+  assert.deepEqual(win.MurdokuSnipper.state.pins.map(p => p.id), ['a', 'b'], '顺序没被拖动改掉');
+  dom.window.close();
+});

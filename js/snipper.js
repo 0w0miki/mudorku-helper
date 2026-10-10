@@ -23,9 +23,14 @@
   const MIN_SIDE = 8;                              // 太小的框视为误拖，不生成卡片
 
   const CHEV = '<svg class="snipper-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
+  const GRIP = '<svg class="snipper-grip" viewBox="0 0 12 20" aria-hidden="true">' +
+    '<circle cx="4" cy="5" r="1.3"/><circle cx="8" cy="5" r="1.3"/>' +
+    '<circle cx="4" cy="10" r="1.3"/><circle cx="8" cy="10" r="1.3"/>' +
+    '<circle cx="4" cy="15" r="1.3"/><circle cx="8" cy="15" r="1.3"/></svg>';
 
   const S = {
     collapsed: false,
+    scroll: {},           // id -> {x,y}，重绘后恢复卡片内的平移
     img: null,        // 当前页的位图（HTMLImageElement）
     file: null,       // 当前 PDF/图片文件，翻页复用
     page: 1,
@@ -124,15 +129,46 @@
   function renderPins() {
     const box = q('pins');
     if (!S.pins.length) { box.innerHTML = ''; return; }
-    box.innerHTML = S.pins.map(p =>
-      '<figure class="snipper-pin" data-id="' + esc(p.id) + '">' +
-        '<img src="' + esc(p.url) + '" alt="摘录">' +
-        '<figcaption><span class="muted">第 ' + p.page + ' 页</span>' +
+    box.innerHTML = S.pins.map(p => {
+      const z = pinZoom(p);
+      return '<figure class="snipper-pin" data-id="' + esc(p.id) + '">' +
+        '<figcaption class="snipper-cap" title="按住这里拖动可以调整卡片顺序">' + GRIP +
+        '<span class="muted">第 ' + p.page + ' 页</span>' +
+        '<span class="muted snip-size">' + p.w + '×' + p.h + '</span>' +
         '<span class="grow"></span>' +
-        '<button class="ghost sm" type="button" data-snip="pin-del" data-id="' + esc(p.id) + '" title="删除这张">✕</button>' +
+        '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="-1" title="缩小">−</button>' +
+        '<button class="ghost sm snip-pct" type="button" data-snip="pin-reset" data-id="' + esc(p.id) + '" title="点击还原到 100%">' + Math.round(z * 100) + '%</button>' +
+        '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="1" title="放大">+</button>' +
+        '<button class="ghost sm icon" type="button" data-snip="pin-del" data-id="' + esc(p.id) + '" title="删除这张">✕</button>' +
         '</figcaption>' +
-      '</figure>'
-    ).join('');
+        '<div class="snipper-pin-body" data-snip="pin-body" data-id="' + esc(p.id) + '" title="放大后可以按住拖动查看">' +
+        '<img src="' + esc(p.url) + '" alt="摘录" style="width:' + (z * 100) + '%">' +
+        '</div>' +
+        '</figure>';
+    }).join('');
+    // 重绘会丢滚动位置，按内存里的记录恢复
+    for (const f of box.querySelectorAll('.snipper-pin')) {
+      const sc = S.scroll[f.dataset.id];
+      const body = f.querySelector('.snipper-pin-body');
+      if (sc && body) { body.scrollLeft = sc.x; body.scrollTop = sc.y; }
+    }
+  }
+
+  /** 卡片缩放系数（老存档没有这个字段就按 1 处理） */
+  function pinZoom(p) {
+    const z = Number(p && p.zoom);
+    return Number.isFinite(z) && z > 0 ? Math.min(4, Math.max(0.5, z)) : 1;
+  }
+
+  /** 缩放某张卡片；dir=0 表示还原 */
+  function zoomPin(id, dir) {
+    const p = S.pins.find(x => x.id === id);
+    if (!p) return;
+    if (dir === 0) p.zoom = 1;
+    else p.zoom = Math.min(4, Math.max(0.5, Math.round(pinZoom(p) * (dir > 0 ? 1.25 : 0.8) * 100) / 100));
+    S.scroll[id] = { x: 0, y: 0 };
+    savePins();
+    render();
   }
 
   // ---------------------------------------------------------------- 持久化
@@ -325,6 +361,8 @@
     const act = t.getAttribute('data-snip');
     if (act === 'toggle') { S.collapsed = !S.collapsed; saveUi(); render(); }
     else if (act === 'import') { const f = q('file'); if (f) f.click(); }
+    else if (act === 'pin-zoom') { zoomPin(t.getAttribute('data-id'), Number(t.getAttribute('data-dir'))); }
+    else if (act === 'pin-reset') { zoomPin(t.getAttribute('data-id'), 0); }
     else if (act === 'prev') gotoPage(S.page - 1);
     else if (act === 'next') gotoPage(S.page + 1);
     else if (act === 'clear') {
@@ -336,6 +374,69 @@
       e.stopPropagation();
       removePin(t.getAttribute('data-id'));
     }
+  }
+
+  // ---------------------------------------------------------------- 卡片：平移 / 排序
+
+  const DRAG_SLOP = 3;   // 超过这个位移才算拖动，避免误触发
+
+  /** 卡片视口内按住拖动 = 平移（放大后看细节） */
+  function beginPan(e, body) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const id = body.getAttribute('data-id');
+    const start = { x: e.clientX, y: e.clientY, sl: body.scrollLeft, st: body.scrollTop };
+    body.classList.add('panning');
+    const move = ev => {
+      body.scrollLeft = start.sl - (ev.clientX - start.x);
+      body.scrollTop = start.st - (ev.clientY - start.y);
+      S.scroll[id] = { x: body.scrollLeft, y: body.scrollTop };
+    };
+    const up = () => {
+      root.removeEventListener('pointermove', move);
+      root.removeEventListener('pointerup', up);
+      body.classList.remove('panning');
+    };
+    root.addEventListener('pointermove', move);
+    root.addEventListener('pointerup', up);
+  }
+
+  /** 按住卡片标题栏拖动 = 调整顺序（实时把节点搬到插入位置） */
+  function beginReorder(e, cap) {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;          // 点按钮不算拖动
+    e.preventDefault();
+    const fig = cap.closest('.snipper-pin');
+    const box = q('pins');
+    const y0 = e.clientY;
+    let active = false;
+    const move = ev => {
+      if (!active) {
+        if (Math.abs(ev.clientY - y0) < DRAG_SLOP) return;
+        active = true;
+        fig.classList.add('dragging');
+      }
+      let ref = null;
+      for (const other of box.children) {
+        if (other === fig) continue;
+        const r = other.getBoundingClientRect();
+        if (ev.clientY < r.top + r.height / 2) { ref = other; break; }
+      }
+      box.insertBefore(fig, ref);                    // ref 为 null 时插到末尾
+    };
+    const up = () => {
+      root.removeEventListener('pointermove', move);
+      root.removeEventListener('pointerup', up);
+      fig.classList.remove('dragging');
+      if (!active) return;
+      // 以 DOM 顺序为准重建数组
+      const order = [...box.querySelectorAll('.snipper-pin')].map(n => n.getAttribute('data-id'));
+      S.pins.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      savePins();
+      render();
+    };
+    root.addEventListener('pointermove', move);
+    root.addEventListener('pointerup', up);
   }
 
   function onFileChange(e) {
@@ -358,6 +459,13 @@
     el.addEventListener('click', onClick);
     q('file').addEventListener('change', onFileChange);
     q('stage').addEventListener('pointerdown', beginSelect);
+    // 卡片是动态渲染的，用委托绑定
+    el.addEventListener('pointerdown', e => {
+      const body = e.target.closest && e.target.closest('.snipper-pin-body');
+      if (body) { beginPan(e, body); return; }
+      const cap = e.target.closest && e.target.closest('.snipper-cap');
+      if (cap) beginReorder(e, cap);
+    });
     q('stage').addEventListener('dragstart', e => e.preventDefault());
     refresh();
     return el;

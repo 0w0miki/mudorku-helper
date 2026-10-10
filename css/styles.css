@@ -610,15 +610,31 @@ kbd {
   overflow: hidden;
   background: #fff;
 }
-.snipper-pin img { display: block; width: 100%; height: auto; }
-.snipper-pin figcaption {
+.snipper-pin.dragging { opacity: .55; }
+.snipper-pin-body {
+  max-height: 140px;
+  overflow: auto;
+  cursor: grab;
+  background:
+    repeating-conic-gradient(#eef2f7 0 25%, #ffffff 0 50%) 50% / 16px 16px;
+}
+.snipper-pin-body.panning { cursor: grabbing; }
+.snipper-pin-body img { display: block; height: auto; max-width: none; }
+.snipper-cap {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  border-top: 1px solid var(--line);
+  gap: 5px;
+  padding: 3px 4px 3px 2px;
+  border-bottom: 1px solid var(--line);
   font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.snipper-cap:active { cursor: grabbing; }
+.snipper-grip { width: 9px; height: 16px; flex: none; fill: var(--line-strong); }
+.snipper-cap .snip-size { font-size: 11px; }
+.snipper-cap .snip-pct { min-width: 44px; font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------ 窄屏 */
 

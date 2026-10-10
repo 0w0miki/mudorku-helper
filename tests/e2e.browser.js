@@ -383,7 +383,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const cbb2 = await p.locator('#board').boundingBox();
   await p.screenshot({ path: '/tmp/mh-e2e-cand.png', clip: { x: cbb2.x - 8, y: cbb2.y - 8, width: cbb2.width + 16, height: cbb2.height + 16 } });
 
-  // 17) 摘录窗改进：箭头图标
+  // 17) 摘录窗改进：箭头图标 / 卡片缩放拖拽排序
   // 上一节可能把面板收起了（会持久化），先归一成展开态再测
   if (await p.locator('.snipper-panel').isHidden()) { await p.click('.snipper-tab'); await p.waitForTimeout(200); }
   ok(await p.locator('.snipper-panel').isVisible(), '面板处于展开态');
@@ -397,6 +397,67 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.click('.snipper-tab');
   await p.waitForTimeout(200);
   ok(await p.locator('.snipper-panel').isVisible(), '再点箭头又展开');
+
+  // 注入 8 张卡片，检验「卡片多了看不到」是否解决
+  await p.evaluate(() => {
+    const cv = document.createElement('canvas'); cv.width = 240; cv.height = 160;
+    const ctx = cv.getContext('2d');
+    const pins = [];
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 240, 160);
+      ctx.fillStyle = '#0b1220'; ctx.font = 'bold 40px sans-serif';
+      ctx.fillText('卡片 ' + (i + 1), 16, 96);
+      pins.push({ id: 'p' + (i + 1), page: 1, w: 240, h: 160, url: cv.toDataURL('image/png') });
+    }
+    localStorage.setItem('murdoku-helper.v1.snipPins', JSON.stringify(pins));
+    window.MurdokuSnipper.refresh();
+  });
+  await p.waitForTimeout(250);
+  const pinInfo = await p.evaluate(() => {
+    const box = document.querySelector('.snipper-pins');
+    const panel = document.querySelector('.snipper-panel');
+    box.scrollTop = 1e6;
+    const last = document.querySelector('.snipper-pin:last-child').getBoundingClientRect();
+    const pb = panel.getBoundingClientRect();
+    return {
+      n: document.querySelectorAll('.snipper-pin').length,
+      scrollable: box.scrollHeight > box.clientHeight + 2,
+      lastVisible: last.bottom <= pb.bottom + 2 && last.bottom <= window.innerHeight + 2,
+      panelInside: pb.bottom <= window.innerHeight + 2,
+    };
+  });
+  ok(pinInfo.n === 8, '8 张卡片都渲染出来');
+  // 卡片缩放
+  const zid = await p.getAttribute('.snipper-pin:first-child', 'data-id');
+  const zw0 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);
+  await p.click(`.snipper-pin[data-id="${zid}"] [data-snip="pin-zoom"][data-dir="1"]`);
+  await p.click(`.snipper-pin[data-id="${zid}"] [data-snip="pin-zoom"][data-dir="1"]`);
+  const zw1 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);
+  ok(zw1 > zw0 * 1.4, '点 + 放大卡片：' + Math.round(zw0) + ' → ' + Math.round(zw1) + 'px（' + (await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) + '）');
+  // 放大后按住拖动 = 平移
+  const zbody = await p.locator(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`).boundingBox();
+  await p.mouse.move(zbody.x + zbody.width - 20, zbody.y + 20);
+  await p.mouse.down();
+  await p.mouse.move(zbody.x + 20, zbody.y + 60, { steps: 6 });
+  await p.mouse.up();
+  const pan = await p.evaluate(id => {
+    const el = document.querySelector(`.snipper-pin[data-id="${id}"] .snipper-pin-body`);
+    return { x: el.scrollLeft, y: el.scrollTop };
+  }, zid);
+  ok(pan.x > 0 || pan.y > 0, '放大后可拖动平移查看：' + JSON.stringify(pan));
+  await p.click(`.snipper-pin[data-id="${zid}"] .snip-pct`);
+  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '100%', '点百分比还原 100%');
+
+  // 拖标题栏排序（落点取最后一张卡片的中点以下）
+  const capBox = await p.locator('.snipper-pin:first-child .snipper-cap').boundingBox();
+  const lastBox = await p.locator('.snipper-pin:last-child').boundingBox();
+  await p.mouse.move(capBox.x + 30, capBox.y + 8);
+  await p.mouse.down();
+  await p.mouse.move(lastBox.x + 30, lastBox.y + lastBox.height / 2 + 20, { steps: 10 });
+  await p.mouse.up();
+  await p.waitForTimeout(200);
+  const pinOrder = await p.evaluate(() => [...document.querySelectorAll('.snipper-pin')].map(e => e.dataset.id));
+  ok(pinOrder[pinOrder.length - 1] === zid, '拖标题栏可调整卡片顺序：' + pinOrder.join(','));
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
