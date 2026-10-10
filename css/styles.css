@@ -541,7 +541,7 @@ kbd {
 }
 
 .snipper-panel {
-  width: 300px;
+  width: 340px;
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
@@ -622,14 +622,27 @@ kbd {
 }
 .snipper-pin.dragging { opacity: .55; }
 .snipper-pin-body {
-  max-height: 140px;
+  position: relative;
+  height: 220px;              /* 固定高度：缩略图才有确定的"框"可适应 */
   overflow: auto;
   cursor: grab;
   background:
     repeating-conic-gradient(#eef2f7 0 25%, #ffffff 0 50%) 50% / 16px 16px;
 }
+/* 缩略图模式：整张内容按比例装进卡片，先看全再放大 */
+.snipper-pin-body.fit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.snipper-pin-body.fit img {
+  width: auto; height: auto;
+  max-width: 100%; max-height: 100%;
+}
 .snipper-pin-body.panning { cursor: grabbing; }
 .snipper-pin-body img { display: block; height: auto; max-width: none; }
+.snipper-pin-body:not(.fit) img { max-height: none; }
 .snipper-cap {
   display: flex;
   align-items: center;

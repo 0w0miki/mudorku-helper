@@ -430,13 +430,36 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(pinInfo.scrollable, '卡片区可滚动（不再被面板裁掉）');
   ok(pinInfo.lastVisible && pinInfo.panelInside, '滚到底能完整看到最后一张：' + JSON.stringify(pinInfo));
 
-  // 卡片缩放
+  // 默认是整张缩略图（适应卡片）+ 卡片比之前大
   const zid = await p.getAttribute('.snipper-pin:first-child', 'data-id');
+  const fitInfo = await p.evaluate(id => {
+    const body = document.querySelector(`.snipper-pin[data-id="${id}"] .snipper-pin-body`);
+    const img = body.querySelector('img');
+    const bb = body.getBoundingClientRect(), ib = img.getBoundingClientRect();
+    return {
+      fit: body.classList.contains('fit'),
+      label: document.querySelector(`.snipper-pin[data-id="${id}"] .snip-pct`).textContent,
+      fits: ib.width <= bb.width + 1 && ib.height <= bb.height + 1,
+      boxH: Math.round(bb.height),
+    };
+  }, zid);
+  ok(fitInfo.boxH >= 200, '卡片视口比之前大：' + fitInfo.boxH + 'px（原 140）');
+  ok(fitInfo.fit && fitInfo.label === '适应' && fitInfo.fits,
+     '默认显示整张缩略图（不超出卡片、不放大模糊）：' + JSON.stringify(fitInfo));
+
+  // 双击切到实际宽度，再双击切回缩略图
+  await p.dblclick(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`);
+  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '100%', '双击变实际宽度');
+  await p.dblclick(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`);
+  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '适应', '双击切回缩略图');
+
+  // 点 + 放大
   const zw0 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);
   await p.click(`.snipper-pin[data-id="${zid}"] [data-snip="pin-zoom"][data-dir="1"]`);
   await p.click(`.snipper-pin[data-id="${zid}"] [data-snip="pin-zoom"][data-dir="1"]`);
   const zw1 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);
   ok(zw1 > zw0 * 1.4, '点 + 放大卡片：' + Math.round(zw0) + ' → ' + Math.round(zw1) + 'px（' + (await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) + '）');
+
   // 放大后按住拖动 = 平移
   const zbody = await p.locator(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`).boundingBox();
   await p.mouse.move(zbody.x + zbody.width - 20, zbody.y + 20);
@@ -449,7 +472,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   }, zid);
   ok(pan.x > 0 || pan.y > 0, '放大后可拖动平移查看：' + JSON.stringify(pan));
   await p.click(`.snipper-pin[data-id="${zid}"] .snip-pct`);
-  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '100%', '点百分比还原 100%');
+  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '适应', '点百分比回到缩略图');
 
   // 拖标题栏排序（落点取最后一张卡片的中点以下）
   const capBox = await p.locator('.snipper-pin:first-child .snipper-cap').boundingBox();

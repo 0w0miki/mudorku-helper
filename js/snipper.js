@@ -134,19 +134,23 @@
     const box = q('pins');
     if (!S.pins.length) { box.innerHTML = ''; return; }
     box.innerHTML = S.pins.map(p => {
-      const z = pinZoom(p);
+      const z = pinZoom(p);                       // 0 = 适应（缩略图），>0 = 显式宽度百分比
+      const label = z ? Math.round(z * 100) + '%' : '适应';
+      const bodyCls = 'snipper-pin-body' + (z ? '' : ' fit');
+      const imgStyle = z ? ' style="width:' + (z * 100) + '%;max-height:none"' : '';
+      const title = z ? '按住拖动可平移；点百分比或双击回到缩略图' : '整张缩略图：双击或点「+」放大看细节';
       return '<figure class="snipper-pin" data-id="' + esc(p.id) + '">' +
         '<figcaption class="snipper-cap" title="按住这里拖动可以调整卡片顺序">' + GRIP +
         '<span class="muted">第 ' + p.page + ' 页</span>' +
         '<span class="muted snip-size">' + p.w + '×' + p.h + '</span>' +
         '<span class="grow"></span>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="-1" title="缩小">−</button>' +
-        '<button class="ghost sm snip-pct" type="button" data-snip="pin-reset" data-id="' + esc(p.id) + '" title="点击还原到 100%">' + Math.round(z * 100) + '%</button>' +
+        '<button class="ghost sm snip-pct" type="button" data-snip="pin-reset" data-id="' + esc(p.id) + '" title="点击回到缩略图（适应卡片）">' + label + '</button>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="1" title="放大">+</button>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-del" data-id="' + esc(p.id) + '" title="删除这张">✕</button>' +
         '</figcaption>' +
-        '<div class="snipper-pin-body" data-snip="pin-body" data-id="' + esc(p.id) + '" title="放大后可以按住拖动查看">' +
-        '<img src="' + esc(p.url) + '" alt="摘录" style="width:' + (z * 100) + '%">' +
+        '<div class="' + bodyCls + '" data-snip="pin-body" data-id="' + esc(p.id) + '" title="' + title + '">' +
+        '<img src="' + esc(p.url) + '" alt="摘录"' + imgStyle + '>' +
         '</div>' +
         '</figure>';
     }).join('');
@@ -158,18 +162,26 @@
     }
   }
 
-  /** 卡片缩放系数（老存档没有这个字段就按 1 处理） */
+  /** 卡片缩放：0 = 适应卡片（缩略图，默认）；>0 = 图片宽度占卡片的百分比 */
   function pinZoom(p) {
     const z = Number(p && p.zoom);
-    return Number.isFinite(z) && z > 0 ? Math.min(4, Math.max(0.5, z)) : 1;
+    if (!Number.isFinite(z) || z <= 0) return 0;
+    return Math.min(4, Math.max(0.5, z));
   }
 
-  /** 缩放某张卡片；dir=0 表示还原 */
+  /** 缩放某张卡片；dir=0 表示回到缩略图（适应） */
   function zoomPin(id, dir) {
     const p = S.pins.find(x => x.id === id);
     if (!p) return;
-    if (dir === 0) p.zoom = 1;
-    else p.zoom = Math.min(4, Math.max(0.5, Math.round(pinZoom(p) * (dir > 0 ? 1.25 : 0.8) * 100) / 100));
+    const cur = pinZoom(p);
+    if (dir === 0) {
+      p.zoom = 0;
+    } else if (!cur) {
+      // 从缩略图出发：放大到 125%，缩小到 75%
+      p.zoom = dir > 0 ? 1.25 : 0.75;
+    } else {
+      p.zoom = Math.min(4, Math.max(0.5, Math.round(cur * (dir > 0 ? 1.25 : 0.8) * 100) / 100));
+    }
     S.scroll[id] = { x: 0, y: 0 };
     savePins();
     render();
@@ -385,6 +397,16 @@
 
   const DRAG_SLOP = 3;   // 超过这个位移才算拖动，避免误触发
 
+  /** 双击卡片：在「整张缩略图」与「实际宽度」之间切换，读细节不用去找按钮 */
+  function toggleFit(id) {
+    const p = S.pins.find(x => x.id === id);
+    if (!p) return;
+    p.zoom = pinZoom(p) ? 0 : 1;
+    S.scroll[id] = { x: 0, y: 0 };
+    savePins();
+    render();
+  }
+
   /** 卡片视口内按住拖动 = 平移（放大后看细节） */
   function beginPan(e, body) {
     if (e.button !== 0) return;
@@ -471,6 +493,10 @@
       if (body) { beginPan(e, body); return; }
       const cap = e.target.closest && e.target.closest('.snipper-cap');
       if (cap) beginReorder(e, cap);
+    });
+    el.addEventListener('dblclick', e => {
+      const body = e.target.closest && e.target.closest('.snipper-pin-body');
+      if (body) toggleFit(body.getAttribute('data-id'));
     });
     q('stage').addEventListener('dragstart', e => e.preventDefault());
     refresh();

@@ -1201,22 +1201,32 @@ test('摘录窗：每张卡片可缩放（± / 点百分比还原）', async () 
   win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 240, h: 160, url: 'data:image/png;base64,AAA' }];
   win.MurdokuSnipper.render();
 
+  const body = () => q(doc, '#snipper .snipper-pin-body');
   const imgW = () => q(doc, '#snipper .snipper-pin-body img').style.width;
   const pct = () => q(doc, '#snipper .snip-pct').textContent;
-  assert.equal(pct(), '100%', '默认 100%');
-  assert.equal(imgW(), '100%');
+
+  // 默认是「适应卡片」的缩略图：整张按比例装进卡片，不写死宽度
+  assert.equal(pct(), '适应', '默认显示整张缩略图');
+  assert.ok(body().classList.contains('fit'), '缩略图模式加 fit 类');
+  assert.equal(imgW(), '', '缩略图模式不给内联宽度，交给 max-width/max-height 自适应');
 
   clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
-  assert.equal(pct(), '125%');
-  assert.equal(imgW(), '125%', '图片跟着变宽');
+  assert.equal(pct(), '125%', '从缩略图放大到 125%');
+  assert.ok(!body().classList.contains('fit'), '离开缩略图模式');
+  assert.equal(imgW(), '125%', '图片按百分比变宽');
   clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
   assert.equal(pct(), '156%');
   clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="-1"]');
   assert.equal(pct(), '125%');
 
   clickSel(dom, '#snipper .snip-pct');
-  assert.equal(pct(), '100%', '点百分比还原');
-  assert.equal(win.MurdokuSnipper.state.pins[0].zoom, 1, '缩放值记在卡片上');
+  assert.equal(pct(), '适应', '点百分比回到缩略图');
+  assert.ok(body().classList.contains('fit'));
+  assert.equal(win.MurdokuSnipper.state.pins[0].zoom, 0, '缩放值记在卡片上');
+
+  // 缩略图状态下点「−」直接进 75%
+  clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="-1"]');
+  assert.equal(pct(), '75%');
   dom.window.close();
 });
 
@@ -1286,5 +1296,24 @@ test('摘录窗：点标题栏里的按钮不会误触发排序', async () => {
   win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 400 }));
   win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
   assert.deepEqual(win.MurdokuSnipper.state.pins.map(p => p.id), ['a', 'b'], '顺序没被拖动改掉');
+  dom.window.close();
+});
+
+test('摘录窗：双击卡片在缩略图与实际宽度之间切换', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 260, h: 700, url: 'data:image/png;base64,AAA' }];
+  win.MurdokuSnipper.render();
+  const body = () => q(doc, '#snipper .snipper-pin-body');
+  const label = () => q(doc, '#snipper .snip-pct').textContent;
+  assert.equal(label(), '适应', '默认整张缩略图');
+
+  body().dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(label(), '100%', '双击变实际宽度');
+  assert.ok(!body().classList.contains('fit'));
+
+  body().dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(label(), '适应', '再双击回到缩略图');
+  assert.ok(body().classList.contains('fit'));
   dom.window.close();
 });
