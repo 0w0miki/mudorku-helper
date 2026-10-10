@@ -383,7 +383,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const cbb2 = await p.locator('#board').boundingBox();
   await p.screenshot({ path: '/tmp/mh-e2e-cand.png', clip: { x: cbb2.x - 8, y: cbb2.y - 8, width: cbb2.width + 16, height: cbb2.height + 16 } });
 
-  // 17) 摘录窗改进：箭头图标 / 卡片缩放拖拽排序 / 多卡片可滚动
+  // 17) 摘录窗改进：箭头图标 / 卡片缩放拖拽排序 / 多卡片可滚动 / 缩略图折叠
   // 上一节可能把面板收起了（会持久化），先归一成展开态再测
   if (await p.locator('.snipper-panel').isHidden()) { await p.click('.snipper-tab'); await p.waitForTimeout(200); }
   ok(await p.locator('.snipper-panel').isVisible(), '面板处于展开态');
@@ -461,6 +461,20 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForTimeout(200);
   const pinOrder = await p.evaluate(() => [...document.querySelectorAll('.snipper-pin')].map(e => e.dataset.id));
   ok(pinOrder[pinOrder.length - 1] === zid, '拖标题栏可调整卡片顺序：' + pinOrder.join(','));
+
+  // 缩略图折叠 + 持久化
+  const pinsH0 = await p.evaluate(() => document.querySelector('.snipper-pins').getBoundingClientRect().height);
+  await p.click('[data-snip="fold-stage"]');
+  await p.waitForTimeout(200);
+  const folded = await p.evaluate(() => ({
+    hidden: getComputedStyle(document.querySelector('.snipper-stage')).display === 'none',
+    h: document.querySelector('.snipper-pins').getBoundingClientRect().height,
+  }));
+  ok(folded.hidden, 'PDF 缩略图可折叠');
+  ok(folded.h >= pinsH0, '折叠后卡片区更高：' + Math.round(pinsH0) + ' → ' + Math.round(folded.h));
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(500);
+  ok(await p.evaluate(() => getComputedStyle(document.querySelector('.snipper-stage')).display === 'none'), '折叠状态刷新后保留');
+  await p.screenshot({ path: '/tmp/mh-e2e-snipper2.png' });
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

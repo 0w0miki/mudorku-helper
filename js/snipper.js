@@ -23,6 +23,7 @@
   const MIN_SIDE = 8;                              // 太小的框视为误拖，不生成卡片
 
   const CHEV = '<svg class="snipper-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
+  const CHEV_DOWN = '<svg class="snipper-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 9 12 15.5 18.5 9"/></svg>';
   const GRIP = '<svg class="snipper-grip" viewBox="0 0 12 20" aria-hidden="true">' +
     '<circle cx="4" cy="5" r="1.3"/><circle cx="8" cy="5" r="1.3"/>' +
     '<circle cx="4" cy="10" r="1.3"/><circle cx="8" cy="10" r="1.3"/>' +
@@ -30,6 +31,7 @@
 
   const S = {
     collapsed: false,
+    stageFolded: false,   // PDF 缩略图折叠起来，把空间让给卡片
     scroll: {},           // id -> {x,y}，重绘后恢复卡片内的平移
     img: null,        // 当前页的位图（HTMLImageElement）
     file: null,       // 当前 PDF/图片文件，翻页复用
@@ -70,6 +72,7 @@
           '<b>PDF 摘录</b>' +
           '<span class="muted" data-snip="status"></span>' +
           '<span class="grow"></span>' +
+          '<button class="ghost sm icon" type="button" data-snip="fold-stage" title="折叠 / 展开 PDF 缩略图">' + CHEV_DOWN + '</button>' +
           '<button class="ghost sm" type="button" data-snip="import">导入 PDF</button>' +
           '<button class="ghost sm icon" type="button" data-snip="toggle" title="收起面板">' + CHEV + '</button>' +
         '</div>' +
@@ -97,6 +100,7 @@
   function render() {
     if (!el) return;
     el.classList.toggle('collapsed', S.collapsed);
+    el.classList.toggle('stage-folded', !!S.stageFolded);
     q('status').textContent = S.img ? '' : '独立于底图';
     q('page').textContent = S.pages > 1 ? (S.page + ' / ' + S.pages) : (S.img ? '1 页' : '—');
     q('prev').disabled = S.busy || S.page <= 1;
@@ -179,7 +183,7 @@
       try { root.localStorage.removeItem(PINS_KEY); } catch (e) { /* ignore */ }
     }
   }
-  function saveUi() { write(UI_KEY, { collapsed: S.collapsed, page: S.page }); }
+  function saveUi() { write(UI_KEY, { collapsed: S.collapsed, stageFolded: S.stageFolded, page: S.page }); }
 
   // ---------------------------------------------------------------- 载入
 
@@ -360,6 +364,7 @@
     if (!t || !el.contains(t)) return;
     const act = t.getAttribute('data-snip');
     if (act === 'toggle') { S.collapsed = !S.collapsed; saveUi(); render(); }
+    else if (act === 'fold-stage') { S.stageFolded = !S.stageFolded; saveUi(); render(); }
     else if (act === 'import') { const f = q('file'); if (f) f.click(); }
     else if (act === 'pin-zoom') { zoomPin(t.getAttribute('data-id'), Number(t.getAttribute('data-dir'))); }
     else if (act === 'pin-reset') { zoomPin(t.getAttribute('data-id'), 0); }
@@ -449,6 +454,7 @@
   function refresh() {
     const ui = read(UI_KEY, {}) || {};
     S.collapsed = !!ui.collapsed;
+    S.stageFolded = !!ui.stageFolded;
     S.pins = read(PINS_KEY, []) || [];
     render();
   }

@@ -518,6 +518,8 @@ kbd {
 }
 /* 展开时箭头指右（点一下收回去），收起时指左（点一下拉出来） */
 .snipper:not(.collapsed) > .snipper-tab .snipper-chev { transform: rotate(180deg); }
+/* 缩略图折叠后，头部的箭头改为指右 */
+.snipper.stage-folded [data-snip="fold-stage"] .snipper-chev { transform: rotate(-90deg); }
 .snipper-head .icon, .snipper-cap .icon {
   width: 24px; height: 22px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -592,6 +594,9 @@ kbd {
   background: rgba(37, 99, 235, .14);
   pointer-events: none;
 }
+
+/* 缩略图折叠后，空间全部让给卡片 */
+.snipper.stage-folded .snipper-stage { display: none; }
 
 /* 卡片区：能伸缩 + 自己滚动。之前写死 max-height 46%，父级高度不确定时
    百分比失效，卡片会顶出面板被 overflow:hidden 裁掉 —— 这就是「下面的卡片

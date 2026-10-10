@@ -1183,6 +1183,17 @@ test('摘录窗：收起按钮是箭头图标（不再是 📌），展开/收�
   dom.window.close();
 });
 
+test('摘录窗：PDF 缩略图可以折叠，且状态留在 UI 里', async () => {
+  const { dom, doc } = await boot();
+  const panel = q(doc, '#snipper');
+  assert.equal(panel.classList.contains('stage-folded'), false, '默认展开缩略图');
+  clickSel(dom, '#snipper [data-snip="fold-stage"]');
+  assert.equal(panel.classList.contains('stage-folded'), true, '可以折叠');
+  assert.equal(dom.window.MurdokuSnipper.state.stageFolded, true, '状态记录下来');
+  clickSel(dom, '#snipper [data-snip="fold-stage"]');
+  assert.equal(panel.classList.contains('stage-folded'), false);
+  dom.window.close();
+});
 
 test('摘录窗：每张卡片可缩放（± / 点百分比还原）', async () => {
   const { dom, doc } = await boot();
