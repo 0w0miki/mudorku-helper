@@ -409,15 +409,44 @@ button.occ.blocked { border-color: #fecaca; background: #fef2f2; color: #b91c1c;
 }
 .draft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 
-.plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.plist li {
-  display: flex; align-items: center; gap: 7px;
-  padding: 3px 5px; border-radius: 8px; cursor: pointer;
+/* 人物网格：人多时不至于拉成一条长龙
+   （24 人一行一个 ≈ 700px+，网格里约 4 行；角标给候选数，✓ = 已确定） */
+.plist {
+  list-style: none; margin: 0; padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 4px;
 }
-.plist li:hover { background: #f1f5f9; }
-.plist li.active { background: var(--accent-soft); }
-.plist li .meta { font-size: 12px; color: var(--muted); }
-.plist li .done { color: var(--pos); }
+.plist li {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  height: 38px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: #fff;
+  color: var(--pc, #0f172a);
+  font-weight: 700; font-size: 14px;
+  cursor: pointer; user-select: none;
+}
+.plist li:hover { background: var(--accent-soft); }
+.plist li.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+.plist li.placed { background: var(--pc); border-color: var(--pc); color: #fff; }
+.plist li.placed:hover { filter: brightness(1.08); }
+.plist li .pl { max-width: 100%; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plist li .pb {
+  position: absolute; top: -5px; right: -4px;
+  min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px;
+  background: #64748b; color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+}
+.plist li .pb.ok { background: var(--pos); }
+
+/* 当前人物：详情与操作只给选中的那一个，避免每人两按钮把列表撑成两倍高 */
+.pnow {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 8px 0 2px; font-size: 13px;
+}
+.pnow b { font-weight: 600; }
 .grow { flex: 1; }
 
 .seg.wide { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

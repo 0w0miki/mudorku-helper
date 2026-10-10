@@ -256,6 +256,14 @@
       '</ul></section>';
   }
 
+  /** 人物状态文案：已确定在哪 / 有几个候选 / 未标注 */
+  function stateOf(st, p) {
+    const at = st.play.placed[p.id];
+    if (at) return '确定 ' + Core.posText(at);
+    const cnt = Core.personCandidateCount(st, p.id);
+    return cnt ? cnt + ' 个候选' : '未标注';
+  }
+
   function playHTML(st) {
     const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
     const placedCount = st.people.filter(p => st.play.placed[p.id]).length;
@@ -263,19 +271,33 @@
     return '' +
       '<section class="card">' +
       '<h2>人物 <span class="muted">' + placedCount + '/' + st.people.length + ' 已确定</span></h2>' +
+      // 人多时一行一个太长了（24 人 ≈ 700px 以上），改成紧凑网格：
+      // 每格一个字母，角标显示候选数（✓ = 已确定），详情只给当前选中的人。
       '<ul class="plist">' +
       st.people.map(p => {
         const at = st.play.placed[p.id];
         const cnt = Core.personCandidateCount(st, p.id);
-        return '<li class="' + (sel && p.id === sel.id ? 'active' : '') + '" data-act="select-person" data-id="' + esc(p.id) + '" data-hover-person="' + esc(p.id) + '">' +
-          '<span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span>' +
-          '<span class="meta">' + (at ? '<b class="done">确定 ' + Core.posText(at) + '</b>' : (cnt ? cnt + ' 个候选' : '<span class="muted">未标注</span>')) + '</span>' +
-          '<span class="grow"></span>' +
-          (at ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(p.id) + '">取消确定</button>' : '') +
-          '<button class="ghost sm" data-act="clear-person" data-id="' + esc(p.id) + '">清除</button>' +
+        const title = (p.label || '') + (p.name ? ' ' + p.name : '') + ' · ' + stateOf(st, p);
+        return '<li class="' + (sel && p.id === sel.id ? 'active ' : '') + (at ? 'placed' : '') + '"' +
+          ' data-act="select-person" data-id="' + esc(p.id) + '" data-hover-person="' + esc(p.id) + '"' +
+          ' style="--pc:' + esc(p.color) + '" title="' + esc(title) + '">' +
+          '<span class="pl">' + esc(p.label) + '</span>' +
+          (at ? '<span class="pb ok" title="已确定">✓</span>'
+              : (cnt ? '<span class="pb" title="' + cnt + ' 个候选">' + cnt + '</span>' : '')) +
           '</li>';
       }).join('') +
       '</ul>' +
+      // 只给当前人物显示详情与操作，避免每人两个按钮把列表撑成两倍高
+      '<div class="pnow">' +
+      (sel
+        ? '<span class="chip sm" style="--pc:' + esc(sel.color) + '">' + esc(sel.label) + '</span>' +
+          '<b>' + (esc(sel.name) || '未命名') + '</b>' +
+          '<span class="muted">' + esc(stateOf(st, sel)) + '</span>' +
+          '<span class="grow"></span>' +
+          (st.play.placed[sel.id] ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(sel.id) + '">取消确定</button>' : '') +
+          '<button class="ghost sm" data-act="clear-person" data-id="' + esc(sel.id) + '">清除标记</button>'
+        : '<span class="muted">还没有人物</span>') +
+      '</div>' +
       (sel ? playPersonLinks(st, sel) : '') +
       '</section>' +
 

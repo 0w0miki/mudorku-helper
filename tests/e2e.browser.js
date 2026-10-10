@@ -558,6 +558,51 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(mmDrag < jumped, '按住拖动 minimap 可连续定位：' + jumped + ' → ' + mmDrag);
   await p.screenshot({ path: '/tmp/mh-e2e-minimap.png' });
 
+  // 19) 24 人时的人物列表：紧凑网格，不再拉成长条
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(24, 24), 'e2e 24 人'));
+  await p.click('#tabPlay');
+  await p.waitForTimeout(300);
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    const ids = st.people.map(x => x.id);
+    C.setCandidate(st, ids[0], '0,5', true);
+    C.setCandidate(st, ids[0], '1,6', true);
+    C.placePerson(st, ids[5], '10,10');
+    window.MH.render();
+  });
+  await p.waitForTimeout(200);
+  const grid = await p.evaluate(() => {
+    const ul = document.querySelector('.plist');
+    const cells = [...ul.querySelectorAll('li')];
+    const cols = getComputedStyle(ul).gridTemplateColumns.split(' ').length;
+    return {
+      n: cells.length, cols: cols, rows: Math.ceil(cells.length / cols),
+      h: Math.round(ul.getBoundingClientRect().height),
+      clearBtns: document.querySelectorAll('[data-act="clear-person"]').length,
+      badgeA: cells[0].querySelector('.pb') ? cells[0].querySelector('.pb').textContent : null,
+      placedCount: cells.filter(c => c.classList.contains('placed')).length,
+      placedOk: cells.filter(c => c.classList.contains('placed')).every(c => c.querySelector('.pb') && c.querySelector('.pb').textContent === '✓'),
+      lastLabel: cells[cells.length - 1].querySelector('.pl').textContent,
+      now: document.querySelector('.pnow') ? document.querySelector('.pnow').textContent.replace(/\s+/g, ' ').trim() : '',
+    };
+  });
+  ok(grid.n === 24 && grid.lastLabel === 'Y', '24 人全在网格里且跳过 X（末位 ' + grid.lastLabel + '）');
+  ok(grid.rows <= 5, '只占 ' + grid.rows + ' 行（每行 ' + grid.cols + ' 个）');
+  ok(grid.h < 260, '人物区高度受控：' + grid.h + 'px（旧版一行一个 ≈ 700px+）');
+  ok(grid.clearBtns === 1, '清除等操作只保留当前人物一份：' + grid.clearBtns);
+  ok(grid.badgeA === '2', '有候选的人带数量角标：A=' + grid.badgeA);
+  ok(grid.placedCount === 1 && grid.placedOk, '已确定的人填本人颜色并带 ✓');
+  await p.click('.plist li:nth-child(6)');
+  await p.waitForTimeout(200);
+  const nowRow = await p.evaluate(() => ({
+    text: document.querySelector('.pnow').textContent.replace(/\s+/g, ' ').trim(),
+    unplace: !!document.querySelector('.pnow [data-act="unplace-person"]'),
+    active: document.querySelectorAll('.plist li.active').length,
+  }));
+  ok(nowRow.active === 1 && nowRow.unplace && /确定/.test(nowRow.text), '点格子切换当前人物并显示其操作：' + nowRow.text);
+  const sb = await p.locator('.sidebar').boundingBox();
+  await p.screenshot({ path: '/tmp/mh-e2e-people24.png', clip: { x: sb.x, y: sb.y, width: sb.width, height: Math.min(sb.height, 560) } });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

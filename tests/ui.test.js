@@ -1350,3 +1350,71 @@ test('minimap：jsdom 下没有布局也不会报错', async () => {
   assert.deepEqual(errors, [], '不应有运行期报错');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 游玩模式：人物网格
+
+test('游玩模式：人物列表是紧凑网格，人多也不会拉成长条', async () => {
+  const { dom, doc, errors } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(24, 24), '测试 24 人');
+  clickSel(dom, '#tabPlay');
+
+  const cells = qa(doc, '.plist li');
+  assert.equal(cells.length, 24, '24 个人 24 个格子');
+  assert.equal(cells[0].querySelector('.pl').textContent, 'A', '格子里是人物标号');
+  assert.equal(cells[cells.length - 1].querySelector('.pl').textContent, 'Y', '24 人时跳过 X（A..W + Y）');
+  assert.equal(cells[0].querySelectorAll('button').length, 0, '格子里不再塞按钮');
+  // 每人两个按钮 → 只剩当前人物的那一份
+  assert.equal(qa(doc, '[data-act="clear-person"]').length, 1, '清除按钮只出现一次');
+  assert.equal(qa(doc, '[data-act="unplace-person"]').length, 0, '没确定的人不显示取消确定');
+  assert.ok(q(doc, '.pnow'), '有当前人物详情行');
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test('游玩模式：网格角标显示候选数，已确定的人填本人颜色 + ✓', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(24, 24), '测试 24 人');
+  const st = win.MH.store.state;
+  const C = win.MurdokuCore;
+  const ids = st.people.map(p => p.id);
+  C.setCandidate(st, ids[0], '0,5', true);
+  C.setCandidate(st, ids[0], '1,6', true);
+  C.setCandidate(st, ids[1], '3,3', true);
+  C.placePerson(st, ids[5], '10,10');
+  clickSel(dom, '#tabPlay');
+
+  const cellA = q(doc, '.plist li:nth-child(1)');
+  const cellB = q(doc, '.plist li:nth-child(2)');
+  const cellF = q(doc, '.plist li:nth-child(6)');
+  assert.equal(cellA.querySelector('.pb').textContent, '2', 'A 有 2 个候选');
+  assert.equal(cellB.querySelector('.pb').textContent, '1', 'B 有 1 个候选');
+  assert.equal(q(doc, '.plist li:nth-child(3) .pb'), null, '没标注的人没有角标');
+  assert.ok(cellF.classList.contains('placed'), 'F 已确定');
+  assert.equal(cellF.querySelector('.pb').textContent, '✓', '已确定显示 ✓');
+  assert.equal(cellF.style.getPropertyValue('--pc'), st.people[5].color, '填成本人颜色');
+  dom.window.close();
+});
+
+test('游玩模式：点格子切换当前人物，详情与操作跟着换', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state;
+  win.MurdokuCore.placePerson(st, st.people[0].id, '2,2');
+  win.MurdokuCore.setCandidate(st, st.people[3].id, '0,0', true);
+  clickSel(dom, '#tabPlay');
+
+  clickSel(dom, '.plist li:nth-child(4)');
+  assert.equal(qa(doc, '.plist li.active').length, 1, '只高亮一个');
+  assert.equal(q(doc, '.plist li:nth-child(4)').classList.contains('active'), true);
+  const now = q(doc, '.pnow');
+  assert.match(now.textContent, /1 个候选/, '详情显示候选数：' + now.textContent);
+  assert.equal(now.querySelector('[data-act="unplace-person"]'), null, '没确定就不显示取消确定');
+
+  clickSel(dom, '.plist li:nth-child(1)');
+  assert.match(q(doc, '.pnow').textContent, /确定/, '切到已确定的人显示位置');
+  assert.ok(q(doc, '.pnow [data-act="unplace-person"]'), '出现取消确定');
+  dom.window.close();
+});
