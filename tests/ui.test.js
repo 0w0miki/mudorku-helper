@@ -1201,18 +1201,13 @@ test('摘录窗：每张卡片可缩放（± / 点百分比还原）', async () 
   win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 240, h: 160, url: 'data:image/png;base64,AAA' }];
   win.MurdokuSnipper.render();
 
-  const body = () => q(doc, '#snipper .snipper-pin-body');
   const imgW = () => q(doc, '#snipper .snipper-pin-body img').style.width;
   const pct = () => q(doc, '#snipper .snip-pct').textContent;
-
-  // 默认是「适应卡片」的缩略图：整张按比例装进卡片，不写死宽度
-  assert.equal(pct(), '适应', '默认显示整张缩略图');
-  assert.ok(body().classList.contains('fit'), '缩略图模式加 fit 类');
-  assert.equal(imgW(), '', '缩略图模式不给内联宽度，交给 max-width/max-height 自适应');
+  assert.equal(pct(), '100%', '默认按宽度显示');
+  assert.equal(imgW(), '100%');
 
   clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
-  assert.equal(pct(), '125%', '从缩略图放大到 125%');
-  assert.ok(!body().classList.contains('fit'), '离开缩略图模式');
+  assert.equal(pct(), '125%');
   assert.equal(imgW(), '125%', '图片按百分比变宽');
   clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="1"]');
   assert.equal(pct(), '156%');
@@ -1220,13 +1215,8 @@ test('摘录窗：每张卡片可缩放（± / 点百分比还原）', async () 
   assert.equal(pct(), '125%');
 
   clickSel(dom, '#snipper .snip-pct');
-  assert.equal(pct(), '适应', '点百分比回到缩略图');
-  assert.ok(body().classList.contains('fit'));
-  assert.equal(win.MurdokuSnipper.state.pins[0].zoom, 0, '缩放值记在卡片上');
-
-  // 缩略图状态下点「−」直接进 75%
-  clickSel(dom, '#snipper [data-snip="pin-zoom"][data-dir="-1"]');
-  assert.equal(pct(), '75%');
+  assert.equal(pct(), '100%', '点百分比还原 100%');
+  assert.equal(win.MurdokuSnipper.state.pins[0].zoom, 1, '缩放值记在卡片上');
   dom.window.close();
 });
 
@@ -1299,21 +1289,64 @@ test('摘录窗：点标题栏里的按钮不会误触发排序', async () => {
   dom.window.close();
 });
 
-test('摘录窗：双击卡片在缩略图与实际宽度之间切换', async () => {
+
+// ------------------------------------------------------------ 摘录卡片：导航缩略图（minimap）
+
+test('minimap：视窗矩形按滚动位置换算（纯计算）', async () => {
+  const { dom } = await boot();
+  const r = dom.window.MurdokuSnipper.viewRect;
+  assert.ok(typeof r === 'function', '导出 viewRect 便于验证换算');
+
+  // 内容 1000×800，视窗 300×200，minimap 100×80，滚到 (350,300)
+  const a = r({ contentW: 1000, contentH: 800, viewW: 300, viewH: 200, scrollLeft: 350, scrollTop: 300, mmW: 100, mmH: 80 });
+  assert.equal(a.overflow, true, '内容大于视窗 → 有溢出');
+  assert.equal(a.w, 30, '视窗宽占 300/1000 → minimap 上 30px');
+  assert.equal(a.h, 20, '视窗高占 200/800 → 20px');
+  assert.equal(a.x, 35, '水平位置 350/1000 → 35px');
+  assert.equal(a.y, 30, '垂直位置 300/800 → 30px');
+
+  // 滚到底：框不能越过右下边界
+  const b = r({ contentW: 1000, contentH: 800, viewW: 300, viewH: 200, scrollLeft: 9999, scrollTop: 9999, mmW: 100, mmH: 80 });
+  assert.equal(b.x + b.w, 100, '右边界对齐');
+  assert.equal(b.y + b.h, 80, '下边界对齐');
+
+  // 内容比视窗小 → 不显示
+  const c = r({ contentW: 200, contentH: 100, viewW: 300, viewH: 200, scrollLeft: 0, scrollTop: 0, mmW: 100, mmH: 80 });
+  assert.equal(c.overflow, false, '没溢出就不显示 minimap');
+
+  // 极端长宽比下框不至于消失
+  const d = r({ contentW: 100, contentH: 4000, viewW: 90, viewH: 60, scrollLeft: 0, scrollTop: 2000, mmW: 20, mmH: 148 });
+  assert.ok(d.w >= 6 && d.h >= 6, '框有最小可见尺寸：' + JSON.stringify(d));
+  dom.window.close();
+});
+
+test('minimap：每张卡片都有缩略图盒子，按原图长宽比', async () => {
   const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MurdokuSnipper.state.pins = [
+    { id: 'tall', page: 1, w: 260, h: 700, url: 'data:image/png;base64,AAA' },
+    { id: 'wide', page: 1, w: 900, h: 200, url: 'data:image/png;base64,BBB' },
+  ];
+  win.MurdokuSnipper.render();
+  const mms = qa(doc, '#snipper .snip-mm');
+  assert.equal(mms.length, 2, '每张卡片一个 minimap');
+  assert.ok(mms[0].querySelector('img') && mms[0].querySelector('.snip-mm-view'), 'minimap 里有缩略图与视窗框');
+  const tall = mms[0].getBoundingClientRect();
+  // jsdom 不布局，退而验证内联尺寸：竖图盒子应该又窄又高、横图反之
+  const tallH = Number(mms[0].style.height.replace('px', ''));
+  const wideH = Number(mms[1].style.height.replace('px', ''));
+  assert.ok(tallH > wideH, '竖图 minimap 更高：' + tallH + ' vs ' + wideH);
+  assert.ok(tallH <= 148, '高度有上限：' + tallH);
+  dom.window.close();
+});
+
+test('minimap：jsdom 下没有布局也不会报错', async () => {
+  const { dom, doc, errors } = await boot();
   const win = dom.window;
   win.MurdokuSnipper.state.pins = [{ id: 'p1', page: 1, w: 260, h: 700, url: 'data:image/png;base64,AAA' }];
   win.MurdokuSnipper.render();
-  const body = () => q(doc, '#snipper .snipper-pin-body');
-  const label = () => q(doc, '#snipper .snip-pct').textContent;
-  assert.equal(label(), '适应', '默认整张缩略图');
-
-  body().dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
-  assert.equal(label(), '100%', '双击变实际宽度');
-  assert.ok(!body().classList.contains('fit'));
-
-  body().dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
-  assert.equal(label(), '适应', '再双击回到缩略图');
-  assert.ok(body().classList.contains('fit'));
+  const fig = q(doc, '#snipper .snipper-pin');
+  win.MurdokuSnipper.syncMinimap(fig);          // clientWidth/offsetWidth 都是 0
+  assert.deepEqual(errors, [], '不应有运行期报错');
   dom.window.close();
 });

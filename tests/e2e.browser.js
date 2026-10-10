@@ -430,28 +430,10 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(pinInfo.scrollable, '卡片区可滚动（不再被面板裁掉）');
   ok(pinInfo.lastVisible && pinInfo.panelInside, '滚到底能完整看到最后一张：' + JSON.stringify(pinInfo));
 
-  // 默认是整张缩略图（适应卡片）+ 卡片比之前大
+  // 卡片比之前大（视口 220px）
   const zid = await p.getAttribute('.snipper-pin:first-child', 'data-id');
-  const fitInfo = await p.evaluate(id => {
-    const body = document.querySelector(`.snipper-pin[data-id="${id}"] .snipper-pin-body`);
-    const img = body.querySelector('img');
-    const bb = body.getBoundingClientRect(), ib = img.getBoundingClientRect();
-    return {
-      fit: body.classList.contains('fit'),
-      label: document.querySelector(`.snipper-pin[data-id="${id}"] .snip-pct`).textContent,
-      fits: ib.width <= bb.width + 1 && ib.height <= bb.height + 1,
-      boxH: Math.round(bb.height),
-    };
-  }, zid);
-  ok(fitInfo.boxH >= 200, '卡片视口比之前大：' + fitInfo.boxH + 'px（原 140）');
-  ok(fitInfo.fit && fitInfo.label === '适应' && fitInfo.fits,
-     '默认显示整张缩略图（不超出卡片、不放大模糊）：' + JSON.stringify(fitInfo));
-
-  // 双击切到实际宽度，再双击切回缩略图
-  await p.dblclick(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`);
-  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '100%', '双击变实际宽度');
-  await p.dblclick(`.snipper-pin[data-id="${zid}"] .snipper-pin-body`);
-  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '适应', '双击切回缩略图');
+  const boxH = await p.evaluate(id => Math.round(document.querySelector(`.snipper-pin[data-id="${id}"] .snipper-pin-body`).getBoundingClientRect().height), zid);
+  ok(boxH >= 200, '卡片视口比之前大：' + boxH + 'px（原 140）');
 
   // 点 + 放大
   const zw0 = await p.evaluate(id => document.querySelector(`.snipper-pin[data-id="${id}"] img`).getBoundingClientRect().width, zid);
@@ -472,7 +454,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   }, zid);
   ok(pan.x > 0 || pan.y > 0, '放大后可拖动平移查看：' + JSON.stringify(pan));
   await p.click(`.snipper-pin[data-id="${zid}"] .snip-pct`);
-  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '适应', '点百分比回到缩略图');
+  ok((await p.textContent(`.snipper-pin[data-id="${zid}"] .snip-pct`)) === '100%', '点百分比还原 100%');
 
   // 拖标题栏排序（落点取最后一张卡片的中点以下）
   const capBox = await p.locator('.snipper-pin:first-child .snipper-cap').boundingBox();
@@ -498,6 +480,83 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(500);
   ok(await p.evaluate(() => getComputedStyle(document.querySelector('.snipper-stage')).display === 'none'), '折叠状态刷新后保留');
   await p.screenshot({ path: '/tmp/mh-e2e-snipper2.png' });
+
+  // 18) 导航缩略图（minimap）：放大后知道自己在整张的哪里
+  await p.evaluate(() => {
+    const mk = (w, h, txt) => {
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#0b1220'; ctx.font = 'bold ' + Math.round(h / 14) + 'px sans-serif';
+      ctx.fillText(txt, 12, Math.round(h / 12));
+      for (let i = 1; i < 12; i++) ctx.fillRect(12, 20 + i * 52, w - 24, 2);
+      return cv.toDataURL('image/png');
+    };
+    localStorage.setItem('murdoku-helper.v1.snipPins', JSON.stringify([
+      { id: 'tall', page: 1, w: 260, h: 700, url: mk(260, 700, '竖长') },
+      { id: 'wide', page: 1, w: 900, h: 200, url: mk(900, 200, '横图') },
+    ]));
+    window.MurdokuSnipper.refresh();
+  });
+  await p.waitForTimeout(400);
+  const mmGeo = await p.evaluate(() => {
+    const g = id => {
+      const m = document.querySelector(`.snipper-pin[data-id="${id}"] .snip-mm`);
+      const fig = document.querySelector(`.snipper-pin[data-id="${id}"]`);
+      const body = fig.querySelector('.snipper-pin-body');
+      const mb = m.getBoundingClientRect(), fb = fig.getBoundingClientRect();
+      return { hidden: m.hidden, mmW: Math.round(mb.width), mmH: Math.round(mb.height),
+               rightGap: Math.round(fb.right - mb.right), inCard: mb.top >= fb.top - 1 && mb.bottom <= fb.bottom + 1,
+               viewH: body.clientHeight, contentH: body.querySelector('img').offsetHeight };
+    };
+    return { tall: g('tall'), wide: g('wide') };
+  });
+  ok(mmGeo.tall.hidden === false, '竖长卡片出现 minimap：' + mmGeo.tall.mmW + '×' + mmGeo.tall.mmH);
+  ok(mmGeo.tall.rightGap <= 8 && mmGeo.tall.inCard, 'minimap 贴在卡片右侧不越界（右距 ' + mmGeo.tall.rightGap + 'px）');
+  ok(mmGeo.wide.hidden === true, '不溢出的卡片不显示 minimap');
+
+  const mmRect0 = await p.evaluate(() => {
+    const v = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm-view').getBoundingClientRect();
+    const m = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm').getBoundingClientRect();
+    return { w: Math.round(v.width), h: Math.round(v.height), mmW: Math.round(m.width), mmH: Math.round(m.height) };
+  });
+  const mmExpH = Math.round(mmGeo.tall.mmH * (mmGeo.tall.viewH / mmGeo.tall.contentH));
+  ok(mmRect0.w >= mmGeo.tall.mmW - 3, '内容不比卡片宽时视窗框横向占满：' + JSON.stringify(mmRect0));
+  ok(Math.abs(mmRect0.h - mmExpH) <= 3, '视窗框高与可见比例一致：' + mmRect0.h + ' ≈ ' + mmExpH);
+
+  await p.evaluate(() => { document.querySelector('.snipper-pin[data-id="tall"] .snipper-pin-body').scrollTop = 1e6; });
+  await p.waitForTimeout(200);
+  const mmBottom = await p.evaluate(() => {
+    const m = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm').getBoundingClientRect();
+    const v = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm-view').getBoundingClientRect();
+    return { bottomGap: Math.round(m.bottom - v.bottom), within: v.bottom <= m.bottom + 1 };
+  });
+  ok(mmBottom.within && mmBottom.bottomGap <= 3, '滚到底时视窗框贴住 minimap 底部：' + JSON.stringify(mmBottom));
+
+  await p.click('.snipper-pin[data-id="tall"] [data-snip="pin-zoom"][data-dir="1"]');
+  await p.click('.snipper-pin[data-id="tall"] [data-snip="pin-zoom"][data-dir="1"]');
+  await p.waitForTimeout(200);
+  const mmZoom = await p.evaluate(() => {
+    const v = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm-view').getBoundingClientRect();
+    const m = document.querySelector('.snipper-pin[data-id="tall"] .snip-mm').getBoundingClientRect();
+    return +(v.width / m.width).toFixed(2);
+  });
+  ok(mmZoom < 0.8, '放大后视窗框变窄，看得出只看得到局部：宽占比 ' + mmZoom);
+
+  await p.evaluate(() => { document.querySelector('.snipper-pin[data-id="tall"] .snipper-pin-body').scrollTop = 0; });
+  const mmBox = await p.locator('.snipper-pin[data-id="tall"] .snip-mm').boundingBox();
+  await p.mouse.click(mmBox.x + mmBox.width / 2, mmBox.y + mmBox.height * 0.85);
+  await p.waitForTimeout(200);
+  const jumped = await p.evaluate(() => document.querySelector('.snipper-pin[data-id="tall"] .snipper-pin-body').scrollTop);
+  ok(jumped > 0, '点 minimap 可直接跳到对应位置：scrollTop=' + jumped);
+  await p.mouse.move(mmBox.x + mmBox.width / 2, mmBox.y + mmBox.height * 0.85);
+  await p.mouse.down();
+  await p.mouse.move(mmBox.x + mmBox.width / 2, mmBox.y + mmBox.height * 0.15, { steps: 8 });
+  await p.mouse.up();
+  await p.waitForTimeout(200);
+  const mmDrag = await p.evaluate(() => document.querySelector('.snipper-pin[data-id="tall"] .snipper-pin-body').scrollTop);
+  ok(mmDrag < jumped, '按住拖动 minimap 可连续定位：' + jumped + ' → ' + mmDrag);
+  await p.screenshot({ path: '/tmp/mh-e2e-minimap.png' });
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

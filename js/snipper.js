@@ -134,57 +134,90 @@
     const box = q('pins');
     if (!S.pins.length) { box.innerHTML = ''; return; }
     box.innerHTML = S.pins.map(p => {
-      const z = pinZoom(p);                       // 0 = 适应（缩略图），>0 = 显式宽度百分比
-      const label = z ? Math.round(z * 100) + '%' : '适应';
-      const bodyCls = 'snipper-pin-body' + (z ? '' : ' fit');
-      const imgStyle = z ? ' style="width:' + (z * 100) + '%;max-height:none"' : '';
-      const title = z ? '按住拖动可平移；点百分比或双击回到缩略图' : '整张缩略图：双击或点「+」放大看细节';
+      const z = pinZoom(p);
+      const mm = mmBox(p.w, p.h);
       return '<figure class="snipper-pin" data-id="' + esc(p.id) + '">' +
         '<figcaption class="snipper-cap" title="按住这里拖动可以调整卡片顺序">' + GRIP +
         '<span class="muted">第 ' + p.page + ' 页</span>' +
         '<span class="muted snip-size">' + p.w + '×' + p.h + '</span>' +
         '<span class="grow"></span>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="-1" title="缩小">−</button>' +
-        '<button class="ghost sm snip-pct" type="button" data-snip="pin-reset" data-id="' + esc(p.id) + '" title="点击回到缩略图（适应卡片）">' + label + '</button>' +
+        '<button class="ghost sm snip-pct" type="button" data-snip="pin-reset" data-id="' + esc(p.id) + '" title="点击还原到 100%">' + Math.round(z * 100) + '%</button>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-zoom" data-id="' + esc(p.id) + '" data-dir="1" title="放大">+</button>' +
         '<button class="ghost sm icon" type="button" data-snip="pin-del" data-id="' + esc(p.id) + '" title="删除这张">✕</button>' +
         '</figcaption>' +
-        '<div class="' + bodyCls + '" data-snip="pin-body" data-id="' + esc(p.id) + '" title="' + title + '">' +
-        '<img src="' + esc(p.url) + '" alt="摘录"' + imgStyle + '>' +
+        '<div class="snipper-pin-body" data-snip="pin-body" data-id="' + esc(p.id) + '" title="放大后可以按住拖动查看；右侧小图显示当前位置">' +
+        '<img src="' + esc(p.url) + '" alt="摘录" style="width:' + (z * 100) + '%">' +
+        '</div>' +
+        // 导航缩略图：放大超出卡片时才出现，框住当前看的那一块
+        '<div class="snip-mm" data-snip="mm" data-id="' + esc(p.id) + '" hidden ' +
+        'data-mmw="' + mm.w + '" data-mmh="' + mm.h + '" ' +
+        'style="width:' + mm.w + 'px;height:' + mm.h + 'px" title="当前视图在整张里的位置（可拖动定位）">' +
+        '<img src="' + esc(p.url) + '" alt="">' +
+        '<span class="snip-mm-view" data-snip="mm-view"></span>' +
         '</div>' +
         '</figure>';
     }).join('');
-    // 重绘会丢滚动位置，按内存里的记录恢复
+    // 重绘会丢滚动位置，按内存里的记录恢复；随后同步每张卡片的 minimap
     for (const f of box.querySelectorAll('.snipper-pin')) {
       const sc = S.scroll[f.dataset.id];
       const body = f.querySelector('.snipper-pin-body');
       if (sc && body) { body.scrollLeft = sc.x; body.scrollTop = sc.y; }
+      body.addEventListener('scroll', () => { syncMinimap(f); }, { passive: true });
     }
+    if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(() => {
+      for (const f of box.querySelectorAll('.snipper-pin')) syncMinimap(f);
+    });
   }
 
-  /** 卡片缩放：0 = 适应卡片（缩略图，默认）；>0 = 图片宽度占卡片的百分比 */
+  /** 卡片缩放：图片宽度占卡片宽度的百分比（默认 100% = 按宽度铺满） */
   function pinZoom(p) {
     const z = Number(p && p.zoom);
-    if (!Number.isFinite(z) || z <= 0) return 0;
-    return Math.min(4, Math.max(0.5, z));
+    return Number.isFinite(z) && z > 0 ? Math.min(4, Math.max(0.5, z)) : 1;
   }
 
-  /** 缩放某张卡片；dir=0 表示回到缩略图（适应） */
+  /** 缩放某张卡片；dir=0 表示还原到 100% */
   function zoomPin(id, dir) {
     const p = S.pins.find(x => x.id === id);
     if (!p) return;
-    const cur = pinZoom(p);
-    if (dir === 0) {
-      p.zoom = 0;
-    } else if (!cur) {
-      // 从缩略图出发：放大到 125%，缩小到 75%
-      p.zoom = dir > 0 ? 1.25 : 0.75;
-    } else {
-      p.zoom = Math.min(4, Math.max(0.5, Math.round(cur * (dir > 0 ? 1.25 : 0.8) * 100) / 100));
-    }
+    p.zoom = dir === 0
+      ? 1
+      : Math.min(4, Math.max(0.5, Math.round(pinZoom(p) * (dir > 0 ? 1.25 : 0.8) * 100) / 100));
     S.scroll[id] = { x: 0, y: 0 };
     savePins();
     render();
+  }
+
+  /**
+   * 导航缩略图（minimap）的视窗矩形：纯计算，方便单测。
+   * 全部按比例换算，返回 minimap 坐标系下的矩形；没有溢出则 overflow=false。
+   */
+  function viewRect(m) {
+    const cw = Math.max(1, m.contentW), ch = Math.max(1, m.contentH);
+    const vw = Math.max(1, m.viewW), vh = Math.max(1, m.viewH);
+    const mmW = Math.max(1, m.mmW), mmH = Math.max(1, m.mmH);
+    const overflow = cw > vw + 1 || ch > vh + 1;
+    const w = Math.max(6, Math.min(mmW, (vw / cw) * mmW));
+    const h = Math.max(6, Math.min(mmH, (vh / ch) * mmH));
+    const maxX = Math.max(0, cw - vw), maxY = Math.max(0, ch - vh);
+    const sx = maxX ? Math.min(maxX, Math.max(0, m.scrollLeft)) / cw : 0;
+    const sy = maxY ? Math.min(maxY, Math.max(0, m.scrollTop)) / ch : 0;
+    return {
+      overflow: overflow,
+      x: Math.round(sx * mmW),
+      y: Math.round(sy * mmH),
+      w: Math.round(Math.min(w, mmW - sx * mmW)),
+      h: Math.round(Math.min(h, mmH - sy * mmH)),
+    };
+  }
+
+  /** minimap 盒子尺寸：按摘录本身的长宽比，限制在卡片右侧一小条 */
+  function mmBox(w, h) {
+    const MAXW = 56, MAXH = 148;
+    const ar = h / Math.max(1, w);
+    let bw = MAXW, bh = Math.round(MAXW * ar);
+    if (bh > MAXH) { bh = MAXH; bw = Math.max(22, Math.round(MAXH / ar)); }
+    return { w: bw, h: bh };
   }
 
   // ---------------------------------------------------------------- 持久化
@@ -397,14 +430,57 @@
 
   const DRAG_SLOP = 3;   // 超过这个位移才算拖动，避免误触发
 
-  /** 双击卡片：在「整张缩略图」与「实际宽度」之间切换，读细节不用去找按钮 */
-  function toggleFit(id) {
-    const p = S.pins.find(x => x.id === id);
-    if (!p) return;
-    p.zoom = pinZoom(p) ? 0 : 1;
-    S.scroll[id] = { x: 0, y: 0 };
-    savePins();
-    render();
+  /** 把某张卡片的 minimap 视窗矩形同步到当前滚动位置；没溢出就藏起来 */
+  function syncMinimap(fig) {
+    const mm = fig.querySelector('.snip-mm');
+    const body = fig.querySelector('.snipper-pin-body');
+    const img = body && body.querySelector('img');
+    if (!mm || !body || !img) return;
+    const contentW = img.offsetWidth, contentH = img.offsetHeight;
+    const viewW = body.clientWidth, viewH = body.clientHeight;
+    if (!contentW || !viewW) return;                       // 还没布局（jsdom 也走这条）
+    // 尺寸取自渲染时算好的 data 属性：minimap 初始是 hidden 的，
+    // 这时候量 clientWidth 会得到 0，视窗框会被算成 1px（踩过）
+    const r = viewRect({
+      contentW: contentW, contentH: contentH, viewW: viewW, viewH: viewH,
+      scrollLeft: body.scrollLeft, scrollTop: body.scrollTop,
+      mmW: Number(mm.getAttribute('data-mmw')) || mm.clientWidth || 1,
+      mmH: Number(mm.getAttribute('data-mmh')) || mm.clientHeight || 1,
+    });
+    mm.hidden = !r.overflow;
+    if (!r.overflow) return;
+    const view = mm.querySelector('.snip-mm-view');
+    view.style.left = r.x + 'px';
+    view.style.top = r.y + 'px';
+    view.style.width = r.w + 'px';
+    view.style.height = r.h + 'px';
+  }
+
+  /** 在 minimap 上按住拖动 = 直接跳到对应位置 */
+  function beginMmNav(e, mm) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const fig = mm.closest('.snipper-pin');
+    const body = fig.querySelector('.snipper-pin-body');
+    const img = body.querySelector('img');
+    const jump = ev => {
+      const r = mm.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const fx = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+      const fy = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
+      body.scrollLeft = fx * img.offsetWidth - body.clientWidth / 2;
+      body.scrollTop = fy * img.offsetHeight - body.clientHeight / 2;
+      S.scroll[mm.getAttribute('data-id')] = { x: body.scrollLeft, y: body.scrollTop };
+      syncMinimap(fig);
+    };
+    jump(e);
+    const up = () => {
+      root.removeEventListener('pointermove', jump);
+      root.removeEventListener('pointerup', up);
+    };
+    root.addEventListener('pointermove', jump);
+    root.addEventListener('pointerup', up);
   }
 
   /** 卡片视口内按住拖动 = 平移（放大后看细节） */
@@ -466,6 +542,13 @@
     root.addEventListener('pointerup', up);
   }
 
+  /** 面板宽度/窗口变化后，视窗比例会变，重新同步所有 minimap */
+  function syncAll() {
+    if (!el) return;
+    for (const f of el.querySelectorAll('.snipper-pin')) syncMinimap(f);
+  }
+  root.addEventListener('resize', syncAll);
+
   function onFileChange(e) {
     const f = e.target.files && e.target.files[0];
     if (f) loadFile(f);
@@ -494,16 +577,16 @@
       const cap = e.target.closest && e.target.closest('.snipper-cap');
       if (cap) beginReorder(e, cap);
     });
-    el.addEventListener('dblclick', e => {
-      const body = e.target.closest && e.target.closest('.snipper-pin-body');
-      if (body) toggleFit(body.getAttribute('data-id'));
-    });
+    el.addEventListener('pointerdown', e => {
+      const mm = e.target.closest && e.target.closest('.snip-mm');
+      if (mm) beginMmNav(e, mm);
+    }, true);   // 捕获阶段：先于卡片的平移/排序处理
     q('stage').addEventListener('dragstart', e => e.preventDefault());
     refresh();
     return el;
   }
 
-  root.MurdokuSnipper = { mount, refresh, render, state: S };
+  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, state: S };
 
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', mount);
   else mount();
