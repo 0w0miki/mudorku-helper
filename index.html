@@ -31,6 +31,7 @@
   <button class="ghost danger" data-act="reset-all">重置</button>
   <button class="ghost" data-act="help">帮助</button>
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
+  <input type="file" id="bgFileInput" accept="image/*,application/pdf,.pdf" hidden>
 </header>
 
 <main class="layout">
@@ -43,14 +44,18 @@
     </div>
     <div class="viewport" id="viewport">
       <div class="board" id="board">
-        <div class="cells" id="cells"></div>
-        <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-          <path class="grid-lines" vector-effect="non-scaling-stroke"></path>
-          <rect class="grid-outer" x="0" y="0" width="1" height="1" vector-effect="non-scaling-stroke"></rect>
-          <g id="regionLayer"></g>
-          <path class="draft-outline" id="draftOutline" vector-effect="non-scaling-stroke"></path>
-        </svg>
-        <div class="ring-layer" id="ringLayer"></div>
+        <div class="bg-layer" id="bgLayer" hidden></div>
+        <div class="grid-box" id="gridBox">
+          <div class="cells" id="cells"></div>
+          <svg class="overlay" id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+            <path class="grid-lines" vector-effect="non-scaling-stroke"></path>
+            <rect class="grid-outer" x="0" y="0" width="1" height="1" vector-effect="non-scaling-stroke"></rect>
+            <g id="regionLayer"></g>
+            <path class="draft-outline" id="draftOutline" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <div class="ring-layer" id="ringLayer"></div>
+        </div>
+        <div class="align-handle" id="alignHandle" hidden title="拖动缩放网格（保持左上角不动）"></div>
       </div>
     </div>
   </section>
@@ -75,6 +80,13 @@
       <li>关联只是<b>相关性提示</b>——用来在悬停时高亮、辅助推理，<b>不是必须满足的规则</b>，「检查」不会因为关联不符而报错。</li>
       <li>列表里点色块可换颜色，点「编辑」可继续增删该区域/物品的格子。</li>
     </ol>
+
+    <h2>底图对位（可选）</h2>
+    <ul>
+      <li>「底图」卡片 → <b>导入图片或 PDF</b>，它会衬在网格下方（PDF 会渲染成位图，多页可选页）。</li>
+      <li>勾上「<b>对齐底图</b>」后：<b>拖动</b>棋盘 = 移动网格；拖网格<b>右下角手柄</b> = 等比缩放（左上角不动）；<b>方向键</b>微调 1px、<b>Shift + 方向键</b> 10px。</li>
+      <li>「底图透明度 / 底图缩放」调节观感；对好后取消勾选即可继续画区域 / 物品。有底图时格子底色是半透明的，所以地图能透出来。</li>
+    </ul>
 
     <h2>② 游玩阶段</h2>
     <ul>

@@ -21,6 +21,34 @@
       this.undoStack = [];
       this.redoStack = [];
       this.state = this._load() || Core.createState(8, 8);
+      this.bgData = this._loadBg();   // 底图 dataURL 单独存，不进主存档
+    }
+
+    /** 底图数据（dataURL）：体积大，单独一个 key，避免每次点击都重写几 MB */
+    _loadBg() {
+      if (!this.storage || !this.state.bg) return null;
+      try { return this.storage.getItem(this.key + '.bg') || null; } catch (e) { return null; }
+    }
+
+    setBgData(dataUrl) {
+      this.bgData = dataUrl || null;
+      if (!this.storage) return { ok: !!dataUrl };
+      try {
+        if (this.bgData) this.storage.setItem(this.key + '.bg', this.bgData);
+        else this.storage.removeItem(this.key + '.bg');
+        return { ok: true };
+      } catch (e) {
+        // 配额不够：本次会话仍可用，但刷新后会丢
+        console.warn('底图保存失败（可能超出 localStorage 配额）', e);
+        return { ok: false, message: '底图太大，本次会话可用但刷新后会丢失；建议先压缩图片' };
+      }
+    }
+
+    /** 手势/拖拽中的实时预览：改状态并立刻重绘，但不写历史也不落盘 */
+    preview(mutator) {
+      const res = mutator(this.state);
+      this.notify({ type: 'preview' });
+      return res;
     }
 
     // ---------------------------------------------------------- 订阅
@@ -151,6 +179,7 @@
         if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
         this.redoStack.length = 0;
       }
+      if (!this.state.bg) this.setBgData(null);
       this._persist();
       this.notify({ type: 'replace', label: label || '替换数据' });
     }
@@ -178,10 +207,12 @@
       }
     }
 
-    exportText() { return Core.serialize(this.state); }
+    exportText() { return Core.serialize(this.state, this.bgData); }
 
     importText(text) {
-      const state = Core.deserialize(text);
+      const raw = typeof text === 'string' ? JSON.parse(text) : text;
+      const state = Core.deserialize(raw);
+      this.setBgData(raw && raw.bgData ? String(raw.bgData) : null);
       this.replace(state, '导入数据');
       return state;
     }

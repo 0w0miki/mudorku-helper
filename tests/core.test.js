@@ -799,3 +799,105 @@ test('导入时重复/含 X 的编号仍会被替换成默认编号', () => {
   assert.equal(labels[0], '小明', '合法自定义编号保留');
   assert.ok(labels.every(l => !/x/i.test(l)), '不能含 X：' + labels.join(','));
 });
+
+// ------------------------------------------------------------ 底图与网格对位
+
+test('boardLayout：底图锚在原点，画布尺寸取底图与网格的并集', () => {
+  const st = C.createState(6, 8);            // 8 列 × 6 行
+  st.settings.cellSize = 50;                 // 网格 400×300
+  assert.deepEqual(C.boardLayout(st), {
+    cell: 50, gridW: 400, gridH: 300, bgW: 0, bgH: 0,
+    bgLeft: 0, bgTop: 0, gridLeft: 0, gridTop: 0, width: 400, height: 300,
+  });
+
+  C.setBackground(st, { kind: 'image', name: 'm.png', w: 400, h: 300, scale: 1 });
+  assert.deepEqual(C.boardLayout(st), {
+    cell: 50, gridW: 400, gridH: 300, bgW: 400, bgH: 300,
+    bgLeft: 0, bgTop: 0, gridLeft: 0, gridTop: 0, width: 400, height: 300,
+  });
+
+  // 网格右下移 → 画布变大，底图与网格各自平移以保证不出现负坐标
+  C.setGridOffset(st, 30, 20);
+  let L = C.boardLayout(st);
+  assert.equal(L.width, 430);
+  assert.equal(L.height, 320);
+  assert.equal(L.gridLeft, 30);
+  assert.equal(L.bgLeft, 0);
+
+  // 网格左上移（负偏移）→ 底图被推下去，画布同样变大
+  C.setGridOffset(st, -25, -15);
+  L = C.boardLayout(st);
+  assert.equal(L.gridLeft, 0);
+  assert.equal(L.gridTop, 0);
+  assert.equal(L.bgLeft, 25);
+  assert.equal(L.bgTop, 15);
+  assert.equal(L.width, 425);
+  assert.equal(L.height, 315);
+
+  // 底图缩放会影响占用尺寸
+  C.updateBackground(st, { scale: 0.5 });
+  assert.equal(C.boardLayout(st).bgW, 200);
+});
+
+test('网格偏移有上下限，nudgeGrid 累加但不越界', () => {
+  const st = C.createState(3, 3);
+  C.setGridOffset(st, 99999, -99999);
+  assert.equal(st.grid.x, C.GRID_LIMIT);
+  assert.equal(st.grid.y, -C.GRID_LIMIT);
+  C.setGridOffset(st, 10, 10);
+  C.nudgeGrid(st, 5, -3);
+  assert.deepEqual(st.grid, { x: 15, y: 7 });
+  C.nudgeGrid(st, 1e9, 0);
+  assert.equal(st.grid.x, C.GRID_LIMIT, '微调也不会越界');
+});
+
+test('setBackground / updateBackground 会规范化脏数据', () => {
+  const st = C.createState(3, 3);
+  assert.equal(C.setBackground(st, null).ok, false, '本来就没有底图');
+  C.setBackground(st, { kind: 'bogus', name: 'x'.repeat(200), w: 400, h: 300, scale: 99, opacity: -1, page: 0, pages: 'x' });
+  assert.equal(st.bg.kind, 'image', '非法 kind 回落到 image');
+  assert.equal(st.bg.name.length, 80, '名称截断');
+  assert.equal(st.bg.scale, C.BG_SCALE_MAX, '缩放夹到上限');
+  assert.equal(st.bg.opacity, C.BG_OPACITY_MIN, '透明度夹到下限');
+  assert.equal(st.bg.page, 1);
+  assert.equal(st.bg.pages, 1);
+  assert.equal(C.setBackground(st, { w: 0, h: 0 }).ok, false, '尺寸为 0 视为不合法');
+
+  C.setBackground(st, { kind: 'pdf', name: 'p.pdf', w: 800, h: 600, srcW: 400, srcH: 300, scale: 0.5, opacity: 0.7, page: 2, pages: 3 });
+  assert.equal(st.bg.kind, 'pdf');
+  assert.equal(C.updateBackground(st, { visible: false }).ok, true);
+  assert.equal(st.bg.visible, false);
+});
+
+test('移除底图会把网格偏移一起归零', () => {
+  const st = C.createState(3, 3);
+  C.setBackground(st, { kind: 'image', name: 'm', w: 100, h: 100 });
+  C.setGridOffset(st, 40, 50);
+  assert.deepEqual(st.grid, { x: 40, y: 50 });
+  assert.equal(C.setBackground(st, null).ok, true);
+  assert.equal(st.bg, null);
+  assert.deepEqual(st.grid, { x: 0, y: 0 });
+});
+
+test('底图与网格偏移随存档往返，导出可带上底图数据', () => {
+  const st = C.createState(4, 4);
+  C.setBackground(st, { kind: 'pdf', name: 'a.pdf', w: 1200, h: 900, srcW: 400, srcH: 300, scale: 0.6, opacity: 0.75, page: 2, pages: 5 });
+  C.setGridOffset(st, 17, -9);
+  const text = C.serialize(st, 'data:image/png;base64,AAA');
+  assert.ok(text.includes('bgData'), '导出带上底图数据');
+  const back = C.deserialize(JSON.parse(text));
+  assert.deepEqual(back.bg, st.bg);
+  assert.deepEqual(back.grid, { x: 17, y: -9 });
+  assert.equal(back.settings.cellSize, st.settings.cellSize);
+  // 不带底图数据的序列化也能正常读回
+  const back2 = C.deserialize(C.serialize(st));
+  assert.deepEqual(back2.bg, st.bg);
+});
+
+test('格子尺寸范围放宽到 12–160（对齐底图需要）', () => {
+  assert.equal(C.CELL_MIN, 12);
+  assert.equal(C.CELL_MAX, 160);
+  const st = C.deserialize({ rows: 3, cols: 3, settings: { cellSize: 999 } });
+  assert.equal(st.settings.cellSize, C.CELL_MAX);
+  assert.equal(C.deserialize({ rows: 3, cols: 3, settings: { cellSize: 1 } }).settings.cellSize, C.CELL_MIN);
+});

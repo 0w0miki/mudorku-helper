@@ -18,11 +18,18 @@
   const MAX_PEOPLE = 100;
   const MAX_DIM = 40;
   const MIN_DIM = 1;
-  // 棋盘缩放：每格显示的像素大小
-  const CELL_MIN = 22;
-  const CELL_MAX = 72;
+  // 棋盘缩放：每格显示的像素大小（对齐底图时需要更大的范围）
+  const CELL_MIN = 12;
+  const CELL_MAX = 160;
   const CELL_DEFAULT = 44;
   const CELL_STEP = 6;
+
+  // 底图（衬在网格下方的图片 / PDF 页面）
+  const BG_SCALE_MIN = 0.1;
+  const BG_SCALE_MAX = 4;
+  const BG_OPACITY_MIN = 0.1;
+  const GRID_LIMIT = 4000;   // 网格偏移上下限，防止拖飞
+  const BG_KINDS = ['image', 'pdf'];
 
   const PERSON_COLORS = [
     '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2',
@@ -223,6 +230,9 @@
       items: [],   // {id,name,color,occupiable,cells:string[]}
       selectedPersonId: people.length ? people[0].id : null,
       settings: { cellSize: CELL_DEFAULT, liveValidate: true, leftMode: 'candidate' },
+      // 衬在网格下方的底图（图片或 PDF 页面渲染结果）与网格在画布中的偏移
+      bg: null,
+      grid: { x: 0, y: 0 },
       play: {
         // xmarks[k] = { src:'user'|'place', by: personId|null }
         xmarks: {},
@@ -231,6 +241,97 @@
         // placed[personId] = key
         placed: {},
       },
+    };
+  }
+
+  // ---------------------------------------------------------------- 底图与网格对位
+
+  function clampNum(v, lo, hi, dflt) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return dflt;
+    return Math.min(hi, Math.max(lo, n));
+  }
+
+  /** 规范化底图元数据；返回 null 表示没有底图 */
+  function normalizeBg(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const wRaw = Number(raw.w), hRaw = Number(raw.h);
+    if (!Number.isFinite(wRaw) || !Number.isFinite(hRaw) || wRaw < 1 || hRaw < 1) return null;
+    const w = Math.min(20000, Math.round(wRaw));
+    const h = Math.min(20000, Math.round(hRaw));
+    return {
+      kind: BG_KINDS.indexOf(raw.kind) >= 0 ? raw.kind : 'image',
+      name: String(raw.name == null ? '底图' : raw.name).slice(0, 80),
+      w: Math.round(w),
+      h: Math.round(h),
+      srcW: Math.round(clampNum(raw.srcW, 1, 20000, w)),
+      srcH: Math.round(clampNum(raw.srcH, 1, 20000, h)),
+      scale: clampNum(raw.scale, BG_SCALE_MIN, BG_SCALE_MAX, 1),
+      opacity: clampNum(raw.opacity, BG_OPACITY_MIN, 1, 0.85),
+      visible: raw.visible !== false,
+      page: Math.max(1, Math.round(clampNum(raw.page, 1, 999, 1))),
+      pages: Math.max(1, Math.round(clampNum(raw.pages, 1, 999, 1))),
+    };
+  }
+
+  /** 设置或移除底图 */
+  function setBackground(state, bg) {
+    if (!bg) {
+      const had = !!state.bg;
+      state.bg = null;
+      state.grid = { x: 0, y: 0 };
+      return { ok: had, message: had ? '已移除底图' : '当前没有底图' };
+    }
+    const next = normalizeBg(Object.assign({}, state.bg || {}, bg));
+    if (!next) return { ok: false, message: '底图数据不合法' };
+    state.bg = next;
+    return { ok: true, message: '底图已就位', bg: next };
+  }
+
+  function updateBackground(state, patch) {
+    if (!state.bg) return { ok: false, message: '当前没有底图' };
+    const next = normalizeBg(Object.assign({}, state.bg, patch));
+    if (!next) return { ok: false, message: '底图数据不合法' };
+    state.bg = next;
+    return { ok: true };
+  }
+
+  /** 底图实际占用的画面尺寸（图片原始像素 × 缩放） */
+  function bgDisplaySize(state) {
+    const b = state.bg;
+    if (!b) return { w: 0, h: 0 };
+    return { w: Math.round(b.w * b.scale), h: Math.round(b.h * b.scale) };
+  }
+
+  function setGridOffset(state, x, y) {
+    const g = state.grid || (state.grid = { x: 0, y: 0 });
+    g.x = Math.round(clampNum(x, -GRID_LIMIT, GRID_LIMIT, 0));
+    g.y = Math.round(clampNum(y, -GRID_LIMIT, GRID_LIMIT, 0));
+    return { ok: true };
+  }
+
+  function nudgeGrid(state, dx, dy) {
+    const g = state.grid || (state.grid = { x: 0, y: 0 });
+    return setGridOffset(state, g.x + dx, g.y + dy);
+  }
+
+  /** 画布布局：底图锚在 (0,0)，网格按 offset 摆放；画布尺寸取两者并集 */
+  function boardLayout(state) {
+    const cell = state.settings.cellSize;
+    const gridW = state.cols * cell;
+    const gridH = state.rows * cell;
+    const gx = state.grid ? state.grid.x : 0;
+    const gy = state.grid ? state.grid.y : 0;
+    const bg = bgDisplaySize(state);
+    const minX = Math.min(0, gx);
+    const minY = Math.min(0, gy);
+    const maxX = Math.max(bg.w, gx + gridW);
+    const maxY = Math.max(bg.h, gy + gridH);
+    return {
+      cell, gridW, gridH, bgW: bg.w, bgH: bg.h,
+      bgLeft: minX < 0 ? -minX : 0, bgTop: minY < 0 ? -minY : 0,
+      gridLeft: gx - minX, gridTop: gy - minY,
+      width: Math.max(maxX - minX, 1), height: Math.max(maxY - minY, 1),
     };
   }
 
@@ -797,8 +898,9 @@
 
   // ---------------------------------------------------------------- 序列化
 
-  function serialize(state) {
-    return JSON.stringify(state, null, 2);
+  /** 序列化；bgData 为底图的 dataURL，只有导出时才带上（自动存档不写它，避免每次操作都写几 MB） */
+  function serialize(state, bgData) {
+    return JSON.stringify(bgData ? Object.assign({}, state, { bgData: bgData }) : state, null, 2);
   }
 
   const SAFE_ID = /^[A-Za-z0-9_-]{1,40}$/;
@@ -945,17 +1047,21 @@
       st.settings.liveValidate = raw.settings.liveValidate !== false;
       st.settings.leftMode = raw.settings.leftMode === 'x' ? 'x' : 'candidate';
     }
+    st.bg = normalizeBg(raw.bg);
+    if (raw.grid && typeof raw.grid === 'object') setGridOffset(st, raw.grid.x, raw.grid.y);
     return st;
   }
 
   return {
     LETTERS, MAX_PEOPLE, MAX_DIM, MIN_DIM, STATE_VERSION,
     CELL_MIN, CELL_MAX, CELL_DEFAULT, CELL_STEP,
+    BG_SCALE_MIN, BG_SCALE_MAX, BG_OPACITY_MIN, GRID_LIMIT,
     PERSON_COLORS, REGION_COLORS, ITEM_COLORS,
     key, unkey, isValidKey, clampInt, hexToRgb, rgba,
     labelFor, peopleCount, neighbors, isConnected, largestComponent,
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
+    normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,

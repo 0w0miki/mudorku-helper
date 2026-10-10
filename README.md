@@ -6,7 +6,9 @@
 
 ![地图准备阶段：区域加粗外轮廓 + 悬停高亮所在区域](docs/preview-prep.png)
 
-![游玩阶段：候选 / X / 确定人物，悬停人物时正向绿色、负向红色](docs/preview-play.png)
+![导入图片作底图，把网格对到地图上](docs/preview-bg.png)
+
+![游玩阶段：候选 / X / 确定人物，悬停人物时正相关绿色、负相关红色](docs/preview-play.png)
 
 ## 快速开始
 
@@ -18,6 +20,20 @@ open index.html
 pnpm run serve             # http://127.0.0.1:8123
 node scripts/serve.js 9000 # 换端口
 ```
+
+## 底图（把网格对到地图上）
+
+如果你手上有题目的图片或 PDF（扫描件、截图、导出的题目），可以把它**衬在网格下方**，再调整网格去匹配：
+
+1. 准备阶段 → 「底图」卡片 → **导入图片或 PDF**。图片会自动缩放到合适大小、压到合理体积；PDF 会渲染成位图（多页可选页）。
+2. 勾上「**对齐底图**」，然后：
+   - **拖动**棋盘任意位置 = 移动网格
+   - 拖网格**右下角的方形手柄** = 等比缩放网格（左上角不动）
+   - **方向键**微调 1px，**Shift + 方向键** 10px
+   - 用「底图透明度 / 底图缩放」调节观感；「适应窗口」让底图铺满可视区
+3. 对好之后取消勾选，继续画区域 / 物品。（改底图缩放会让相对位置变化，需要重新对一次。）
+
+底图数据存在浏览器本地（和存档分开，避免每次操作都重写几 MB），**导出 JSON 时会一并带上**，分享给别人也能看到底图。
 
 ## ① 地图准备阶段
 
@@ -45,7 +61,8 @@ node scripts/serve.js 9000 # 换端口
 
 - **撤销 / 重做**：`⌘Z` / `⇧⌘Z`（Windows：`Ctrl+Z` / `Ctrl+Y`）。所有改动（区域、物品、关联、候选、X、确定）都可撤销。
 - **存档**：每次改动自动写入浏览器 localStorage；「导出 / 导入 JSON」可备份或把题目发给别人。
-- **缩放**：顶栏 🔍 旁的 `−` / `+` 按钮（步进 6px，到极限自动禁用）或拖动中间的滑块，调整每格显示的像素大小（22–72px）；大棋盘可在棋盘区域滚动。
+- **底图**：导入图片 / PDF 衬在网格下方，用「对齐底图」拖网格对位（见上文）。
+- **缩放**：顶栏 🔍 旁的 `−` / `+` 按钮（步进 6px，到极限自动禁用）或拖动中间的滑块，调整每格显示的像素大小（12–160px）；大棋盘可在棋盘区域滚动。
 - 顶栏「重置」只清空内容，行/列不变。
 
 ## 设计取舍
@@ -65,9 +82,10 @@ node scripts/serve.js 9000 # 换端口
 
 ```bash
 pnpm install          # 只装测试用的 jsdom；运行网页本身零依赖
-pnpm test             # 94 个用例：纯逻辑 + 状态层 + jsdom 界面集成
+pnpm test             # 124 个用例：纯逻辑 + 状态层 + jsdom 界面集成
 pnpm run test:core    # 只跑不需要 DOM 的逻辑测试
 pnpm run serve        # 本地静态服务
+pnpm run vendor:pdfjs # 重新打包 pdf.js（升级 pdfjs-dist 后用）
 
 # 可选：真实浏览器端到端（拖拽刷格、长按进度条、刷新后恢复等必须真机验证的部分）
 pnpm add -D playwright && pnpm exec playwright install chromium
@@ -85,7 +103,9 @@ js/store.js         状态容器：提交-回滚、撤销重做、localStorage �
 js/board.js         棋盘渲染（DOM 网格 + SVG 轮廓层）与全部指针交互
 js/panels.js        侧栏两个阶段的界面、顶栏同步、全局动作分发
 js/app.js           MH 命名空间、渲染编排、提示条、启动
+vendor/pdfjs/       打包好的 pdf.js（经典 IIFE + 内联 worker，file:// 下也能渲染 PDF）
 scripts/serve.js    本地静态服务器（零依赖，只用 node:http / node:fs）
+scripts/vendor-pdfjs.js  重新生成 vendor/pdfjs（pnpm run vendor:pdfjs）
 tests/*.test.js     node:test 用例（core / store / ui-jsdom）
 tests/e2e.browser.js 可选的真实 Chromium 端到端演练
 ```

@@ -8,9 +8,17 @@
     "test": "node --test tests/core.test.js tests/store.test.js tests/ui.test.js",
     "test:core": "node --test tests/core.test.js tests/store.test.js",
     "serve": "node scripts/serve.js",
-    "test:browser": "node tests/e2e.browser.js"
+    "test:browser": "node tests/e2e.browser.js",
+    "vendor:pdfjs": "node scripts/vendor-pdfjs.js"
   },
   "devDependencies": {
-    "jsdom": "^25.0.1"
+    "esbuild": "^0.28.2",
+    "jsdom": "^25.0.1",
+    "pdfjs-dist": "^6.4.299"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

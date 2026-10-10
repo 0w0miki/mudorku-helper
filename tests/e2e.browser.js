@@ -10,6 +10,7 @@
  */
 const path = require('node:path');
 const fs = require('node:fs');
+const zlib = require('node:zlib');
 
 // 只认项目自己装的 playwright：不要被 NODE_PATH 里其它项目塞进来的版本带跑
 const LOCAL_PW = path.join(__dirname, '..', 'node_modules', 'playwright');
@@ -21,6 +22,31 @@ try {
   console.error('这个脚本需要 playwright（可选依赖，没有随项目安装）：');
   console.error('  pnpm add -D playwright && pnpm exec playwright install chromium');
   process.exit(1);
+}
+
+/** 现场造一张"地图" PNG（白底 + 网格线），免得仓库里放测试图片 */
+function makeMapPng(w, h, cols, rows) {
+  const table = (() => { const t = new Int32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; } return t; })();
+  const crc32 = buf => { let c = -1; for (const b of buf) c = table[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const t = Buffer.from(type); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([t, data])));
+    return Buffer.concat([len, t, data, crc]);
+  };
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  const cw = w / cols, ch = h / rows;
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0;
+    for (let x = 0; x < w; x++) {
+      let c = [252, 252, 250];
+      if (Math.abs(x - Math.round(x / cw) * cw) < 1.2 || Math.abs(y - Math.round(y / ch) * ch) < 1.2) c = [150, 150, 150];
+      if (x < 2 || y < 2 || x > w - 3 || y > h - 3) c = [200, 30, 30];
+      const o = y * (w * 3 + 1) + 1 + x * 3;
+      raw[o] = c[0]; raw[o + 1] = c[1]; raw[o + 2] = c[2];
+    }
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
 const FILE = 'file://' + path.join(__dirname, '..', 'index.html');
@@ -90,12 +116,14 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     return {
       outlineHl: o.classList.contains('hl'),
       outlineWidth: getComputedStyle(o).strokeWidth,
-      cellBg: getComputedStyle(cell).backgroundColor,   // 只描外框，格子保持区域底色
+      cellBg: getComputedStyle(cell).backgroundImage,   // 区域底色由渐变层表达
       filled: cell.classList.contains('hl-region'),
+      hoverBg: getComputedStyle(cell).backgroundColor,
     };
   });
   ok(hl.outlineHl && hl.outlineWidth === '5px', '网格悬停：区域外框加粗 ' + hl.outlineWidth);
   ok(!hl.filled && /0\.16/.test(hl.cellBg), '网格悬停不填充整块：' + hl.cellBg);
+  ok(!/0\.4[26]/.test(hl.hoverBg + hl.cellBg), '网格悬停没有整块高亮色');
 
   // 5) 切到游玩：不可占据格固定 X
   await p.click('#tabPlay');
@@ -192,6 +220,39 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   // 12) 校验面板
   const issues = await p.$$eval('.issues .issue', els => els.map(e => e.textContent));
   ok(issues.length >= 1, '实时检查有输出：' + JSON.stringify(issues));
+
+  // 13) 底图：导入 PNG → 对齐 → 刷新后仍在 → PDF
+  await p.click('#tabPrep');           // 底图控制项在准备阶段
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  st = await S();
+  ok(st.bg.kind === 'image' && st.bg.w === 400, '导入 PNG 作底图：' + st.bg.w + 'x' + st.bg.h);
+  ok(await p.locator('#bgLayer').isVisible(), '底图层可见');
+  const veil = await p.evaluate(() => getComputedStyle(document.querySelector('.cell')).backgroundImage);
+  ok(/rgba\(255,\s*255,\s*255/.test(veil), '有底图时格子半透明，底图能透出来：' + veil.slice(0, 60));
+
+  await p.click('[data-act="bg-align"]');
+  const g0 = await p.evaluate(() => Object.assign({}, window.MH.store.state.grid));
+  const gb = await p.locator('#gridBox').boundingBox();
+  await p.mouse.move(gb.x + 20, gb.y + 20);
+  await p.mouse.down();
+  await p.mouse.move(gb.x + 20 + 45, gb.y + 20 + 25, { steps: 5 });
+  await p.mouse.up();
+  st = await S();
+  ok(st.grid.x === g0.x + 45 && st.grid.y === g0.y + 25, '对齐模式拖动网格：' + JSON.stringify(g0) + ' → ' + JSON.stringify(st.grid));
+  ok(await p.locator('#alignHandle').isVisible(), '缩放手柄可见');
+
+  await p.reload();
+  await p.waitForSelector('.cell');
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 10000 });
+  st = await S();
+  ok(st.bg && st.grid.x === g0.x + 45, '刷新后底图与网格偏移都保留');
+  ok(await p.locator('#bgLayer').isVisible(), '刷新后底图仍显示');
+
+  await p.setInputFiles('#bgFileInput', { name: 'map.pdf', mimeType: 'application/pdf', buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'map.pdf')) });
+  await p.waitForFunction(() => window.MH.store.state.bg && window.MH.store.state.bg.kind === 'pdf', null, { timeout: 30000 });
+  st = await S();
+  ok(st.bg.kind === 'pdf' && st.bg.w > 0, '导入 PDF 渲染成底图：' + st.bg.w + 'x' + st.bg.h);
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

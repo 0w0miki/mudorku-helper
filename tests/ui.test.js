@@ -630,14 +630,15 @@ test('缩放改成放大镜 + −/+ 按钮：步进、边界禁用、棋盘尺�
   clickSel(dom, '#btnZoomOut');
   assert.equal(size(), 44);
 
-  for (let i = 0; i < 10; i++) clickSel(dom, '#btnZoomOut');
-  assert.equal(size(), 22, '缩到最小值');
-  assert.equal(cssVar(), '22px');
+  const C = dom.window.MurdokuCore;
+  for (let i = 0; i < 40; i++) clickSel(dom, '#btnZoomOut');
+  assert.equal(size(), C.CELL_MIN, '缩到最小值');
+  assert.equal(cssVar(), C.CELL_MIN + 'px');
   assert.equal(q(doc, '#btnZoomOut').disabled, true, '到最小后「−」应禁用');
 
-  for (let i = 0; i < 20; i++) clickSel(dom, '#btnZoomIn');
-  assert.equal(size(), 72, '放到最大值');
-  assert.equal(cssVar(), '72px');
+  for (let i = 0; i < 60; i++) clickSel(dom, '#btnZoomIn');
+  assert.equal(size(), C.CELL_MAX, '放到最大值');
+  assert.equal(cssVar(), C.CELL_MAX + 'px');
   assert.equal(q(doc, '#btnZoomIn').disabled, true, '到最大后「+」应禁用');
 
   assert.ok(q(doc, '.zoomctl .zoom-icon'), '应有放大镜图标');
@@ -884,5 +885,134 @@ test('长编号在棋盘上用小字号，不会撑破圆形标记', async () =>
   clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
   clickSel(dom, '#tabPlay');
   assert.equal(q(doc, '.cell[data-k="2,2"] .person-chip').className, 'person-chip small', '4 个字符降档');
+  dom.window.close();
+});
+
+// ------------------------------------------------------------ 底图与对齐（界面层）
+
+function withBg(dom, patch) {
+  const C = dom.window.MH.core;
+  dom.window.MH.store.setBgData('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==');
+  dom.window.MH.store.commit('放底图', s => C.setBackground(s, Object.assign(
+    { kind: 'image', name: 'map.png', w: 400, h: 300, scale: 1, opacity: 0.85, visible: true }, patch || {})));
+  dom.window.MH.render();
+}
+
+test('底图卡片：没有底图时只有导入按钮，有底图后出现全部控制', async () => {
+  const { dom, doc } = await boot();
+  assert.ok(q(doc, '[data-act="bg-import"]'), '应有导入按钮');
+  assert.ok(!q(doc, '#bgOpacity'), '没有底图时不显示透明度');
+
+  withBg(dom);
+  for (const sel of ['[data-act="bg-import"]', '[data-act="bg-toggle"]', '[data-act="bg-fit"]',
+                     '[data-act="bg-remove"]', '#bgOpacity', '#bgScale', '[data-act="bg-align"]']) {
+    assert.ok(q(doc, sel), '有底图后应出现 ' + sel);
+  }
+  assert.match(q(doc, '.sidebar').textContent, /map\.png/, '显示底图文件名');
+  dom.window.close();
+});
+
+test('对齐模式：拖动移动网格，不会误刷区域，方向键可微调', async () => {
+  const { dom, doc } = await boot();
+  withBg(dom);
+  clickSel(dom, '[data-act="bg-align"]');
+  assert.equal(dom.window.MH.ui.aligning, true);
+  assert.equal(q(doc, '#alignHandle').hidden, false, '右下角手柄出现');
+  assert.ok(q(doc, '#board').classList.contains('aligning'), '棋盘进入对齐态');
+
+  const g0 = { x: dom.window.MH.store.state.grid.x, y: dom.window.MH.store.state.grid.y };
+  pointer(dom, 'pointerdown', cellEl(dom, 0, 0), { clientX: 100, clientY: 100 });
+  pointer(dom, 'pointermove', cellEl(dom, 0, 1), { clientX: 160, clientY: 130 });
+  pointer(dom, 'pointerup');
+  let g = dom.window.MH.store.state.grid;
+  assert.equal(g.x, g0.x + 60, '水平拖动 60px');
+  assert.equal(g.y, g0.y + 30, '垂直拖动 30px');
+  assert.equal(dom.window.MH.store.state.regions.length, 0, '对齐模式下不会误建区域草稿');
+  assert.equal(dom.window.MH.ui.draft, null);
+
+  // 方向键 1px / Shift 10px
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true }));
+  g = dom.window.MH.store.state.grid;
+  assert.equal(g.x, g0.x + 61);
+  assert.equal(g.y, g0.y + 40);
+
+  // 关掉对齐模式后，拖动恢复成刷选
+  clickSel(dom, '[data-act="bg-align"]');
+  assert.equal(dom.window.MH.ui.aligning, false);
+  assert.equal(q(doc, '#alignHandle').hidden, true);
+  dom.window.close();
+});
+
+test('对齐模式：右下角手柄等比缩放网格（保持左上角不动）', async () => {
+  const { dom, doc } = await boot();
+  withBg(dom);
+  clickSel(dom, '[data-act="bg-align"]');
+  const before = dom.window.MH.store.state.settings.cellSize;
+  const g0 = { x: dom.window.MH.store.state.grid.x, y: dom.window.MH.store.state.grid.y };
+
+  const handle = q(doc, '#alignHandle');
+  pointer(dom, 'pointerdown', handle, { clientX: 0, clientY: 0 });
+  dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 80, clientY: 60 }));
+  dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true }));
+
+  const st = dom.window.MH.store.state;
+  assert.ok(st.settings.cellSize > before, '拖手柄后格子变大：' + before + ' → ' + st.settings.cellSize);
+  assert.equal(st.grid.x, g0.x, '左上角 x 不动');
+  assert.equal(st.grid.y, g0.y, '左上角 y 不动');
+  dom.window.close();
+});
+
+test('底图透明度 / 显示隐藏 / 网格归位 / 移除', async () => {
+  const { dom, doc } = await boot();
+  withBg(dom);
+  setInput(dom, '#bgOpacity', '40');
+  assert.equal(dom.window.MH.store.state.bg.opacity, 0.4);
+
+  clickSel(dom, '[data-act="bg-toggle"]');
+  assert.equal(dom.window.MH.store.state.bg.visible, false);
+  clickSel(dom, '[data-act="bg-toggle"]');
+  assert.equal(dom.window.MH.store.state.bg.visible, true);
+
+  dom.window.MH.store.commit('挪', s => dom.window.MH.core.setGridOffset(s, 33, 44));
+  clickSel(dom, '[data-act="bg-align"]');
+  clickSel(dom, '[data-act="bg-reset"]');
+  assert.equal(dom.window.MH.store.state.grid.x, 0);
+  assert.equal(dom.window.MH.store.state.grid.y, 0);
+
+  clickSel(dom, '[data-act="bg-remove"]');
+  assert.equal(dom.window.MH.store.state.bg, null);
+  assert.equal(dom.window.MH.ui.aligning, false, '移除底图会退出对齐模式');
+  assert.ok(!q(doc, '#bgOpacity'), '控制项随之消失');
+  dom.window.close();
+});
+
+test('游玩阶段也能开关底图显示', async () => {
+  const { dom, doc } = await boot();
+  withBg(dom);
+  clickSel(dom, '#tabPlay');
+  const box = q(doc, 'input[data-act="bg-toggle"]');
+  assert.ok(box, '游玩阶段应有底图显示开关');
+  assert.equal(box.checked, true);
+  clickSel(dom, 'input[data-act="bg-toggle"]');
+  assert.equal(dom.window.MH.store.state.bg.visible, false);
+  dom.window.close();
+});
+
+test('有底图时格子底为半透明（让底图透出来），没有底图时是纯白', async () => {
+  const { dom } = await boot();
+  assert.equal(msgEl(dom, '2,2').style.background, 'rgb(255, 255, 255)', '无底图：纯白');
+  withBg(dom);
+  const bgStr = msgEl(dom, '2,2').style.background;
+  assert.ok(bgStr.includes('rgba(255,255,255,.34)'), '有底图：半透明白纱 → ' + bgStr);
+  assert.ok(!bgStr.includes('255, 255, 255)'), '不能再是纯白，否则会盖住底图');
+  // 区域底色叠在白纱之上
+  clickSel(dom, '[data-act="new-region"]');
+  pointer(dom, 'pointerdown', cellEl(dom, 2, 2)); pointer(dom, 'pointerup');
+  clickSel(dom, '[data-act="draft-save"]');
+  const withRegion = msgEl(dom, '2,2').style.background;
+  const tintAt = withRegion.indexOf('rgba(14,165,233');
+  const veilAt = withRegion.indexOf('rgba(255,255,255,.34)');
+  assert.ok(tintAt >= 0 && veilAt > tintAt, '区域底色在白纱之上（两层）：' + withRegion);
   dom.window.close();
 });

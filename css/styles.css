@@ -146,13 +146,47 @@ button.block { display: block; width: 100%; text-align: center; }
 .board {
   position: relative;
   display: block;
-  width: fit-content;
   --cell: 44px;
   margin: 0 auto;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   touch-action: manipulation;
+}
+
+.bg-layer {
+  position: absolute;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: 0 0;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 4px;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, .16);
+}
+
+.grid-box { position: absolute; z-index: 1; }
+
+/* 有底图时不能用 margin:auto 居中：拖动网格会改变画布宽度，
+   居中会带着整个画布一起重排，内容就在光标下漂移。左对齐才有稳定原点。 */
+.board.has-bg { margin: 0; }
+
+.board.aligning { cursor: move; }
+.board.aligning .cells { cursor: move; }
+.board.aligning .grid-box { outline: 2px dashed var(--accent); outline-offset: 3px; border-radius: 2px; }
+.board.aligning .cell:hover { outline-color: transparent; }
+
+.align-handle {
+  position: absolute;
+  width: 16px; height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 4px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 5px rgba(15, 23, 42, .35);
+  cursor: nwse-resize;
+  z-index: 6;
+  touch-action: none;
 }
 
 .cells {

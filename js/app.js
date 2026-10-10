@@ -17,6 +17,13 @@
       hoverPersonId: null,
       hoverRegionId: null,
       hoverItemId: null,
+      aligning: false,      // 对齐底图模式：拖动=移动网格
+      bgBusy: false,        // 正在解析图片 / 渲染 PDF
+    },
+
+    /** 当前底图的 dataURL（来自 store，不进主存档） */
+    bgUrl() {
+      return MH.store && MH.store.bgData ? MH.store.bgData : null;
     },
 
     registerRenderer(fn) { MH.renderers.push(fn); },
@@ -73,7 +80,7 @@
     },
 
     boot() {
-      const ids = ['board', 'cells', 'overlay', 'regionLayer', 'draftOutline', 'ringLayer', 'viewport', 'sidebar', 'toast', 'fileInput'];
+      const ids = ['board', 'cells', 'overlay', 'regionLayer', 'draftOutline', 'ringLayer', 'gridBox', 'bgLayer', 'alignHandle', 'viewport', 'sidebar', 'toast', 'fileInput', 'bgFileInput'];
       for (const id of ids) MH.els[id] = document.getElementById(id);
 
       MH.store = new StoreNS.Store('murdoku-helper.v1', undefined);

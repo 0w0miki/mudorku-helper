@@ -44,6 +44,12 @@
       this.draftPath = els.draftOutline;
       this.ringLayer = els.ringLayer;
 
+      this.bgEl = els.bgLayer;
+      this.gridBox = els.gridBox;
+      this.handleEl = els.alignHandle;
+      this.imgEl = null;
+
+      this.handleEl.addEventListener('pointerdown', e => this.onHandleDown(e));
       this.boardEl.addEventListener('pointerdown', e => this.onPointerDown(e));
       this.boardEl.addEventListener('pointermove', e => this.onPointerMove(e));
       this.boardEl.addEventListener('contextmenu', e => this.onContextMenu(e));
@@ -105,7 +111,45 @@
         this.outlineSig = osig;
       }
       this.boardEl.style.setProperty('--cell', st.settings.cellSize + 'px');
+      this.applyLayout(st);
+      this.syncBackground(st);
       this.updateDraftOutline(st);
+    },
+
+    /** 底图锚在画布原点，网格按偏移摆放；画布尺寸取两者并集 */
+    applyLayout(st) {
+      const L = Core.boardLayout(st);
+      this.boardEl.style.width = L.width + 'px';
+      this.boardEl.style.height = L.height + 'px';
+      this.bgEl.style.left = L.bgLeft + 'px';
+      this.bgEl.style.top = L.bgTop + 'px';
+      this.grilElPos = { left: L.gridLeft, top: L.gridTop };
+      this.gridBox.style.left = L.gridLeft + 'px';
+      this.gridBox.style.top = L.gridTop + 'px';
+      this.gridBox.style.width = L.gridW + 'px';
+      this.gridBox.style.height = L.gridH + 'px';
+      this.handleEl.style.left = (L.gridLeft + L.gridW) + 'px';
+      this.handleEl.style.top = (L.gridTop + L.gridH) + 'px';
+      this.boardEl.classList.toggle('aligning', !!MH.ui.aligning);
+      this.boardEl.classList.toggle('has-bg', !!st.bg);
+      this.handleEl.hidden = !(MH.ui.aligning && st.bg);
+    },
+
+    /** 底图元素的尺寸与透明度 */
+    syncBackground(st) {
+      const b = st.bg;
+      const L = Core.boardLayout(st);
+      if (!b) {
+        this.bgEl.hidden = true;
+        this.bgEl.style.backgroundImage = '';
+        return;
+      }
+      const url = MH.bgUrl();
+      this.bgEl.hidden = !(b.visible && url);
+      if (url) this.bgEl.style.backgroundImage = 'url("' + String(url).replace(/["\\]/g, '') + '")';
+      this.bgEl.style.width = L.bgW + 'px';
+      this.bgEl.style.height = L.bgH + 'px';
+      this.bgEl.style.opacity = String(b.opacity);
     },
 
     buildGrid(st) {
@@ -182,9 +226,17 @@
         const regIds = Core.regionsAt(st, k);
         const inDraft = !!(draft && draft.cells && draft.cells.has(k));
 
-        let bg = '#ffffff';
-        if (inDraft) bg = draft.kind === 'region' ? DRAFT_REGION_BG : Core.rgba(draft.color || '#8b5cf6', 0.30);
-        else if (regIds.length) bg = Core.rgba(Core.region(st, regIds[0]).color, 0.16);
+        // 有可见底图时，格子底加一层半透明白纱，否则会把底图整个盖住。
+        // 注意：多层 background 简写里只有最后一层能带颜色，所以每层都用 linear-gradient 表达。
+        const hasBg = !!(st.bg && st.bg.visible && MH.bgUrl());
+        const veil = hasBg ? 'linear-gradient(rgba(255,255,255,.34),rgba(255,255,255,.34))' : null;
+        let tint = null;
+        if (inDraft) tint = draft.kind === 'region' ? DRAFT_REGION_BG : Core.rgba(draft.color || '#8b5cf6', 0.30);
+        else if (regIds.length) tint = Core.rgba(Core.region(st, regIds[0]).color, 0.16);
+        const bg = [
+          tint ? 'linear-gradient(' + tint + ',' + tint + ')' : null,
+          veil,
+        ].filter(Boolean).join(',') || '#ffffff';
 
         this.baseBg.set(k, bg);
         el.style.background = bg;
@@ -351,6 +403,16 @@
       const k = cellEl.dataset.k;
       const st = MH.store.state;
 
+      // 对齐模式：拖动 = 移动网格（此时不做区域/物品的刷选）
+      if (MH.ui.aligning && st.bg) {
+        e.preventDefault();
+        this.alignDrag = {
+          startX: e.clientX, startY: e.clientY,
+          baseX: st.grid ? st.grid.x : 0, baseY: st.grid ? st.grid.y : 0,
+        };
+        return;
+      }
+
       if (st.phase === 'prep') {
         if (!MH.ui.draft) return;
         e.preventDefault();
@@ -390,6 +452,18 @@
         MH.ui.hoverCell = k;
         MH.ui.hoverPersonId = pid;
         this.applyHover();
+      }
+
+      // 对齐模式：拖动移动网格
+      if (this.alignDrag) {
+        const st0 = MH.store.state;
+        MH.store.preview(s => Core.setGridOffset(
+          s,
+          this.alignDrag.baseX + (e.clientX - this.alignDrag.startX),
+          this.alignDrag.baseY + (e.clientY - this.alignDrag.startY)
+        ));
+        this.applyLayout(st0);
+        return;
       }
 
       // 准备阶段：拖拽刷格
@@ -446,6 +520,12 @@
     },
 
     onPointerUp() {
+      if (this.alignDrag) {
+        this.alignDrag = null;
+        MH.store.setSettings({});   // 拖动结束，落盘一次
+        MH.render();
+        return;
+      }
       if (this.painting) { this.painting = false; this._paintKey = null; }
       const p = this.press;
       this.press = null;
@@ -473,6 +553,49 @@
       if (st.phase !== 'play') return;
       const res = MH.store.commit('标 X', s => Core.toggleX(s, cellEl.dataset.k));
       MH.toast(res.message, res.ok ? 'ok' : 'warn');
+    },
+
+    /** 右下角手柄拖动 = 等比缩放网格（保持左上角不动） */
+    onHandleDown(e) {
+      if (e.button !== 0) return;
+      const st = MH.store.state;
+      if (!st.bg || !MH.ui.aligning) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const L = Core.boardLayout(st);
+      this.handleDrag = {
+        startX: e.clientX, startY: e.clientY,
+        cell: st.settings.cellSize,
+        gridW: L.gridW, gridH: L.gridH,
+      };
+      window.addEventListener('pointermove', this._onHandleMove = ev => {
+        const d = this.handleDrag;
+        if (!d) return;
+        const w = Math.max(20, d.gridW + (ev.clientX - d.startX));
+        const h = Math.max(20, d.gridH + (ev.clientY - d.startY));
+        // 两个方向取平均，拖起来比较跟手
+        const cell = Math.round((w / MH.store.state.cols + h / MH.store.state.rows) / 2);
+        const st2 = MH.store.state;
+        MH.store.preview(s => { s.settings.cellSize = Core.clampInt(cell, Core.CELL_MIN, Core.CELL_MAX, s.settings.cellSize); });
+        this.applyLayout(st2);
+      });
+      window.addEventListener('pointerup', this._onHandleUp = () => {
+        window.removeEventListener('pointermove', this._onHandleMove);
+        window.removeEventListener('pointerup', this._onHandleUp);
+        this.handleDrag = null;
+        MH.store.setSettings({});
+        MH.render();
+        if (MH.panels) MH.panels.render(MH.store.state);
+      });
+    },
+
+    /** 对齐模式下用方向键微调（Shift 加速 10px） */
+    nudge(dx, dy) {
+      const st = MH.store.state;
+      if (!st.bg || !MH.ui.aligning) return false;
+      MH.store.setSettings({});
+      MH.store.commit('微调网格位置', s => Core.nudgeGrid(s, dx, dy));
+      return true;
     },
 
     /** 左键点按 */

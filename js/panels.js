@@ -114,6 +114,43 @@
       (overlap ? ' · <span class="bad">其中 ' + overlap + ' 格已在其它' + kindName(d.kind) + '里，保存后归属会移过来</span>' : '');
   }
 
+  function bgCard(st) {
+    const b = st.bg;
+    const pct = v => Math.round(v * 100) + '%';
+    if (!b) {
+      return '<section class="card">' +
+        '<h2>底图 <span class="muted">图片 / PDF 衬在网格下方</span></h2>' +
+        '<button class="ghost block" data-act="bg-import" ' + (MH.ui.bgBusy ? 'disabled' : '') + '>' +
+        (MH.ui.bgBusy ? '正在解析…' : '＋ 导入图片或 PDF') + '</button>' +
+        '<p class="hint">导入后会出现一个衬在网格下方的底图；打开「对齐底图」就能拖动网格、拖右下角手柄缩放，把它对准底图上的地图。</p>' +
+        '</section>';
+    }
+    return '<section class="card">' +
+      '<h2>底图 <span class="muted">' + esc(b.kind === 'pdf' ? 'PDF' : '图片') + '</span></h2>' +
+      '<div class="row wrap">' +
+      '<button class="ghost sm" data-act="bg-import" ' + (MH.ui.bgBusy ? 'disabled' : '') + '>更换</button>' +
+      '<button class="ghost sm" data-act="bg-toggle">' + (b.visible ? '隐藏' : '显示') + '</button>' +
+      '<button class="ghost sm" data-act="bg-fit">适应窗口</button>' +
+      '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
+      '</div>' +
+      '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
+      ' · ' + b.w + '×' + b.h + (b.kind === 'pdf' ? '（第 ' + b.page + '/' + b.pages + ' 页）' : '') + '</p>' +
+      (b.kind === 'pdf' && b.pages > 1
+        ? '<div class="row"><button class="ghost sm" data-act="bg-page" data-dir="-1">◀ 上一页</button>' +
+          '<span class="meta">第 ' + b.page + ' / ' + b.pages + ' 页</span>' +
+          '<button class="ghost sm" data-act="bg-page" data-dir="1">下一页 ▶</button></div>'
+        : '') +
+      '<label class="field">底图透明度 <input type="range" id="bgOpacity" min="10" max="100" step="5" value="' + Math.round(b.opacity * 100) + '"></label>' +
+      '<label class="field">底图缩放 <input type="range" id="bgScale" min="10" max="200" step="5" value="' + Math.round(b.scale * 100) + '">' +
+      '<span class="meta">' + pct(b.scale) + '</span></label>' +
+      '<label class="check"><input type="checkbox" data-act="bg-align" ' + (MH.ui.aligning ? 'checked' : '') + '> <b>对齐底图</b>（拖动移动网格 · 拖右下角手柄缩放 · 方向键微调）</label>' +
+      (MH.ui.aligning
+        ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
+          '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
+        : '<p class="hint">格子大小也可以调（顶栏 🔍 或下面的缩放），网格会以左上角为锚点变化。</p>') +
+      '</section>';
+  }
+
   function entityList(kind, st) {
     const list = kind === 'region' ? st.regions : st.items;
     if (!list.length) return '<li class="empty">还没有' + kindName(kind) + '</li>';
@@ -175,6 +212,8 @@
       (d && d.kind === 'item' ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('item', st) + '</ul>' +
       '</section>' +
+
+      bgCard(st) +
 
       '<section class="card">' +
       '<h2>存档</h2>' +
@@ -257,6 +296,12 @@
       '<button class="ghost" data-act="clear-marks">清空全部标记</button>' +
       '<button class="ghost" data-act="phase" data-phase="prep">← 回到准备阶段</button>' +
       '</div></section>' +
+
+      (st.bg
+        ? '<section class="card"><h2>底图 <span class="muted">' + esc(st.bg.kind === 'pdf' ? 'PDF' : '图片') + '</span></h2>' +
+          '<label class="check"><input type="checkbox" data-act="bg-toggle" ' + (st.bg.visible ? 'checked' : '') + '> 显示底图</label>' +
+          '<p class="hint">对齐与透明度在「地图准备」阶段调整。</p></section>'
+        : '') +
 
       (st.settings.liveValidate ? issueCard(issues) : '') +
 
@@ -350,6 +395,155 @@
     MH.toast('已保存「' + name + '」', 'ok');
   }
 
+  const BG_KEY = 'murdoku-helper.v1';   // 与 store 主 key 对应，底图数据单独存
+
+  /** 把任意图片源画到 canvas 并压到合理体积，返回 {dataUrl, w, h} */
+  function encodeBitmap(src, maxSide) {
+    const sw = src.width, sh = src.height;
+    const k = Math.min(1, maxSide / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * k));
+    const h = Math.max(1, Math.round(sh * k));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(src, 0, 0, w, h);
+    let url = cv.toDataURL('image/png');
+    if (url.length > 1_200_000) url = cv.toDataURL('image/jpeg', 0.85);   // 太大就转 JPEG
+    if (url.length > 2_200_000) url = cv.toDataURL('image/jpeg', 0.7);
+    return { dataUrl: url, w, h, srcW: sw, srcH: sh };
+  }
+
+  function loadImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片解析失败')); };
+      img.src = url;
+    });
+  }
+
+  /** PDF：按需加载本地 pdf.js（经典脚本 + blob worker，file:// 下也能跑） */
+  let pdfLibReady = null;
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => reject(new Error('加载失败：' + src));
+      document.head.appendChild(el);
+    });
+  }
+  function ensurePdfLib() {
+    if (pdfLibReady) return pdfLibReady;
+    pdfLibReady = (async () => {
+      if (!window.pdfjsLib) await loadScript('vendor/pdfjs/pdf.min.js');
+      if (!window.__PDFJS_WORKER_SRC__) await loadScript('vendor/pdfjs/pdf.worker.inline.js');
+      if (!window.pdfjsLib) throw new Error('pdf.js 未加载');
+      const url = URL.createObjectURL(new Blob([window.__PDFJS_WORKER_SRC__], { type: 'text/javascript' }));
+      window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(url);
+      return window.pdfjsLib;
+    })();
+    return pdfLibReady;
+  }
+
+  async function renderPdfPage(file, pageNo) {
+    const lib = await ensurePdfLib();
+    if (!file.__pdfBytes) file.__pdfBytes = new Uint8Array(await file.arrayBuffer());
+    if (!file.__pdfDoc) file.__pdfDoc = await lib.getDocument({ data: file.__pdfBytes, isEvalSupported: false }).promise;
+    const doc = file.__pdfDoc;
+    const page = await doc.getPage(Math.min(Math.max(1, pageNo), doc.numPages));
+    // 目标：最长边约 1600px
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, Math.max(0.3, 1600 / Math.max(base.width, base.height)));
+    const vp = page.getViewport({ scale });
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    return { dataUrl: cv.toDataURL('image/png'), w: cv.width, h: cv.height, srcW: Math.round(base.width), srcH: Math.round(base.height), pages: doc.numPages, page: pageNo };
+  }
+
+  /** 导入底图（统一入口） */
+  async function importBackground(file) {
+    if (!file) return;
+    MH.ui.bgBusy = true;
+    MH.render();
+    try {
+      const isPdf = /pdf$/i.test(file.type) || /\.pdf$/i.test(file.name);
+      let res;
+      if (isPdf) {
+        MH.toast('正在渲染 PDF…', 'ok');
+        res = await renderPdfPage(file, 1);
+        file.__pdfName = file.name;
+      } else {
+        const img = await loadImageFile(file);
+        res = encodeBitmap(img, 1600);
+        res.pages = 1; res.page = 1;
+      }
+      await applyNewBackground(file, res);
+    } catch (err) {
+      MH.toast('底图导入失败：' + (err && err.message ? err.message : err), 'error');
+    } finally {
+      MH.ui.bgBusy = false;
+      MH.render();
+    }
+  }
+
+  async function applyNewBackground(file, res) {
+    const save = MH.store.setBgData(res.dataUrl);
+    const fit = fitScale(res.w, res.h);
+    MH.store.commit('导入底图', s => {
+      Core.setBackground(s, {
+        kind: res.pages > 1 || /\.pdf$/i.test(file.name) ? 'pdf' : 'image',
+        name: file.name,
+        w: res.w, h: res.h, srcW: res.srcW, srcH: res.srcH,
+        scale: fit, opacity: 0.85, visible: true,
+        page: res.page || 1, pages: res.pages || 1,
+      });
+      Core.setGridOffset(s, 0, 0);
+      return { ok: true };
+    });
+    // PDF 的原始文件留在内存里，方便翻页
+    if (res.pages > 1) MH.ui.pdfFile = { file, res };
+    if (save && save.ok === false) MH.toast(save.message, 'warn');
+    else MH.toast('底图已导入，打开「对齐底图」把它和网格对上', 'ok');
+  }
+
+  /** 让底图恰好铺满可视区域 */
+  function fitScale(w, h) {
+    const vp = MH.els.viewport;
+    const availW = Math.max(240, (vp ? vp.clientWidth : 900) - 60);
+    const availH = Math.max(240, (vp ? vp.clientHeight : 600) - 60);
+    return Math.max(Core.BG_SCALE_MIN, Math.min(Core.BG_SCALE_MAX, Math.min(1, availW / w, availH / h)));
+  }
+
+  async function switchPdfPage(dir) {
+    const st = MH.store.state;
+    const keep = MH.ui.pdfFile;
+    if (!st.bg || !keep || !keep.file) { MH.toast('请重新导入该 PDF 后再翻页', 'warn'); return; }
+    const next = Math.min(Math.max(1, st.bg.page + dir), st.bg.pages);
+    if (next === st.bg.page) return;
+    MH.ui.bgBusy = true; MH.render();
+    try {
+      const res = await renderPdfPage(keep.file, next);
+      MH.store.setBgData(res.dataUrl);
+      MH.store.commit('切换 PDF 页', s => {
+        Core.updateBackground(s, { w: res.w, h: res.h, page: res.page, pages: res.pages });
+        return { ok: true };
+      });
+      MH.toast('已切到第 ' + res.page + ' 页', 'ok');
+    } catch (e) {
+      MH.toast('翻页失败：' + e.message, 'error');
+    } finally {
+      MH.ui.bgBusy = false; MH.render();
+    }
+  }
+
   function generate() {
     const st = MH.store.state;
     const rowsInput = document.getElementById('rowsInput');
@@ -385,6 +579,9 @@
   function onImportFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    // 图片 / PDF → 当底图；JSON → 当存档
+    const isBg = /^image\//.test(file.type) || /pdf$/i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp|pdf)$/i.test(file.name);
+    if (isBg) { importBackground(file); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -481,6 +678,31 @@
       if (!confirm('清空游玩阶段的所有 X、候选与确定人物？')) return;
       runCommit('清空全部标记', s => Core.clearAllMarks(s));
     },
+    'bg-import'() { if (MH.els.bgFileInput) MH.els.bgFileInput.click(); },
+    'bg-toggle'() {
+      MH.store.commit('底图显示切换', s => { Core.updateBackground(s, { visible: !s.bg.visible }); return { ok: true }; });
+    },
+    'bg-fit'() {
+      MH.store.commit('底图适应窗口', s => {
+        Core.updateBackground(s, { scale: fitScale(s.bg.w, s.bg.h) });
+        return { ok: true };
+      });
+    },
+    'bg-remove'() {
+      if (!confirm('移除底图？（网格与题目内容不受影响）')) return;
+      MH.store.setBgData(null);
+      MH.ui.aligning = false;
+      MH.ui.pdfFile = null;
+      MH.store.commit('移除底图', s => Core.setBackground(s, null));
+    },
+    'bg-reset'() { MH.store.commit('网格归位', s => Core.setGridOffset(s, 0, 0)); },
+    'bg-page'(el) { switchPdfPage(Number(el.dataset.dir)); },
+    'bg-align'() {
+      MH.ui.aligning = !MH.ui.aligning;
+      MH.ui.draft = null;
+      MH.render();
+      if (MH.ui.aligning) MH.toast('拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调', 'ok');
+    },
     export() { exportJSON(); },
     import() { if (MH.els.fileInput) MH.els.fileInput.click(); },
     'reset-all'() {
@@ -562,6 +784,17 @@
     const t = e.target;
     if (t.id === 'draftName') {
       if (MH.ui.draft) MH.ui.draft.name = t.value;
+    } else if (t.id === 'bgOpacity') {
+      const v = Core.clampInt(t.value, 10, 100, 85) / 100;
+      MH.store.preview(s => { Core.updateBackground(s, { opacity: v }); });
+      MH.board.syncBackground(MH.store.state);
+    } else if (t.id === 'bgScale') {
+      const v = Core.clampInt(t.value, 10, 200, 100) / 100;
+      MH.store.preview(s => { Core.updateBackground(s, { scale: v }); });
+      MH.board.rebuildIfNeeded();
+      MH.board.paint();
+      const meta = t.parentNode && t.parentNode.querySelector('.meta');
+      if (meta) meta.textContent = Math.round(v * 100) + '%';
     } else if (t.id === 'cellSize') {
       MH.store.setSettings({ cellSize: Core.clampInt(t.value, Core.CELL_MIN, Core.CELL_MAX, Core.CELL_DEFAULT) });
     }
@@ -586,6 +819,10 @@
       MH.toast('已把 ' + Core.person(st, pid).label + ' 与「' + target.name + '」关联（正相关）', 'ok');
     } else if (t.id === 'fileInput') {
       onImportFile(e);
+    } else if (t.id === 'bgFileInput') {
+      const f = t.files && t.files[0];
+      t.value = '';
+      if (f) importBackground(f);
     }
   }
 
@@ -678,6 +915,13 @@
           e.preventDefault();
           const r = MH.store.redo();
           MH.toast(r.message, r.ok ? 'ok' : 'warn');
+        } else if (MH.ui.aligning && /^Arrow(Left|Right|Up|Down)$/.test(e.key)
+                   && !/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+          const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+          MH.board.nudge(dx, dy);
         } else if (e.key === 'Escape') {
           if (MH.ui.draft) { MH.setDraft(null); }
           else MH.closeModal();
