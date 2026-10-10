@@ -1418,3 +1418,19 @@ test('游玩模式：点格子切换当前人物，详情与操作跟着换', as
   assert.ok(q(doc, '.pnow [data-act="unplace-person"]'), '出现取消确定');
   dom.window.close();
 });
+
+test('摘录窗：收起面板只有左侧标签一个入口（标题栏不再重复放一个）', async () => {
+  const { dom, doc } = await boot();
+  const head = q(doc, '#snipper .snipper-head');
+  assert.equal(head.querySelector('[data-snip="toggle"]'), null, '标题栏里没有第二个收起按钮');
+  // 全窗只有一个收起入口，就是左侧标签
+  const toggles = qa(doc, '#snipper [data-snip="toggle"]');
+  assert.equal(toggles.length, 1, '收起入口唯一：' + toggles.length);
+  assert.ok(toggles[0].classList.contains('snipper-tab'), '入口是左侧箭头标签');
+  // 但它仍然管用
+  clickSel(dom, '#snipper .snipper-tab');
+  assert.equal(q(doc, '#snipper').classList.contains('collapsed'), true, '点标签能收起');
+  clickSel(dom, '#snipper .snipper-tab');
+  assert.equal(q(doc, '#snipper').classList.contains('collapsed'), false, '再点展开');
+  dom.window.close();
+});

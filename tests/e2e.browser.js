@@ -336,7 +336,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const pins = await p.locator('.snipper-pin').count();
   ok(pins >= 1, '拖框截取生成摘录卡片：' + pins + ' 张');
   ok(((await p.locator('.snipper-badge').textContent()) || '').trim() === String(pins), '角标显示张数');
-  await p.click('.snipper-head [data-snip="toggle"]');
+  await p.click('.snipper-tab');
   await p.waitForTimeout(250);
   ok(!(await p.locator('.snipper-panel').isVisible()), '📌 可收起悬浮窗');
   await p.screenshot({ path: '/tmp/mh-e2e-snipper.png' });

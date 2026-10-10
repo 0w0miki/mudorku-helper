@@ -74,8 +74,9 @@
           '<span class="grow"></span>' +
           '<button class="ghost sm icon" type="button" data-snip="fold-stage" title="折叠 / 展开 PDF 缩略图">' + CHEV_DOWN + '</button>' +
           '<button class="ghost sm" type="button" data-snip="import">导入 PDF</button>' +
-          '<button class="ghost sm icon" type="button" data-snip="toggle" title="收起面板">' + CHEV + '</button>' +
         '</div>' +
+        // 收起面板只由左侧的箭头标签负责；这里原来还有一个 ‹ 按钮，功能重复且箭头方向
+        // 与标签相反（面板贴在屏幕右侧，收起应该朝右），容易看错，已去掉。
         '<div class="snipper-stage" data-snip="stage">' +
           '<div class="snipper-empty">导入一份 PDF（可以和地图不是同一页），<br>然后在页面上<b>拖一个矩形</b>把它截下来。</div>' +
         '</div>' +
