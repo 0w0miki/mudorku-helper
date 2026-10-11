@@ -618,8 +618,10 @@
       Core.updateBackground(s, { scale: place.scale, bound: true });
       Core.setGridOffset(s, place.gridX, place.gridY);
     });
-    MH.ui.alignInfo = (det.cols && det.rows ? det.cols + '×' + det.rows + ' · ' : '') +
-      '置信度 ' + det.confidence.toFixed(2) + ' · ' + (Date.now() - t0) + 'ms' +
+    // 只报可核对的量：格距与缩放。**不要**报 det.cols/rows —— 那是"整幅页面"上
+    // 数到的线数（页面 ÷ 格距），跟地图的行列数没有关系，显示出来会误导
+    MH.ui.alignInfo = '格距 ' + det.pitch.x.toFixed(1) + '/' + det.pitch.y.toFixed(1) + 'px · 缩放 ' +
+      (Math.round(place.scale * 1000) / 10) + '% · 置信度 ' + det.confidence.toFixed(2) +
       (det.inverted ? ' · 已纠反相' : '');
     MH.render();
     MH.toast(place.message + (det.inverted ? '（已自动纠正反相）' : ''), 'ok');
