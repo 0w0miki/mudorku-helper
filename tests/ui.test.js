@@ -1640,8 +1640,11 @@ test('点行统计里的人：清掉这一行别人的候选并标 ✕，自己�
   assert.equal((now.play.candidates[b] || []).join(','), '4,4', 'B 在第 0 行的候选被清掉，别处不动');
   assert.equal((now.play.candidates[c] || []).join(','), '', 'C 在第 0 行的候选被清掉');
   assert.equal(now.play.candidates[a].join(','), '0,0,0,2', 'A 自己的候选保留');
-  assert.equal(win.MH.core.xSource(now, '0,1'), 'user', '别人候选的那格标上 X');
-  assert.equal(win.MH.core.xSource(now, '0,3'), 'user');
+  // 这一行归 A：除 A 自己的候选格外，其余格子一律 X
+  const rowX = [];
+  for (let c = 0; c < st.cols; c++) rowX.push(win.MH.core.xSource(now, '0,' + c) ? 'X' : '.');
+  // A 的候选在 (0,0)(0,2) → 这两格留空（.），其余 4 格都是 X
+  assert.equal(rowX.join(''), '.X.XXX', '第 0 行应为 .X.XXX，实得 ' + rowX.join(''));
   assert.equal(win.MH.core.xSource(now, '0,0'), null, 'A 自己的候选格不标 X');
   assert.equal(win.MH.core.xSource(now, '0,2'), null);
   assert.equal(win.MH.core.xSource(now, '4,4'), null, '别的行不受影响');
@@ -1671,9 +1674,12 @@ test('点列统计里的人：作用在这一列上', async () => {
   clickSel(dom, '.col-head[data-c="2"] button.hi[data-id="' + a + '"]');
   const now = win.MH.store.state;
   assert.equal(now.play.candidates[b].join(','), '0,5', 'B 在第 2 列的候选都清掉，第 5 列不动');
-  assert.equal(win.MH.core.xSource(now, '0,2'), 'user', '清掉的格子标 X');
-  assert.equal(win.MH.core.xSource(now, '3,2'), 'user');
+  const colX = [];
+  for (let r = 0; r < st.rows; r++) colX.push(win.MH.core.xSource(now, r + ',2') ? 'X' : '.');
+  // A 的候选在 (1,2) → 那一格留空，其余 5 格都是 X
+  assert.equal(colX.join(''), 'X.XXXX', '第 2 列应为 X.XXXX，实得 ' + colX.join(''));
   assert.equal(win.MH.core.xSource(now, '1,2'), null, 'A 的候选格不标 X');
+  assert.equal(win.MH.core.xSource(now, '1,1'), null, '别的列不受影响');
   dom.window.close();
 });
 
@@ -1691,18 +1697,20 @@ test('点行列统计里的已确定的人：不可点（没有筛选动作）',
   dom.window.close();
 });
 
-test('行列统计里没什么可清的时候：给出提示且不写入撤销历史', async () => {
+test('行列统计里没什么可做的时候：给出提示且不写入撤销历史', async () => {
   const { dom, doc } = await boot();
   const win = dom.window;
   win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
   const st = win.MH.store.state, C = win.MurdokuCore;
-  const [a, b] = st.people.map(p => p.id);
-  C.setCandidate(st, a, '0,0', true);          // 第 0 行只有 A 自己的候选
-  C.setCandidate(st, b, '3,3', true);          // 第 0 行没有 B 的事
+  const [a] = st.people.map(p => p.id);
+  C.setCandidate(st, a, '0,0', true);
+  // 第 0 行除了 A 自己那一格，其余已经都是 X 了 → 再点 A 无事可做
+  for (let c = 1; c < st.cols; c++) C.setX(st, '0,' + c, true);
   clickSel(dom, '#tabPlay');
   const before = win.MH.store.undoStack.length;
   clickSel(dom, '.row-head[data-r="0"] button.hi[data-id="' + a + '"]');
   assert.equal(win.MH.store.undoStack.length, before, '没变化就不该占一条历史');
   assert.equal(win.MH.store.state.play.candidates[a].join(','), '0,0', 'A 的候选还在');
+  assert.equal(win.MH.core.xSource(win.MH.store.state, '0,1'), 'user', '已有的 X 不受影响');
   dom.window.close();
 });

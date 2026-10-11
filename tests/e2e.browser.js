@@ -741,6 +741,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       other: (st.play.candidates[ids[2]] || []).join(','),
       xPicked: C.xSource(st, '3,4'),
       x5: C.xSource(st, '3,5'), x6: C.xSource(st, '3,6'),
+      // 第 3 行整体：B 的候选在 (3,4)，C 的在 (3,5)(3,6)
+      rowX: Array.from({ length: st.cols }, (_, c) => C.xSource(st, '3,' + c) ? 'X' : '.').join(''),
       xOtherRow: C.xSource(st, '5,7'),
       toast: (document.querySelector('#toast') || {}).textContent || '',
     };
@@ -748,7 +750,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(filtered.picked === pickedBefore, '被点的人候选不受影响：' + pickedBefore + ' → ' + filtered.picked);
   ok(filtered.other === '', '同行其他人的候选被清掉：' + filtered.other);
   ok(filtered.xPicked === null, '被点的人自己的候选格不标 X');
-  ok(filtered.x5 === 'user' && filtered.x6 === 'user', '被清的格子标上 X：' + [filtered.x5, filtered.x6].join('/'));
+  const openCols = filtered.rowX.split('').map((ch, i) => (ch === '.' ? i : -1)).filter(i => i >= 0);
+  ok(openCols.join(',') === '4', '整行只剩他自己那格是空的（其余全 X）：' + filtered.rowX);
   ok(filtered.xOtherRow === null, '别的行不受影响');
   ok(/清掉/.test(filtered.toast), '有反馈提示');
   await p.click('[data-act="undo"]');

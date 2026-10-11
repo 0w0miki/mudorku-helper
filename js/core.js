@@ -465,18 +465,18 @@
           while ((i = arr.indexOf(k)) >= 0) { arr.splice(i, 1); removed++; }
         }
         cleared += removed;
-        if (mine) { kept++; continue; }        // 还留给 P 的格子：只清别人，不标 X
-        if (!removed) continue;                // 本来就没有别人的候选，不动
+        if (mine) { kept++; continue; }        // 留给 P 的格子：只清别人，不标 X
+        // 这一行/列既然归 P，其余格子一律标 X（不只是"有别人候选"的那些）
         if (!xSource(state, k)) { toggleX(state, k); marked++; }
       }
     }
     if (!cleared && !marked) {
-      return { ok: false, message: '这一' + (isCol ? '列' : '行') + '里没有别人的候选可清' };
+      return { ok: false, message: '这一' + (isCol ? '列' : '行') + '已经是 ' + p.label + ' 的了' };
     }
     return {
       ok: true, cleared, marked, kept, label: p.label,
-      message: '第 ' + (idx + 1) + (isCol ? ' 列' : ' 行') + '：清掉 ' + cleared + ' 个别人的候选，标了 ' + marked + ' 个 ✕'
-        + (kept ? '，' + kept + ' 格留给 ' + p.label : ''),
+      message: '第 ' + (idx + 1) + (isCol ? ' 列' : ' 行') + ' 归 ' + p.label + '：清掉 ' + cleared
+        + ' 个别人的候选，其余 ' + marked + ' 格标了 ✕' + (kept ? '，' + kept + ' 格留给他' : ''),
     };
   }
 
