@@ -94,13 +94,26 @@
   }
 
   /** 第 index 个人物标签：A B C … W Y Z AA AB …（始终跳过含 X 的标签） */
-  function labelFor(index) {
-    let n = Math.max(0, Math.trunc(index));
+  /**
+   * 第 index 个人的编号。
+   *
+   * - 人数 total ≤ 22 时：**最后一个人固定是 V**，前面依次排 A、B、C…（中间那些
+   *   字母跳过）。例如 3 人 = A B V、6 人 = A B C D E V、20 人 = A…S V。
+   *   22 人时正好排满 A–V。
+   * - 人数 > 22（或没给 total）时：按 A–Z 顺序排、跳过 X —— A…V、W、Y、Z、AA…
+   */
+  const LAST_LABEL = 'V';
+  function labelFor(index, total) {
+    const n = Math.max(0, Math.trunc(index));
+    if (Number.isFinite(total) && total > 0 && total <= 22) {
+      return n === total - 1 ? LAST_LABEL : LETTERS[n];
+    }
+    let i = n;
     let out = '';
     for (;;) {
-      out = LETTERS[n % LETTERS.length] + out;
-      n = Math.floor(n / LETTERS.length) - 1;
-      if (n < 0) break;
+      out = LETTERS[i % LETTERS.length] + out;
+      i = Math.floor(i / LETTERS.length) - 1;
+      if (i < 0) break;
     }
     return out;
   }
@@ -219,7 +232,7 @@
     for (let i = 0; i < n; i++) {
       people.push({
         id: 'p' + (i + 1),
-        label: labelFor(i),
+        label: labelFor(i, n),
         color: PERSON_COLORS[i % PERSON_COLORS.length],
         links: [], // {kind:'region'|'item', id, polarity:1|-1}
       });
@@ -1192,7 +1205,14 @@
       const usedIds = new Set();
       const usedLabels = new Set();
       const freeId = () => { let n = st.people.length; while (usedIds.has('p' + (++n))); return 'p' + n; };
-      const freeLabel = () => { let i = 0; while (usedLabels.has(labelFor(i))) i++; return labelFor(i); };
+      // 补标签也遵守「最后一个固定 V」的规则：先按位次给出默认编号，占了再往后找
+      const freeLabel = () => {
+        for (let i = 0; i < 200; i++) {
+          const want = labelFor(i, st.people.length);
+          if (!usedLabels.has(want)) return want;
+        }
+        return labelFor(usedLabels.size);
+      };
       const takeLabel = (want, fallback) => {
         const clean = normalizeLabel(want);
         if (clean && !usedLabels.has(clean)) return clean;

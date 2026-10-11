@@ -91,7 +91,7 @@ test('启动后渲染 8x8 棋盘与 8 个人物', async () => {
   assert.equal(st.cols, 8);
   assert.equal(qa(doc, '.cell').length, 64);
   assert.equal(qa(doc, '.sidebar .chips .chip').length, 8);
-  assert.equal([...st.people].map(p => p.label).join(''), 'ABCDEFGH');
+  assert.equal([...st.people].map(p => p.label).join(''), 'ABCDEFGV', '8 人：A..G + 末尾 V');
   assert.equal(st.phase, 'prep');
   // 回归：SVG 覆盖层的线必须用 non-scaling-stroke，否则会被 viewBox 放大成粗带
   assert.equal(q(doc, '.grid-lines').getAttribute('vector-effect'), 'non-scaling-stroke');

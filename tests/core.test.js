@@ -24,27 +24,35 @@ test('labelFor 跳过 X', () => {
   assert.ok(labels.every(l => !l.includes('X')), '标签不含 X');
 });
 
-test('默认编号：22 人最后是 V；超过 22 继续按 A–Z 顺序（跳过 X）', () => {
-  // 22 人 = A..V
-  const at22 = C.createState(22, 22);
-  assert.equal(at22.people.length, 22);
-  assert.equal(at22.people[21].label, 'V', '22 人最后一个编号是 V');
-  // 超过 22 → 接着 W / Y / Z（X 留给"不能放人"），再往后 AA、AB…
-  const tail = n => C.createState(n, n).people.map(p => p.label).slice(-4).join(' ');
-  assert.equal(tail(23), 'T U V W');
-  assert.equal(tail(24), 'U V W Y');
-  assert.equal(tail(25), 'V W Y Z');
-  assert.equal(tail(26), 'W Y Z AA');
-  assert.equal(tail(27), 'Y Z AA AB');
-  // 26 人时前 22 个仍是 A..V（不因为超过 22 就整体改变）
-  const at26 = C.createState(26, 26).people.map(p => p.label);
-  assert.deepEqual(at26.slice(0, 22), at22.people.map(p => p.label), '前 22 个编号不变');
-  assert.deepEqual(at26, ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','Y','Z','AA']);
-  // 到 40×40（人手一张大图）也不重复、不含 X
-  const big = C.createState(40, 40).people.map(p => p.label);
-  assert.equal(big.length, 40);
-  assert.equal(new Set(big).size, 40, '40 个编号互不重复');
-  assert.ok(big.every(l => !l.includes('X')), '不含 X');
+test('默认编号：22 人以内最后一个固定是 V；超过 22 继续 A–Z 顺序（跳过 X）', () => {
+  const labels = n => C.createState(n, n).people.map(p => p.label);
+
+  // 人数 ≤ 22：最后一个人固定是 V，前面从 A 依次排、中间字母跳过
+  assert.deepEqual(labels(1), ['V']);
+  assert.deepEqual(labels(2), ['A', 'V']);
+  assert.deepEqual(labels(3), ['A', 'B', 'V']);
+  assert.deepEqual(labels(6), ['A', 'B', 'C', 'D', 'E', 'V']);
+  const at20 = labels(20);
+  assert.equal(at20[19], 'V', '20 人末尾是 V');
+  assert.equal(at20.slice(0, 19).join(''), 'ABCDEFGHIJKLMNOPQRS', '20 人前面是 A..S（T、U 跳过）');
+  assert.equal(labels(22).join(''), 'ABCDEFGHIJKLMNOPQRSTUV', '22 人正好排满 A..V');
+
+  // 人数 > 22：接着 A–Z 顺序排（跳过 X）
+  assert.equal(labels(23).join(''), 'ABCDEFGHIJKLMNOPQRSTUVW');
+  assert.equal(labels(24).slice(-2).join(''), 'WY');
+  assert.equal(labels(25).slice(-3).join(''), 'WYZ');
+  assert.equal(labels(26).slice(-3).join(''), 'YZAA');
+  assert.equal(labels(27).slice(-4).join(''), 'YZAAAB');
+  // 26 人时前 22 个仍是 A..V（不因为超过 22 就整体变）
+  assert.equal(labels(26).slice(0, 22).join(''), labels(22).join(''));
+
+  // 唯一 + 不含 X
+  for (const n of [1, 2, 3, 6, 20, 22, 23, 24, 25, 26, 40]) {
+    const L = labels(n);
+    assert.equal(L.length, n);
+    assert.equal(new Set(L).size, n, n + ' 人编号互不重复');
+    assert.ok(L.every(l => !l.includes('X')), n + ' 人编号不含 X');
+  }
 });
 
 test('peopleCount = min(rows, cols)', () => {
@@ -58,7 +66,8 @@ test('createState 生成人物与默认值', () => {
   assert.equal(st.rows, 4);
   assert.equal(st.cols, 6);
   assert.equal(st.people.length, 4);
-  assert.deepEqual(st.people.map(p => p.label), ['A', 'B', 'C', 'D']);
+  // 人数 ≤ 22 时最后一个固定是 V（中间字母跳过）
+  assert.deepEqual(st.people.map(p => p.label), ['A', 'B', 'C', 'V']);
   assert.equal(st.phase, 'prep');
   assert.deepEqual(st.play, { xmarks: {}, candidates: {}, placed: {} });
 });
@@ -391,7 +400,7 @@ test('deserialize 人物不足时补齐为 min(rows, cols)', () => {
   assert.equal(out.people.length, 5);
   assert.equal(out.people[0].links.length, 1, '原有人的关联保留');
   assert.deepEqual(out.people.map(p => p.id), ['p1', 'p2', 'p3', 'p4', 'p5']);
-  assert.deepEqual(out.people.map(p => p.label), ['A', 'B', 'C', 'D', 'E']);
+  assert.deepEqual(out.people.map(p => p.label), ['A', 'B', 'C', 'D', 'V'], '5 人补齐：A..D + V');
 });
 
 test('deserialize 人物 id 重复时自动去重', () => {
@@ -729,7 +738,7 @@ test('B-4 导入标签被规范化：互不重复且不含 X，合法自定义�
   assert.ok(labels.every(l => !l.includes('X')), '标签不能含 X：' + labels.join(','));
 
   const st2 = C.deserialize({ rows: 3, cols: 3, people: [{ id: 'p1', label: 'Q' }, { id: 'p2', label: 'R' }] });
-  assert.deepEqual([...st2.people].map(p => p.label), ['Q', 'R', 'C'], '合法标签保留，补齐的人物用默认标签');
+  assert.deepEqual([...st2.people].map(p => p.label), ['Q', 'R', 'V'], '合法标签保留，补齐的人物用默认标签（3 人最后一个补 V）');
 });
 
 test('B-4 导入超长/含 X 的标签会被替换，不会撑破格子', () => {
@@ -808,7 +817,7 @@ test('自定义编号能导出再导入原样保留', () => {
   C.setPersonLabel(st, st.people[1].id, '小红');
   C.setPersonLabel(st, st.people[2].id, 'Z9');
   const round = C.deserialize(C.serialize(st));
-  assert.deepEqual([...round.people].map(p => p.label), ['甲', '小红', 'Z9', 'D']);
+  assert.deepEqual([...round.people].map(p => p.label), ['甲', '小红', 'Z9', 'V'], '改过名的保留，默认的最后一个仍是 V');
 });
 
 test('导入时重复/含 X 的编号仍会被替换成默认编号', () => {
@@ -1121,4 +1130,19 @@ test('行列提示开关跟着存档往返', () => {
   const raw = JSON.parse(C.serialize(st));
   delete raw.settings.showHeads;
   assert.equal(C.deserialize(raw).settings.showHeads, true, '缺字段时默认开启');
+});
+
+test('导入时重复/缺失的编号也遵守「最后一个固定 V」', () => {
+  // 4 人板：p1 合法、p2 重复、p3/p4 缺省
+  const st = C.deserialize({
+    rows: 4, cols: 4,
+    people: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'A' }],
+  });
+  const labels = [...st.people].map(p => p.label);
+  assert.equal(labels.length, 4);
+  assert.equal(labels[0], 'A', '合法编号保留');
+  assert.equal(new Set(labels).size, 4, '互不重复：' + labels.join(','));
+  assert.ok(labels.every(l => !l.includes('X')));
+  assert.equal(labels[3], 'V', '最后一个仍是 V：' + labels.join(','));
+  assert.equal(labels[1], 'B', '重复的按位次补 B');
 });
