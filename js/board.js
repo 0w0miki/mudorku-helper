@@ -217,22 +217,28 @@
         const items = [];
         if (info.placed) {
           const p = Core.person(st, info.placed);
-          if (p) items.push({ label: p.label, color: p.color, done: true });
+          if (p) items.push({ id: p.id, label: p.label, color: p.color, done: true });
         }
         for (const pid of info.cands) {
           const p = Core.person(st, pid);
-          if (p) items.push({ label: p.label, color: p.color, done: false });
+          if (p) items.push({ id: p.id, label: p.label, color: p.color, done: false });
         }
         // 容量按格子大小估算：格子小了就少显示几个，免得溢出格子（多出来的折成 +N）
         const max = axis === 'r' ? cap.rowMax : cap.colMax;
         const shown = items.slice(0, max);
         const rest = items.length - shown.length;
-        el.innerHTML = shown.map(it =>
-          '<i class="' + (it.done ? 'done' : '') + '" style="--pc:' + esc(it.color) + '">' + esc(it.label) + '</i>'
-        ).join('') + (rest > 0 ? '<i class="more">+' + rest + '</i>' : '');
+        const lineName = axis === 'r' ? ' 行' : ' 列';
+        el.innerHTML = shown.map(it => {
+          if (it.done) {
+            return '<span class="hi done" style="--pc:' + esc(it.color) + '" title="' + esc(it.label) + ' 已确定在这一' + lineName.trim() + '">' + esc(it.label) + '</span>';
+          }
+          return '<button type="button" class="hi" data-act="head-pick" data-axis="' + (axis === 'r' ? 'row' : 'col') + '" data-line="' + i + '" data-id="' + esc(it.id) + '" ' +
+            'style="--pc:' + esc(it.color) + '" title="点一下：把这一' + lineName.trim() + '里其他人的候选清掉并标 ✕（' + esc(it.label) + ' 保留）">' + esc(it.label) + '</button>';
+        }).join('') + (rest > 0 ? '<span class="hi more" title="还有 ' + rest + ' 个人，点开列表看不到，可放大格子">+' + rest + '</span>' : '');
         el.classList.toggle('none', items.length === 0);
         const all = items.map(it => it.label + (it.done ? '（已确定）' : '')).join(' ');
-        el.title = '第 ' + (i + 1) + (axis === 'r' ? ' 行' : ' 列') + '：' + (all || '没有候选');
+        el.title = '第 ' + (i + 1) + lineName + '：' + (all || '没有候选')
+          + (items.some(it => !it.done) ? ' · 点某个人可把这一' + lineName.trim() + '里其他人的候选清掉并标 ✕' : '');
       };
       LP.rows.forEach((info, r) => fill(this.rowHeadEls[r], info, 'r', r));
       LP.cols.forEach((info, c) => fill(this.colHeadEls[c], info, 'c', c));

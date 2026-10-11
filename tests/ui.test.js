@@ -1514,7 +1514,7 @@ test('游玩模式：网格外侧显示每行/每列有哪些候选的人', asyn
   assert.equal(rowHeads[0].textContent, 'AB', '第 0 行有 A、B 的候选');
   assert.equal(rowHeads[1].textContent, '', '第 1 行没有候选');
   assert.equal(colHeads[3].textContent, 'D', '第 3 列有已确定的 D');
-  assert.ok(colHeads[3].querySelector('i.done'), '已确定的人用实心样式标出');
+  assert.ok(colHeads[3].querySelector('.hi.done'), '已确定的人用实心样式标出');
   assert.equal(rowHeads[3].textContent, 'D', '第 3 行也是已确定的 D');
   assert.equal(colHeads[5].textContent, 'C', '第 5 列有 C 的候选');
   assert.ok(q(doc, '.head-corner'), '左上角有转角块');
@@ -1609,5 +1609,100 @@ test('游玩模式：人物旁边不会再出现凭空的「未命名」', async
   assert.match(now, /B/, '显示编号');
   assert.match(now, /确定/, '显示状态');
   assert.equal(/未命名/.test(now), false);
+  dom.window.close();
+});
+
+// ------------------------------------------------------------ 行列统计里点人筛选
+
+test('点行统计里的人：清掉这一行别人的候选并标 ✕，自己的格子留着', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  const [a, b, c] = st.people.map(p => p.id);
+  // 第 0 行：A 在 (0,0)(0,2)，B 在 (0,1)，C 在 (0,3)
+  C.setCandidate(st, a, '0,0', true);
+  C.setCandidate(st, a, '0,2', true);
+  C.setCandidate(st, b, '0,1', true);
+  C.setCandidate(st, c, '0,3', true);
+  // 别的行也有候选，不该被动
+  C.setCandidate(st, b, '4,4', true);
+  clickSel(dom, '#tabPlay');
+
+  const chipA = q(doc, '.row-head[data-r="0"] button.hi[data-id="' + a + '"]');
+  assert.ok(chipA, '行统计里的候选人是可点的');
+  assert.equal(chipA.dataset.axis, 'row', '行用的是 row');
+  assert.equal(chipA.dataset.line, '0');
+  clickSel(dom, '.row-head[data-r="0"] button.hi[data-id="' + a + '"]');
+
+  const now = win.MH.store.state;
+  // 注意：数组来自 jsdom realm，用 join 比较（deepEqual 会纠结原型）
+  assert.equal((now.play.candidates[b] || []).join(','), '4,4', 'B 在第 0 行的候选被清掉，别处不动');
+  assert.equal((now.play.candidates[c] || []).join(','), '', 'C 在第 0 行的候选被清掉');
+  assert.equal(now.play.candidates[a].join(','), '0,0,0,2', 'A 自己的候选保留');
+  assert.equal(win.MH.core.xSource(now, '0,1'), 'user', '别人候选的那格标上 X');
+  assert.equal(win.MH.core.xSource(now, '0,3'), 'user');
+  assert.equal(win.MH.core.xSource(now, '0,0'), null, 'A 自己的候选格不标 X');
+  assert.equal(win.MH.core.xSource(now, '0,2'), null);
+  assert.equal(win.MH.core.xSource(now, '4,4'), null, '别的行不受影响');
+
+  // 整件事只算一次撤销
+  win.MH.store.undo();
+  const back = win.MH.store.state;
+  assert.equal(back.play.candidates[b].join(','), '0,1,4,4', '一次撤销全部还原');
+  assert.equal(win.MH.core.xSource(back, '0,1'), null);
+  dom.window.close();
+});
+
+test('点列统计里的人：作用在这一列上', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  const [a, b] = st.people.map(p => p.id);
+  C.setCandidate(st, a, '1,2', true);
+  C.setCandidate(st, b, '0,2', true);
+  C.setCandidate(st, b, '3,2', true);
+  C.setCandidate(st, b, '0,5', true);     // 别的列
+  clickSel(dom, '#tabPlay');
+
+  const chipCol = q(doc, '.col-head[data-c="2"] button.hi[data-id="' + a + '"]');
+  assert.equal(chipCol.dataset.axis, 'col', '列用的是 col');
+  clickSel(dom, '.col-head[data-c="2"] button.hi[data-id="' + a + '"]');
+  const now = win.MH.store.state;
+  assert.equal(now.play.candidates[b].join(','), '0,5', 'B 在第 2 列的候选都清掉，第 5 列不动');
+  assert.equal(win.MH.core.xSource(now, '0,2'), 'user', '清掉的格子标 X');
+  assert.equal(win.MH.core.xSource(now, '3,2'), 'user');
+  assert.equal(win.MH.core.xSource(now, '1,2'), null, 'A 的候选格不标 X');
+  dom.window.close();
+});
+
+test('点行列统计里的已确定的人：不可点（没有筛选动作）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  C.placePerson(st, st.people[0].id, '2,2');
+  clickSel(dom, '#tabPlay');
+  const doneChip = q(doc, '.row-head[data-r="2"] .hi.done');
+  assert.ok(doneChip, '第 2 行显示已确定的实心标');
+  assert.equal(doneChip.dataset.act, undefined, '实心标不带筛选动作');
+  assert.equal(q(doc, '.row-head[data-r="2"] button.hi'), null, '那一行没有可点的候选标签');
+  dom.window.close();
+});
+
+test('行列统计里没什么可清的时候：给出提示且不写入撤销历史', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  const st = win.MH.store.state, C = win.MurdokuCore;
+  const [a, b] = st.people.map(p => p.id);
+  C.setCandidate(st, a, '0,0', true);          // 第 0 行只有 A 自己的候选
+  C.setCandidate(st, b, '3,3', true);          // 第 0 行没有 B 的事
+  clickSel(dom, '#tabPlay');
+  const before = win.MH.store.undoStack.length;
+  clickSel(dom, '.row-head[data-r="0"] button.hi[data-id="' + a + '"]');
+  assert.equal(win.MH.store.undoStack.length, before, '没变化就不该占一条历史');
+  assert.equal(win.MH.store.state.play.candidates[a].join(','), '0,0', 'A 的候选还在');
   dom.window.close();
 });

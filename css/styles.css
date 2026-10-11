@@ -254,12 +254,13 @@ button.block { display: block; width: 100%; text-align: center; }
   align-content: flex-start;
   padding-top: 2px;
 }
-.head i {
-  font-style: normal;
+.head .hi {
+  font: inherit;
   font-size: 10px;
   font-weight: 700;
   line-height: 12px;
   padding: 0 3px;
+  border: 0;
   border-radius: 4px;
   color: var(--pc);
   background: #fff;
@@ -267,10 +268,13 @@ button.block { display: block; width: 100%; text-align: center; }
   max-width: 100%;
   overflow: hidden;
 }
-/* 已确定的人：实心，和候选区分开 */
-.head i.done { background: var(--pc); color: #fff; box-shadow: none; }
-.head i.more { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.head.none i { display: none; }
+button.hi { cursor: pointer; }
+button.hi:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+button.hi:active { background: var(--accent); color: #fff; }
+/* 已确定的人：实心，和候选区分开，也不可点 */
+.head .hi.done { background: var(--pc); color: #fff; box-shadow: none; }
+.head .hi.more { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.head.none .hi { display: none; }
 /* 鼠标所在的行/列：整条点亮 */
 .head.hot { background: var(--accent-soft); }
 

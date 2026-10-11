@@ -438,6 +438,48 @@
     };
   }
 
+  /**
+   * 在行/列统计里点选一个人 P：把这一行（列）里**别人**的候选清掉，
+   * 并给这些格子标 X —— 等于「这一行就是 P 的」。
+   * P 自己在那一格的候选保留，那一格不会标 X（否则自相矛盾）。
+   */
+  function applyLineChoice(state, axis, index, pid) {
+    const p = person(state, pid);
+    if (!p) return { ok: false, message: '找不到这个人物' };
+    const isCol = axis === 'col';
+    const idx = Number(index);
+    if (!(idx >= 0 && idx < (isCol ? state.cols : state.rows))) return { ok: false, message: '这一' + (isCol ? '列' : '行') + '不存在' };
+
+    let cleared = 0, marked = 0, kept = 0;
+    for (let r = 0; r < state.rows; r++) {
+      for (let c = 0; c < state.cols; c++) {
+        if ((isCol ? c : r) !== idx) continue;
+        const k = key(r, c);
+        const mine = (state.play.candidates[pid] || []).indexOf(k) >= 0;
+        let removed = 0;
+        for (const other of state.people) {
+          if (other.id === pid) continue;
+          const arr = state.play.candidates[other.id];
+          if (!arr) continue;
+          let i;
+          while ((i = arr.indexOf(k)) >= 0) { arr.splice(i, 1); removed++; }
+        }
+        cleared += removed;
+        if (mine) { kept++; continue; }        // 还留给 P 的格子：只清别人，不标 X
+        if (!removed) continue;                // 本来就没有别人的候选，不动
+        if (!xSource(state, k)) { toggleX(state, k); marked++; }
+      }
+    }
+    if (!cleared && !marked) {
+      return { ok: false, message: '这一' + (isCol ? '列' : '行') + '里没有别人的候选可清' };
+    }
+    return {
+      ok: true, cleared, marked, kept, label: p.label,
+      message: '第 ' + (idx + 1) + (isCol ? ' 列' : ' 行') + '：清掉 ' + cleared + ' 个别人的候选，标了 ' + marked + ' 个 ✕'
+        + (kept ? '，' + kept + ' 格留给 ' + p.label : ''),
+    };
+  }
+
   function boardLayout(state) {
     const cell = state.settings.cellSize;
     const gridW = state.cols * cell;
@@ -1189,7 +1231,7 @@
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
     normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
-    setCellSize, gridCropRect, headsVisible, headSize, linePeople, headCapacity, HEAD_LABELS,
+    setCellSize, gridCropRect, headsVisible, headSize, linePeople, headCapacity, applyLineChoice, HEAD_LABELS,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,

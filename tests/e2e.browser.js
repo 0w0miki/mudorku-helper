@@ -659,6 +659,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     C.setCandidate(st, ids[1], '0,2', true);
     C.setCandidate(st, ids[1], '3,4', true);
     C.setCandidate(st, ids[2], '3,5', true);
+    C.setCandidate(st, ids[2], '3,6', true);
     C.placePerson(st, ids[3], '7,0');
     window.MH.render();
   });
@@ -679,7 +680,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       row0: [...document.querySelectorAll('.row-head')][0].textContent.trim(),
       col3: [...document.querySelectorAll('.col-head')][3].textContent.trim(),
       row7: [...document.querySelectorAll('.row-head')][7].textContent.trim(),
-      done: !!document.querySelector('.row-head i.done'),
+      done: !!document.querySelector('.row-head .hi.done'),
     };
   });
   ok(hg.rows === 8 && hg.cols === 10, '行列各一条提示：' + hg.rows + '×' + hg.cols);
@@ -730,6 +731,33 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
 
   // 点行统计里的人 → 清掉这一行别人的候选并标 X
   const ids = await p.evaluate(() => window.MH.store.state.people.map(x => x.id));
+  const pickedBefore = await p.evaluate(id => (window.MH.store.state.play.candidates[id] || []).join(','), ids[1]);
+  await p.click(`.row-head[data-r="3"] button.hi[data-id="${ids[1]}"]`);
+  await p.waitForTimeout(250);
+  const filtered = await p.evaluate(ids => {
+    const st = window.MH.store.state, C = window.MH.core;
+    return {
+      picked: (st.play.candidates[ids[1]] || []).join(','),
+      other: (st.play.candidates[ids[2]] || []).join(','),
+      xPicked: C.xSource(st, '3,4'),
+      x5: C.xSource(st, '3,5'), x6: C.xSource(st, '3,6'),
+      xOtherRow: C.xSource(st, '5,7'),
+      toast: (document.querySelector('#toast') || {}).textContent || '',
+    };
+  }, ids);
+  ok(filtered.picked === pickedBefore, '被点的人候选不受影响：' + pickedBefore + ' → ' + filtered.picked);
+  ok(filtered.other === '', '同行其他人的候选被清掉：' + filtered.other);
+  ok(filtered.xPicked === null, '被点的人自己的候选格不标 X');
+  ok(filtered.x5 === 'user' && filtered.x6 === 'user', '被清的格子标上 X：' + [filtered.x5, filtered.x6].join('/'));
+  ok(filtered.xOtherRow === null, '别的行不受影响');
+  ok(/清掉/.test(filtered.toast), '有反馈提示');
+  await p.click('[data-act="undo"]');
+  await p.waitForTimeout(200);
+  const backFilter = await p.evaluate(ids => ({
+    other: (window.MH.store.state.play.candidates[ids[2]] || []).join(','),
+    x: window.MH.core.xSource(window.MH.store.state, '3,5'),
+  }), ids);
+  ok(backFilter.other === '3,5,3,6' && backFilter.x === null, '一次撤销全部还原：' + JSON.stringify(backFilter));
   await p.screenshot({ path: '/tmp/mh-e2e-heads.png' });
 
   console.log(A.join('\n'));

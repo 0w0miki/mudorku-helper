@@ -752,6 +752,16 @@
       const st = MH.store.state;
       MH.store.setSettings({ liveValidate: !st.settings.liveValidate });
     },
+    // 在行/列统计里点一个人：这一行（列）就是他的，清掉别人的候选并标 ✕
+    'head-pick'(el) {
+      const st = MH.store.state;
+      const axis = el.dataset.axis === 'col' ? 'col' : 'row';
+      const idx = Number(el.dataset.line);
+      const pid = el.dataset.id;
+      const res = MH.store.commit('按行列筛选', s => Core.applyLineChoice(s, axis, idx, pid));
+      if (!res || res.ok === false) { MH.toast((res && res.message) || '没有可清理的候选', 'warn'); return; }
+      MH.toast(res.message, 'ok');
+    },
     'toggle-heads'() {
       const st = MH.store.state;
       MH.store.setSettings({ showHeads: st.settings.showHeads === false });
