@@ -326,7 +326,6 @@
       '<button class="ghost" data-act="undo">撤销</button>' +
       '<button class="ghost" data-act="redo">重做</button>' +
       '<button class="ghost" data-act="clear-marks">清空全部标记</button>' +
-      '<button class="ghost" data-act="phase" data-phase="prep">← 回到准备阶段</button>' +
       '</div></section>' +
 
       (st.bg

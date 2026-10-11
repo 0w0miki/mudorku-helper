@@ -1012,7 +1012,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const srW4 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
   ok(srW4 === 372, '双击还原 372px：' + srW4);
 
-  // 27) 列统计标签按内容宽度（不撑满）
+  // 27) 列统计标签按内容宽度（不撑满）；操作卡片去掉重复的「回到准备阶段」
   const chipW = await p.evaluate(() => {
     const head = document.querySelector('.col-head[data-c="2"]');
     const chip = head.querySelector('.hi');
@@ -1026,6 +1026,18 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(chipW.sameAsCell, '列统计条宽度仍等于列宽：' + chipW.headW + 'px');
   ok(chipW.chipW < chipW.headW - 2, '标签按内容宽度不撑满：' + chipW.chipW + ' < ' + chipW.headW);
   ok(Math.abs(chipW.leftGap - chipW.rightGap) <= 1, '标签居中：左右 ' + chipW.leftGap + '/' + chipW.rightGap);
+  const opsBtns = await p.evaluate(() => {
+    const card = [...document.querySelectorAll('.sidebar .card')].find(c => /操作/.test(c.querySelector('h2').textContent));
+    return { text: card.textContent.replace(/\s+/g, ' ').trim(), n: card.querySelectorAll('button').length };
+  });
+  ok(!/回到准备阶段/.test(opsBtns.text) && opsBtns.n === 3, '操作卡片只剩 3 个按钮：' + opsBtns.text);
+  await p.click('#tabPrep');
+  await p.waitForTimeout(200);
+  ok(await p.evaluate(() => window.MH.store.state.phase) === 'prep', '顶栏 tab 仍能切回准备阶段');
+  await p.click('#tabPlay');
+  await p.waitForTimeout(200);
+  ok(await p.evaluate(() => window.MH.store.state.phase) === 'play', '再切回游玩');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

@@ -1483,7 +1483,7 @@ test('准备阶段选人不会动左键模式（那里用不上）', async () =>
   const win = dom.window;
   clickSel(dom, '#tabPlay');
   clickSel(dom, '[data-act="left-mode"][data-mode="x"]');       // 游玩阶段设成标 X
-  clickSel(dom, '[data-act="phase"][data-phase="prep"]');        // 回到准备阶段
+  clickSel(dom, '#tabPrep');                                     // 回到准备阶段（顶栏）
   const st = win.MH.store.state;
   assert.equal(st.settings.leftMode, 'x', '模式跟着存档留在 X');
   clickSel(dom, '[data-act="select-person"][data-id="' + st.people[1].id + '"]');   // 准备阶段的人物条
@@ -1899,5 +1899,21 @@ test('侧栏宽度不进存档、不进撤销（是本地界面偏好）', async
   win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
   assert.equal(win.MH.store.undoStack.length, before, '不占撤销历史');
   assert.equal(/sidebarW/.test(win.MH.store.exportText()), false, '不写进导出的 JSON');
+  dom.window.close();
+});
+
+test('游玩阶段的「操作」卡片不再重复放「回到准备阶段」（顶栏 tab 就是它）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  clickSel(dom, '#tabPlay');
+  const ops = [...qa(doc, '.sidebar .card')].find(c => /操作/.test(c.querySelector('h2').textContent));
+  assert.ok(ops, '有操作卡片');
+  assert.equal(/回到准备阶段/.test(ops.textContent), false, '没有重复的返回按钮：' + ops.textContent.trim());
+  assert.ok(q(doc, '#tabPrep'), '顶栏的「① 地图准备」还在');
+  // 顶栏 tab 仍然能切回去
+  clickSel(dom, '#tabPrep');
+  assert.equal(win.MH.store.state.phase, 'prep', '顶部 tab 切回准备阶段');
+  clickSel(dom, '#tabPlay');
+  assert.equal(win.MH.store.state.phase, 'play', '再切回游玩');
   dom.window.close();
 });
