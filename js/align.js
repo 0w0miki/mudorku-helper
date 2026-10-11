@@ -219,13 +219,28 @@
     let peak = 0;
     for (let i = 0; i < map.length; i++) if (map[i] > peak) peak = map[i];
     if (!(peak > 0)) return null;
-    // 幅值阈值放低：位图型页面里地图的细线对比度可能远低于周围插画，
-    // 高阈值会把线滤掉。"短边"由最小行程拦、"稀疏假周期"由证据门槛拦。
+    // 幅值阈值放低：位图型页面里地图的细线对比度可能远低于周围插画。
     const th = Math.max(6, otsu(map) * 0.35);
-    // 网格线要基本贯穿裁剪区（≥20%）。这一条同时是噪声的守门人：最小行程设小了，
-    // 大部分像素被清掉后剩下的稀疏随机边反而显得"高对比"，凑出假周期。
-    const minRun = Math.max(8, Math.round((axis === 'x' ? h : w) * 0.2));
-    return runProfile(map, w, h, axis, th, bounds, minRun);
+    // 用"每列覆盖量（幅值加权）"，**不要求连续行程**：真实页面的格线会被家具、图标、
+    // 文字打断。实测 car-repair 地图区：方向筛后有 5.2 万边缘像素，但要求连续 ≥128px 后
+    // 只剩 4 列——格线全被"连续性"丢掉了。
+    // 周期性交给梳状对比度判：纹理是"每列覆盖差不多"，格子是"只有格线列高"。
+    const vert = axis === 'x';
+    const outer = vert ? w : h;
+    const inner = vert ? h : w;
+    const j0 = bounds ? Math.max(0, Math.floor(bounds[0])) : 0;
+    const j1 = bounds ? Math.min(inner - 1, Math.ceil(bounds[1])) : inner - 1;
+    const prof = new Float64Array(outer);
+    const at = vert ? (i, j) => j * w + i : (i, j) => i * w + j;
+    for (let i = 0; i < outer; i++) {
+      let sum = 0;
+      for (let j = j0; j <= j1; j++) {
+        const v = map[at(i, j)];
+        if (v >= th) sum += v;
+      }
+      prof[i] = sum;
+    }
+    return prof;
   }
 
   // ---------------------------------------------------------------- 周期与相位
@@ -740,6 +755,6 @@
     };
   }
 
-  return { detectGrid, toGray, suggestPlacement, boxBlur, inkMap, project, otsu, runProfile, detrend, combStats, autocorr, combScore, findPitch, refineLines, linfit,
+  return { detectGrid, toGray, suggestPlacement, orientEdgeMap, edgeProfile, boxBlur, inkMap, project, otsu, runProfile, detrend, combStats, autocorr, combScore, findPitch, refineLines, linfit,
            estimateAngle, rotateGray, DEFAULTS };
 });
