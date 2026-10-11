@@ -105,14 +105,41 @@ button.block { display: block; width: 100%; text-align: center; }
 }
 
 .sidebar {
-  flex: 0 0 372px;
-  width: 372px;
+  flex: 0 0 var(--sidebar-w, 372px);
+  width: var(--sidebar-w, 372px);
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding-right: 2px;
 }
+
+/* 侧栏与棋盘之间的拖拽条：拖动改侧栏宽度（双击还原） */
+.sidebar-resizer {
+  flex: 0 0 10px;
+  margin: 0 -6px;
+  align-self: stretch;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  border-radius: 4px;
+}
+.sidebar-resizer::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--line-strong);
+  opacity: .6;
+  transition: opacity .1s linear, background-color .1s linear;
+}
+.sidebar-resizer:hover::before,
+.sidebar-resizer.dragging::before { background: var(--accent); opacity: 1; }
+.sidebar-resizer:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 
 .board-area {
   flex: 1;

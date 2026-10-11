@@ -1854,3 +1854,50 @@ test('对齐拖动：移动网格不触发整块重渲染（原来每移动一�
   board.paint = origPaint;
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 侧栏宽度可调
+
+test('左侧面板可以拖宽，并有最小/最大宽度限制', async () => {
+  const { dom, doc, errors } = await boot();
+  const win = dom.window;
+  const bar = q(doc, '#sidebarResizer');
+  assert.ok(bar, '有拖拽条');
+  const widthVar = () => parseFloat(win.document.documentElement.style.getPropertyValue('--sidebar-w'));
+  assert.equal(widthVar(), 372, '默认 372px');
+
+  // 往右拖 100px
+  pointer(dom, 'pointerdown', bar, { clientX: 400, clientY: 300 });
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 300 }));
+  assert.equal(widthVar(), 472, '拖动跟随：' + widthVar());
+  // 拖到很窄 → 夹在最小宽度
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 40, clientY: 300 }));
+  assert.equal(widthVar(), 300, '最小宽度 300px');
+  // 拖到很宽 → 给棋盘留出空间
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 5000, clientY: 300 }));
+  const max = widthVar();
+  assert.ok(max <= 760 && max <= win.innerWidth - 360, '最大宽度受限：' + max);
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+
+  // 松手不会因为"要落盘"而报错（jsdom 在 file:// 下没有 localStorage，
+  // 持久化那一段放到真机 e2e 里验）
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+
+  // 双击还原
+  bar.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(widthVar(), 372, '双击还原 372px');
+  assert.deepEqual(errors, [], '没有 localStorage 时也不该报错');
+  dom.window.close();
+});
+
+test('侧栏宽度不进存档、不进撤销（是本地界面偏好）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  const bar = q(doc, '#sidebarResizer');
+  const before = win.MH.store.undoStack.length;
+  pointer(dom, 'pointerdown', bar, { clientX: 400, clientY: 300 });
+  win.dispatchEvent(new win.MouseEvent('pointermove', { bubbles: true, clientX: 520, clientY: 300 }));
+  win.dispatchEvent(new win.MouseEvent('pointerup', { bubbles: true }));
+  assert.equal(win.MH.store.undoStack.length, before, '不占撤销历史');
+  assert.equal(/sidebarW/.test(win.MH.store.exportText()), false, '不写进导出的 JSON');
+  dom.window.close();
+});

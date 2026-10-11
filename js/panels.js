@@ -1050,8 +1050,74 @@
     }
   }
 
+  // ---------------------------------------------------------------- 侧栏宽度
+
+  const SIDEBAR_KEY = 'murdoku-helper.v1.ui';
+  const SIDEBAR_MIN = 300;      // 再窄卡片就挤了
+  const SIDEBAR_DEFAULT = 372;
+
+  function sidebarMax() {
+    // 给棋盘留出至少 360px，窗口很窄时不至于把棋盘压没
+    return Math.max(SIDEBAR_MIN, Math.min(760, window.innerWidth - 360));
+  }
+
+  function currentSidebarWidth() {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w');
+    const n = parseFloat(v);
+    return Number.isFinite(n) && n > 0 ? n : SIDEBAR_DEFAULT;
+  }
+
+  function applySidebarWidth(w, save) {
+    const next = Math.round(Math.min(sidebarMax(), Math.max(SIDEBAR_MIN, w)));
+    document.documentElement.style.setProperty('--sidebar-w', next + 'px');
+    if (save) {
+      try { window.localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ sidebarW: next })); } catch (e) { /* 隐私模式忽略 */ }
+    }
+    return next;
+  }
+
+  function readSidebarWidth() {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_KEY);
+      const v = raw ? JSON.parse(raw) : null;
+      if (v && Number.isFinite(v.sidebarW)) return v.sidebarW;
+    } catch (e) { /* ignore */ }
+    return SIDEBAR_DEFAULT;
+  }
+
+  function initSidebarResizer() {
+    const bar = document.getElementById('sidebarResizer');
+    if (!bar) return;
+    applySidebarWidth(readSidebarWidth(), false);
+
+    bar.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const startX = e.clientX, startW = currentSidebarWidth();
+      bar.classList.add('dragging');
+      const move = ev => applySidebarWidth(startW + (ev.clientX - startX), false);
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        bar.classList.remove('dragging');
+        applySidebarWidth(currentSidebarWidth(), true);   // 松手才落盘
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+    bar.addEventListener('dblclick', () => applySidebarWidth(SIDEBAR_DEFAULT, true));
+    bar.addEventListener('keydown', e => {
+      const step = e.shiftKey ? 40 : 12;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); applySidebarWidth(currentSidebarWidth() - step, true); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); applySidebarWidth(currentSidebarWidth() + step, true); }
+      else if (e.key === 'Home') { e.preventDefault(); applySidebarWidth(SIDEBAR_MIN, true); }
+      else if (e.key === 'End') { e.preventDefault(); applySidebarWidth(sidebarMax(), true); }
+    });
+  }
+
   const P = {
     init() {
+      initSidebarResizer();
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);

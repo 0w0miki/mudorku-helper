@@ -951,6 +951,67 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const readout = await p.textContent('[data-bg="scale"]');
   ok(Math.abs(parseFloat(readout) / 100 - dragStat.scale) < 0.001, '数值显示与状态一致：' + readout + ' vs ' + dragStat.scale);
 
+  // 26) 列统计单列 / 区域外框不被统计条吃掉 / 左侧面板可拖宽
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(8, 10), 'e2e 三改'));
+  await p.click('#tabPlay');
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    const ids = st.people.map(x => x.id);
+    ['0,2', '1,2', '2,2', '3,2'].forEach((k, i) => C.setCandidate(st, ids[i], k, true));
+    window.MH.render();
+  });
+  await p.waitForTimeout(300);
+  const csCol = await p.evaluate(() => {
+    const chips = [...document.querySelectorAll('.col-head[data-c="2"] .hi')].map(e => {
+      const r = e.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top) };
+    });
+    return {
+      n: chips.length,
+      dir: getComputedStyle(document.querySelector('.col-head')).flexDirection,
+      sameX: new Set(chips.map(c => c.x)).size === 1,
+      asc: chips.every((c, i) => i === 0 || c.y > chips[i - 1].y),
+    };
+  });
+  ok(csCol.n === 4 && csCol.dir === 'column' && csCol.sameX && csCol.asc,
+     '列统计排成单列（一个标签一行）：' + csCol.n + ' 个，dir=' + csCol.dir);
+  const layer = await p.evaluate(() => ({
+    overlay: parseFloat(getComputedStyle(document.querySelector('.overlay')).zIndex) || 0,
+    heads: parseFloat(getComputedStyle(document.querySelector('.row-heads')).zIndex) || 0,
+  }));
+  ok(layer.overlay > layer.heads, '区域外框画在统计条之上（不再被吃掉）：' + layer.overlay + ' > ' + layer.heads);
+
+  // 侧栏宽度
+  const srBox = await p.locator('#sidebarResizer').boundingBox();
+  const srW0 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
+  await p.mouse.move(srBox.x + srBox.width / 2, srBox.y + 200);
+  await p.mouse.down();
+  await p.mouse.move(srBox.x + srBox.width / 2 + 120, srBox.y + 200, { steps: 20 });
+  await p.mouse.up();
+  await p.waitForTimeout(200);
+  const srW1 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
+  ok(srW1 > srW0 + 100, '拖拽条能加宽左侧面板：' + srW0 + ' → ' + srW1);
+  const srBox2 = await p.locator('#sidebarResizer').boundingBox();
+  await p.mouse.move(srBox2.x + srBox2.width / 2, srBox2.y + 200);
+  await p.mouse.down();
+  await p.mouse.move(srBox2.x - 800, srBox2.y + 200, { steps: 20 });
+  await p.mouse.up();
+  await p.waitForTimeout(200);
+  const srW2 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
+  ok(srW2 === 300, '最小宽度夹在 300px：' + srW2);
+  const srSaved = await p.evaluate(() => localStorage.getItem('murdoku-helper.v1.ui'));
+  ok(/"sidebarW":300/.test(srSaved || ''), '宽度落盘：' + srSaved);
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(400);
+  const srW3 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
+  ok(srW3 === 300, '刷新后宽度保留：' + srW3);
+  const boardW = await p.evaluate(() => Math.round(document.querySelector('.board-area').getBoundingClientRect().width));
+  ok(boardW > 400, '棋盘仍然有空间：' + boardW + 'px');
+  const srBox3 = await p.locator('#sidebarResizer').boundingBox();
+  await p.mouse.dblclick(srBox3.x + srBox3.width / 2, srBox3.y + 200);
+  await p.waitForTimeout(200);
+  const srW4 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
+  ok(srW4 === 372, '双击还原 372px：' + srW4);
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
