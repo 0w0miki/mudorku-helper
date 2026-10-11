@@ -328,13 +328,16 @@
    * 格子、底图缩放、网格偏移三者同倍变化，否则对齐会散掉。没裁切过（还在对齐
    * 阶段）则只动格子、底图保持不动 —— 那正是「对齐」需要的自由度。
    */
-  function setCellSize(state, cell) {
+  function setCellSize(state, cell, opts) {
     const prev = state.settings.cellSize;
     const next = clampInt(cell, CELL_MIN, CELL_MAX, prev);
     if (next === prev) return { ok: false, changed: false, cellSize: prev };
     state.settings.cellSize = next;
     const b = state.bg;
-    if (b && b.bound) {
+    // 对齐阶段只缩放网格本身：这时候要的正是"把网格对到底图上"，
+    // 若连带缩放底图，相对关系不变，就再也对不齐了（抓手会像"整体放大缩小"）
+    const gridOnly = !!(opts && opts.gridOnly);
+    if (b && b.bound && !gridOnly) {
       const k = next / prev;
       b.scale = clampNum(b.scale * k, BG_SCALE_MIN, BG_SCALE_MAX, b.scale);
       if (state.grid) {

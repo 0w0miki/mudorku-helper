@@ -686,7 +686,8 @@
         // 两个方向取平均，拖起来比较跟手
         const cell = Math.round((w / MH.store.state.cols + h / MH.store.state.rows) / 2);
         const st2 = MH.store.state;
-        MH.store.preview(s => { Core.setCellSize(s, cell); });
+        // 对齐模式下抓手只缩放网格（底图有「绑定缩放」也不跟），否则对位调不动
+        MH.store.preview(s => { Core.setCellSize(s, cell, { gridOnly: true }); });
         this.applyLayout(st2);
       });
       window.addEventListener('pointerup', this._onHandleUp = () => {

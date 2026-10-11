@@ -745,8 +745,9 @@
     zoom(el) {
       const st = MH.store.state;
       const next = st.settings.cellSize + Number(el.dataset.dir) * Core.CELL_STEP;
-      // 走 Core.setCellSize：底图裁切过（bound）时它会连带缩放底图与网格偏移
-      MH.store.live(s => Core.setCellSize(s, next));
+      // 走 Core.setCellSize：底图裁切过（bound）时它会连带缩放底图与网格偏移；
+      // 但对齐阶段只缩放网格，否则相对关系不变、根本对不齐
+      MH.store.live(s => Core.setCellSize(s, next, { gridOnly: !!MH.ui.aligning }));
     },
     'toggle-live'() {
       const st = MH.store.state;
@@ -899,7 +900,7 @@
       const meta = t.parentNode && t.parentNode.querySelector('.meta');
       if (meta) meta.textContent = Math.round(v * 100) + '%';
     } else if (t.id === 'cellSize') {
-      MH.store.live(s => Core.setCellSize(s, t.value));
+      MH.store.live(s => Core.setCellSize(s, t.value, { gridOnly: !!MH.ui.aligning }));
     }
   }
 
