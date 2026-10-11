@@ -317,3 +317,41 @@ test('图片边缘有伪线时，原点不能被挪错一格', () => {
   assert.ok(Math.abs(d.pitch.x - P) < 2, 'pitchX=' + d.pitch.x);
   assert.ok(Math.abs(d.origin.x - X0) < 6, '原点不该被伪线挪一格：' + d.origin.x);
 });
+
+test('整页插画里的位图地图（P0.2 验收）：纹理/卡片/文字围着也能认出网格', () => {
+  // 模仿 car-repair-color.pdf：整页插画，地图是位图、网格线细而浅，四周深色卡片与纹理
+  const W = 1400, H = 1100;
+  const r = makeRaster(W, H);
+  fillBg(r, 236);
+  const MX = 820, MY = 300, MW = 560, MH = 520, P = 56;   // 地图块：10×9 格
+  const rand = rng(4242);
+  // 四周：深色卡片 + 文字行 + 随机纹理
+  for (let i = 0; i < 6; i++) {
+    const x = 40 + (i % 2) * 380, y = 60 + Math.floor(i / 2) * 330;
+    for (let dy = 0; dy < 260; dy++) for (let dx = 0; dx < 300; dx++) put(r, x + dx, y + dy, 96);
+    for (let dy = 20; dy < 230; dy++) for (let dx = 20; dx < 280; dx++) put(r, x + dx, y + dy, 210);
+  }
+  for (let i = 0; i < 5000; i++) {
+    const x = Math.floor(rand() * W), y = Math.floor(rand() * H);
+    if (x > MX - 20 && x < MX + MW + 20 && y > MY - 20 && y < MY + MH + 20) continue;
+    put(r, x, y, 60 + Math.floor(rand() * 60));
+  }
+  // 地图：浅色地板 + 家具 + 细浅网格线 + 少量粗区域边框
+  for (let dy = 0; dy < MH; dy++) for (let dx = 0; dx < MW; dx++) put(r, MX + dx, MY + dy, 224);
+  for (let i = 0; i < 16; i++) {
+    const bx = MX + 20 + Math.floor(rand() * (MW - 120)), by = MY + 20 + Math.floor(rand() * (MH - 120));
+    for (let dy = 0; dy < 60; dy++) for (let dx = 0; dx < 90; dx++) put(r, bx + dx, by + dy, 180);
+  }
+  for (let c = 0; c <= 10; c++) for (let y = MY; y < MY + MH; y++) put(r, MX + Math.round(c * P), y, 208);
+  for (let rr = 0; rr <= 9; rr++) for (let x = MX; x < MX + MW; x++) put(r, x, MY + Math.round(rr * P), 208);
+  for (let y = MY; y < MY + MH; y++) { put(r, MX + 3 * P, y, 150); put(r, MX + 7 * P, y, 150); }
+  for (let x = MX; x < MX + MW; x++) put(r, x, MY + 4 * P, 150);
+
+  const d = A.detectGrid(r, { region: { x: MX - 30, y: MY - 30, w: MW + 60, h: MH + 60 } });
+  assert.ok(d.ok, '应检出：' + d.reason + ' pitch=' + d.pitch.x.toFixed(1) + '/' + d.pitch.y.toFixed(1));
+  assert.ok(Math.abs(d.pitch.x - P) < 3, 'pitchX=' + d.pitch.x.toFixed(2) + '（真值 ' + P + '）');
+  assert.ok(Math.abs(d.pitch.y - P) < 3, 'pitchY=' + d.pitch.y.toFixed(2));
+  assert.ok(Math.abs(d.origin.x - MX) < 8, 'originX=' + d.origin.x.toFixed(1));
+  assert.ok(d.squareness >= 0.9, 'squareness=' + d.squareness);
+  assert.ok(d.signal === 'edge' || d.signal === 'ink', '信号=' + d.signal);
+});

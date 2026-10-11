@@ -160,7 +160,7 @@
    * 用 runLength² 加权后，一条贯穿的地图网格线会把纹理压下去（无需调参）。
    * axis='x' → 逐列沿 y 找竖线行程；axis='y' 反之。
    */
-  function runProfile(ink, w, h, axis, thresh, bounds) {
+  function runProfile(ink, w, h, axis, thresh, bounds, minRun) {
     const vert = axis === 'x';
     const outer = vert ? w : h;          // 有多少条"列/行"
     const inner = vert ? h : w;          // 每条里走多远
@@ -168,6 +168,7 @@
     // 另一个方向的周期带偏（真实例子里 y 就这样被文字行骗成半格距）
     const j0 = bounds ? Math.max(0, Math.floor(bounds[0])) : 0;
     const j1 = bounds ? Math.min(inner - 1, Math.ceil(bounds[1])) : inner - 1;
+    const min = Math.max(2, minRun || 2);
     const prof = new Float64Array(outer);
     const at = vert ? (i, j) => j * w + i : (i, j) => i * w + j;
     for (let i = 0; i < outer; i++) {
@@ -175,14 +176,56 @@
       for (let j = j0; j <= j1; j++) {
         if (ink[at(i, j)] >= thresh) run++;
         else {
-          if (run > 1) sum += run * run;   // 短行程贡献极小
+          if (run >= min) sum += run * run;   // 短行程贡献极小
           run = 0;
         }
       }
-      if (run > 1) sum += run * run;
+      if (run >= min) sum += run * run;
       prof[i] = sum;
     }
     return prof;
+  }
+
+  /**
+   * 方向选择性边缘图。位图型页面（地图是嵌入式图片、四周插画/纹理密集）里，
+   * 逐列"墨迹"会被纹理占满——但网格线有个纹理没有的性质：**又长又直**。
+   * 所以先按方向筛：竖线两侧的梯度必然接近水平（横线反之），方向不纯的边直接丢掉，
+   * 再交给行程长度²加权投影，纹理与图标就基本不参与了。
+   */
+  function orientEdgeMap(gray, w, h, axis) {
+    const out = new Float32Array(w * h);
+    const vert = axis === 'x';
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const gx = gray[i + 1] - gray[i - 1];
+        const gy = gray[i + w] - gray[i - w];
+        const ax = gx < 0 ? -gx : gx;
+        const ay = gy < 0 ? -gy : gy;
+        const m = Math.sqrt(ax * ax + ay * ay);
+        if (m < 10) continue;
+        const want = vert ? ax : ay;
+        const other = vert ? ay : ax;
+        if (want < other * 2.2) continue;     // 与目标轴夹角 >24° 的边 → 纹理/斜线，丢掉
+        out[i] = m;
+      }
+    }
+    return out;
+  }
+
+  /** 边缘投影：方向筛选 + Otsu 阈值 + 行程长度²加权 */
+  function edgeProfile(gray, w, h, axis, bounds) {
+    const map = orientEdgeMap(gray, w, h, axis);
+    let peak = 0;
+    for (let i = 0; i < map.length; i++) if (map[i] > peak) peak = map[i];
+    if (!(peak > 0)) return null;
+    // 幅值阈值放低：位图型页面里地图的细线对比度可能远低于周围插画，
+    // 高阈值会把线滤掉。"短边"由最小行程拦、"稀疏假周期"由证据门槛拦。
+    const th = Math.max(6, otsu(map) * 0.35);
+    // 网格线要基本贯穿裁剪区（≥20%）。这一条同时是噪声的守门人：最小行程设小了，
+    // 大部分像素被清掉后剩下的稀疏随机边反而显得"高对比"，凑出假周期。
+    const minRun = Math.max(8, Math.round((axis === 'x' ? h : w) * 0.2));
+    return runProfile(map, w, h, axis, th, bounds, minRun);
   }
 
   // ---------------------------------------------------------------- 周期与相位
@@ -488,13 +531,21 @@
 
   /** 对一个方向的投影求 pitch/原点/置信度 */
   function analyzeAxis(prof, opts) {
+    if (!prof || !prof.length) return { ok: false, reason: '没有信号' };
     const minPitch = opts.minPitch, maxPitch = opts.maxPitch;
     const peakBase = findPitch(prof, minPitch, maxPitch);
     if (!peakBase) return { ok: false, reason: '找不到周期' };
-    let mean = 0;
-    for (let i = 0; i < prof.length; i++) mean += prof[i];
+    let mean = 0, nonZero = 0;
+    for (let i = 0; i < prof.length; i++) {
+      mean += prof[i];
+      if (prof[i] > 0) nonZero++;
+    }
     mean /= prof.length;
-    const contrast = mean > 0 ? peakBase.score / mean : 0;       // >1 说明线上确实更"墨"
+    // 证据不足直接判负：投影几乎是空的时 mean≈0，contrast 会变成 ∞ 并"通过"所有门槛
+    // （纯噪声就栽在这里——被清理过的稀疏随机边凑出了一对假周期）
+    if (!(mean > 0) || nonZero < 4) return { ok: false, reason: '墨迹太少' };
+    const contrast = peakBase.score / mean;                      // >1 说明线上确实更"墨"
+    if (!Number.isFinite(contrast) || contrast > 60) return { ok: false, reason: '对比度异常' };
     const strengthFloor = Math.max(mean * 0.6, peakBase.score * 0.35);
     const lines = refineLines(prof, peakBase.pitch, peakBase.phase, strengthFloor);
     // 去掉两端明显偏弱的线：图片边缘/阴影/贴边纹理常常造出一条伪线，
@@ -567,35 +618,57 @@
     const radius = Math.max(4, Math.round(Math.min(w, h) / 30));
     const runAxes = (img) => {
       const ink = inkMap(img, w, h, radius);
-      // 只认长直线：纹理/文字/图标的短行程会被 runLength² 压下去
-      const thresh = Math.max(10, otsu(ink) * 0.6);
-      const span = (ax) => (ax.ok && ax.lines && ax.lines.length >= 3)
-        ? [Math.floor(ax.lines[0]), Math.ceil(ax.lines[ax.lines.length - 1])] : null;
-      const ax0 = analyzeAxis(runProfile(ink, w, h, 'x', thresh), opts);
-      // y 只统计 x 网格覆盖的那一段，避免右侧/下方图例与文字把周期带偏
-      const ay = analyzeAxis(runProfile(ink, w, h, 'y', thresh, span(ax0)), opts);
-      let ax = ax0;
-      const yb = span(ay);
-      if (yb) {
-        const ax2 = analyzeAxis(runProfile(ink, w, h, 'x', thresh, yb), opts);
-        if (ax2.ok || !ax0.ok) ax = ax2.ok ? ax2 : ax0;
-      }
-      return { x: ax, y: ay };
+      const thInk = Math.max(10, otsu(ink) * 0.6);
+      // 一套"位置无关"的流程：先 x 定范围，再在该范围里算 y，最后回算 x
+      const flow = (mk) => {
+        const span = (ax) => (ax.ok && ax.lines && ax.lines.length >= 3)
+          ? [Math.floor(ax.lines[0]), Math.ceil(ax.lines[ax.lines.length - 1])] : null;
+        const ax0 = analyzeAxis(mk('x', null), opts);
+        const ay = analyzeAxis(mk('y', span(ax0)), opts);
+        let ax = ax0;
+        const yb = span(ay);
+        if (yb) {
+          const ax2 = analyzeAxis(mk('x', yb), opts);
+          if (ax2.ok || !ax0.ok) ax = ax2.ok ? ax2 : ax0;
+        }
+        return { x: ax, y: ay };
+      };
+      // 墨迹信号（矢量/干净扫描件最稳）与边缘信号（位图型页面）各跑一遍
+      const pairs = [];
+      const inkPair = flow((axis, bounds) => runProfile(ink, w, h, axis, thInk, bounds));
+      inkPair.signal = 'ink';
+      pairs.push(inkPair);
+      const edgePair = flow((axis, bounds) => edgeProfile(img, w, h, axis, bounds));
+      edgePair.signal = 'edge';
+      pairs.push(edgePair);
+      // 评分：两轴都成立 + 格子接近正方形 + 置信度
+      const scoreOf = (r) => {
+        const both = r.x.ok && r.y.ok;
+        const sq = both && r.x.pitch && r.y.pitch
+          ? Math.min(r.x.pitch, r.y.pitch) / Math.max(r.x.pitch, r.y.pitch) : 0;
+        return (both && sq >= 0.75 ? 100 : 0) + (both ? sq * 10 : 0) +
+          (r.x.confidence || 0) * 10 + (r.y.confidence || 0) * 10 +
+          Math.min(r.x.contrast || 0, r.y.contrast || 0);
+      };
+      pairs.sort((a, b) => scoreOf(b) - scoreOf(a));
+      return pairs[0];
     };
     // 伪倾角会把线抹开反而更差：旋转前后各分析一次，按"两个方向都成立且置信度高"取更好的
     const scoreOf = r => {
       const okBoth = r.x.ok && r.y.ok;
       const sq = okBoth && r.x.pitch && r.y.pitch
         ? Math.min(r.x.pitch, r.y.pitch) / Math.max(r.x.pitch, r.y.pitch) : 0;
-      return (okBoth ? 1 : 0) * 10 + sq + (r.x.confidence || 0) + (r.y.confidence || 0);
+      return (okBoth ? 1 : 0) * 10 + (okBoth && sq >= 0.75 ? 5 : 0) + sq +
+        (r.x.confidence || 0) + (r.y.confidence || 0);
     };
     let angle = 0;
     let best = runAxes(gray);
+    let signal = best.signal;
     if (guess) {
       const rotated = runAxes(rotateGray(gray, w, h, -guess));
-      if (scoreOf(rotated) > scoreOf(best)) { best = rotated; angle = guess; }
+      if (scoreOf(rotated) > scoreOf(best)) { best = rotated; angle = guess; signal = rotated.signal; }
     }
-    const ax = best.x, ay = best.y;
+      const ax = best.x, ay = best.y;
 
     const pitchX = ax.pitch || 0, pitchY = ay.pitch || 0;
     const okX = !!ax.ok, okY = !!ay.ok;
@@ -618,7 +691,7 @@
     const atX = v => Math.round((v * K + offX) * 100) / 100;
     const atY = v => Math.round((v * K + offY) * 100) / 100;
     return {
-      ok: good, inverted: full.inverted, squareness: Math.round(squareness * 1000) / 1000,
+      ok: good, signal, inverted: full.inverted, squareness: Math.round(squareness * 1000) / 1000,
       mismatch: both && !good,
       reason: good ? '' : (ok ? 'x/y 格距不一致，可能没框到地图' : (ax.reason || ay.reason || '未检出')),
       confidence: Math.round(conf * 1000) / 1000,
