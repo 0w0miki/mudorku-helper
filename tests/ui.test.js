@@ -1780,3 +1780,75 @@ test('底图缩放：上下限仍然夹住', async () => {
   assert.equal(win.MH.store.state.bg.scale, 4, '超过上限被夹住');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 拖动热路径不能被重渲染打断
+
+test('底图滑块：连续输入期间节点不会被重渲染换掉（换掉就等于拖动中断）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  withBg(dom);
+  const el = q(doc, '#bgScale');
+  assert.ok(el, '有缩放滑块');
+
+  // 模拟拖动：连发多次 input
+  for (const v of [101.5, 103.2, 105.8, 108.1]) setInput(dom, '#bgScale', v);
+  assert.equal(q(doc, '#bgScale'), el, '输入过程中滑块必须是同一个节点');
+  assert.equal(win.MH.store.state.bg.scale, 1.081, '最后一次输入立即生效');
+
+  // 松手（change）才落盘 + 全量重绘
+  el.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.notEqual(q(doc, '#bgScale'), el, '松手后重绘一次（节点换新，数值同步）');
+  assert.equal(q(doc, '[data-bg="scale"]').textContent, '108.1%', '重绘后数值正确');
+  dom.window.close();
+});
+
+test('store.previewSilent：只改状态、不通知（拖动热路径靠它避开整块重渲染）', async () => {
+  const { dom } = await boot();
+  const win = dom.window;
+  let notified = 0;
+  win.MH.store.subscribe(() => { notified += 1; });
+
+  win.MH.store.previewSilent(s => { s.settings.cellSize = 60; });
+  assert.equal(win.MH.store.state.settings.cellSize, 60, '状态已改');
+  assert.equal(notified, 0, '没有触发通知（因此不会重渲染侧栏）');
+
+  win.MH.store.preview(s => { s.settings.cellSize = 62; });
+  assert.equal(notified, 1, 'preview 仍然会通知');
+  assert.equal(win.MH.store.state.settings.cellSize, 62);
+  dom.window.close();
+});
+
+test('对齐拖动：移动网格不触发整块重渲染（原来每移动一像素重渲染一次）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  withBg(dom);
+  clickSel(dom, '[data-act="bg-align"]');
+  let renders = 0;
+  const origRender = win.MH.render;
+  win.MH.render = function () { renders += 1; return origRender.apply(win.MH, arguments); };
+  const board = win.MH.board;
+  let paints = 0;
+  const origPaint = board.paint.bind(board);
+  board.paint = function () { paints += 1; return origPaint.apply(board, arguments); };
+
+  // 模拟拖动：pointerdown 在网格上，然后多次 pointermove
+  // 注意先取值：state.grid 是被原地改写的，前后快照会是同一个对象
+  const gx0 = win.MH.store.state.grid.x;
+  const gy0 = win.MH.store.state.grid.y;
+  const start = { clientX: 200, clientY: 200 };
+  const target = cellEl(dom, 0, 0);
+  pointer(dom, 'pointerdown', target, start);
+  for (let i = 1; i <= 10; i++) {
+    // 必须从棋盘元素往上冒泡（事件派发在 window 上不会到达 boardEl）
+    target.dispatchEvent(new win.MouseEvent('pointermove', {
+      bubbles: true, clientX: start.clientX + i * 3, clientY: start.clientY + i * 3,
+    }));
+  }
+  assert.equal(renders, 0, '拖动过程中没有整块重渲染：' + renders);
+  assert.equal(paints, 0, '也没有重绘格子：' + paints);
+  assert.equal(win.MH.store.state.grid.x - gx0, 30, '网格跟着移动了 30px');
+  assert.equal(win.MH.store.state.grid.y - gy0, 30, '网格跟着移动了 30px');
+  win.MH.render = origRender;
+  board.paint = origPaint;
+  dom.window.close();
+});

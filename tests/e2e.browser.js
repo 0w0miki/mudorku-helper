@@ -897,6 +897,40 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(fits.gw === fits.bw && fits.gh === fits.bh,
      '对齐到像素级：网格 ' + fits.gw + '×' + fits.gh + ' vs 底图 ' + fits.bw + '×' + fits.bh);
 
+  // 25) 拖动热路径：滑块连续拖动要一直生效（原来拖一下就断）
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(24, 24), 'e2e 拖动'));
+  await p.click('#tabPrep');
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  await p.waitForTimeout(300);
+  await p.evaluate(() => {
+    window.__hot = { renders: 0, paints: 0 };
+    const MH = window.MH;
+    const origRender = MH.render.bind(MH);
+    MH.render = function () { window.__hot.renders++; return origRender(); };
+    const board = MH.board;
+    const origPaint = board.paint.bind(board);
+    board.paint = function () { window.__hot.paints++; return origPaint(); };
+  });
+
+  const dragBox = await p.locator('#bgScale').boundingBox();
+  await p.mouse.move(dragBox.x + dragBox.width * 0.1, dragBox.y + dragBox.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(dragBox.x + dragBox.width * 0.9, dragBox.y + dragBox.height / 2, { steps: 60 });
+  await p.mouse.up();
+  await p.waitForTimeout(300);
+  const dragStat = await p.evaluate(() => ({
+    scale: window.MH.store.state.bg.scale,
+    hot: { ...window.__hot },
+  }));
+  ok(dragStat.scale > 3.0, '真实拖过整条滑块：比例到 ' + dragStat.scale + '（原来拖一下就断，只到 0.78）');
+  ok(dragStat.hot.renders <= 3, '拖动期间几乎不重渲染：' + dragStat.hot.renders + ' 次');
+  ok(dragStat.hot.paints <= 3, '拖动期间几乎不重绘格子：' + dragStat.hot.paints + ' 次');
+
+  // 滑块拖完之后数值显示与状态一致
+  const readout = await p.textContent('[data-bg="scale"]');
+  ok(Math.abs(parseFloat(readout) / 100 - dragStat.scale) < 0.001, '数值显示与状态一致：' + readout + ' vs ' + dragStat.scale);
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

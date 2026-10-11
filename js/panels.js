@@ -904,17 +904,35 @@
   }
 
   /** 设置底图缩放：拖动滑块、精调按钮、还原都走这里，顺带刷新数值显示 */
+  /**
+   * 底图热调节（缩放 / 透明度）的公共入口：拖动时**静默**改状态 + 只刷新画布，
+   * 松手（change）时再 touch() 落盘 + 全量重绘。
+   *
+   * 走 store.preview 的话每次输入都触发整块重渲染，而侧栏里的滑块本身就在
+   * 重渲染范围内 —— 拖到第二下节点被换掉，拖动直接失效（实测 40 步只生效 1 步）。
+   * 这里再用 rAF 合并同帧的多次输入。
+   */
+  let bgRaf = 0;
+  function applyBgPatch(patch) {
+    if (!MH.store.state.bg) return;
+    // 状态立即生效（数值显示、后续读取都立刻正确），只把画布刷新合并到一帧里
+    MH.store.previewSilent(s => Core.updateBackground(s, patch));
+    if (bgRaf) return;
+    const flush = () => { bgRaf = 0; MH.board.refreshLayout(); };
+    bgRaf = typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame(flush)
+      : (setTimeout(flush, 16), 1);
+  }
+
   function applyBgScale(v) {
     const st = MH.store.state;
     if (!st.bg) return;
     const next = Math.round(Core.clampNum(v, 0.1, 4, 1) * 1000) / 1000;
-    MH.store.preview(s => { Core.updateBackground(s, { scale: next }); });
-    MH.board.rebuildIfNeeded();
-    MH.board.paint();
     const slider = document.getElementById('bgScale');
     if (slider) slider.value = String(Math.round(next * 1000) / 10);
     const meta = document.querySelector('[data-bg="scale"]');
     if (meta) meta.textContent = (Math.round(next * 1000) / 10).toFixed(1) + '%';
+    applyBgPatch({ scale: next });
   }
 
   function onDocumentInput(e) {
@@ -923,8 +941,7 @@
       if (MH.ui.draft) MH.ui.draft.name = t.value;
     } else if (t.id === 'bgOpacity') {
       const v = Core.clampInt(t.value, 10, 100, 85) / 100;
-      MH.store.preview(s => { Core.updateBackground(s, { opacity: v }); });
-      MH.board.syncBackground(MH.store.state);
+      applyBgPatch({ opacity: v });
     } else if (t.id === 'bgScale') {
       // 注意用浮点 clamp：以前用 clampInt 会把值取整到 1%，细步长等于白调
       const v = Core.clampNum(t.value, 10, 400, 100) / 100;
@@ -936,6 +953,11 @@
 
   function onDocumentChange(e) {
     const t = e.target;
+    // 底图滑块松手：把拖动期间的静默改动落盘，并全量重绘一次（侧栏数值也跟着刷新）
+    if (t.id === 'bgScale' || t.id === 'bgOpacity') {
+      MH.store.touch('调整底图');     // 落盘 + 全量重绘一次（侧栏数值也跟着刷新）
+      return;
+    }
     if (t.name === 'draftOcc') {
       if (MH.ui.draft) { MH.ui.draft.occupiable = t.value === '1'; MH.render(); }
     } else if (t.id === 'linkPicker') {

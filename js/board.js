@@ -148,6 +148,16 @@
       this.handleEl.hidden = !(MH.ui.aligning && st.bg);
     },
 
+    /**
+     * 拖动类操作的轻量刷新：只重算布局（画布/网格/底图位置与尺寸），
+     * 不重绘格子内容、不重建侧栏 —— 底图缩放/网格偏移都不影响格子内容。
+     */
+    refreshLayout() {
+      const st = MH.store.state;
+      this.rebuildIfNeeded();
+      this.syncBackground(st);
+    },
+
     /** 底图元素的尺寸与透明度 */
     syncBackground(st) {
       const b = st.bg;
@@ -567,7 +577,8 @@
       // 对齐模式：拖动移动网格
       if (this.alignDrag) {
         const st0 = MH.store.state;
-        MH.store.preview(s => Core.setGridOffset(
+        // 静默改：这里每移动一像素就触发一次，走 preview 会把侧栏（含滑块）整个重建
+        MH.store.previewSilent(s => Core.setGridOffset(
           s,
           this.alignDrag.baseX + (e.clientX - this.alignDrag.startX),
           this.alignDrag.baseY + (e.clientY - this.alignDrag.startY)
@@ -687,8 +698,9 @@
         const cell = Math.round((w / MH.store.state.cols + h / MH.store.state.rows) / 2);
         const st2 = MH.store.state;
         // 对齐模式下抓手只缩放网格（底图有「绑定缩放」也不跟），否则对位调不动
-        MH.store.preview(s => { Core.setCellSize(s, cell, { gridOnly: true }); });
-        this.applyLayout(st2);
+        MH.store.previewSilent(s => { Core.setCellSize(s, cell, { gridOnly: true }); });
+        this.rebuildIfNeeded();     // --cell 变了，格子尺寸靠它刷新
+        this.syncBackground(st2);
       });
       window.addEventListener('pointerup', this._onHandleUp = () => {
         window.removeEventListener('pointermove', this._onHandleMove);
