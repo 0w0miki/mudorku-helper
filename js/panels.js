@@ -137,6 +137,7 @@
       '<div class="row wrap">' +
       '<button class="ghost sm" data-act="auto-align" title="在底图上自动找出网格，算好缩放与网格偏移">🪄 自动对位</button>' +
       '<button class="ghost sm" data-act="bg-region" title="地图只占画面一部分时，先圈出地图范围再识别">框选地图</button>' +
+      '<button class="ghost sm" data-act="bg-calibrate" title="识别不出来时用这个：在地图上点三下（左上交点 → 右边一格 → 下边一格）">按格定标</button>' +
       (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
       '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
@@ -624,9 +625,66 @@
     MH.toast(place.message + (det.inverted ? '（已自动纠正反相）' : ''), 'ok');
   }
 
+  /** 视口坐标 → 底图比例（0..1，相对底图左上角与显示尺寸） */
+  function viewToRatio(clientX, clientY) {
+    const st = MH.store.state;
+    if (!st.bg) return null;
+    const lay = Core.boardLayout(st);
+    const gb = document.getElementById('gridBox');
+    if (!gb) return null;
+    const rect = gb.getBoundingClientRect();
+    // gridBox 的 rect 对应场景里的 gridLeft/gridTop，用它把视口坐标换算进场景
+    const sx = lay.gridLeft + (clientX - rect.left);
+    const sy = lay.gridTop + (clientY - rect.top);
+    return { fx: (sx - lay.bgLeft) / Math.max(1, lay.bgW), fy: (sy - lay.bgTop) / Math.max(1, lay.bgH) };
+  }
+
+  /**
+   * 按格定标：识别不出来时的手工路径，比拖滑块准得多。
+   * 依次点三下 —— ① 地图左上角格线交点 ② 它右边相邻的交点 ③ 它下边相邻的交点。
+   * 三个点直接给出格距与原点，换算方式与自动对位完全一致。
+   */
+  function startCalibrate() {
+    if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (MH.ui.calib) { MH.ui.calib = null; MH.ui.picking = false; document.body.classList.remove('picking'); MH.toast('已取消定标', 'warn'); return; }
+    MH.ui.calib = { pts: [] };
+    MH.ui.picking = true;                       // 复用"在棋盘上取点"的模式
+    document.body.classList.add('picking');
+    MH.toast('点三下：① 地图左上角格线交点 ② 右边相邻交点 ③ 下边相邻交点（再点按钮取消）', 'ok');
+  }
+
+  async function finishCalibrate(pts) {
+    const st = MH.store.state;
+    let raster;
+    try { raster = await bgRaster(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    const W = raster.width, H = raster.height;
+    const A = { x: pts[0].fx * W, y: pts[0].fy * H };
+    const B = { x: pts[1].fx * W, y: pts[1].fy * H };
+    const C = { x: pts[2].fx * W, y: pts[2].fy * H };
+    const pitchX = Math.abs(B.x - A.x) || Math.abs(C.x - A.x);
+    const pitchY = Math.abs(C.y - A.y) || Math.abs(B.y - A.y);
+    if (!(pitchX > 4) || !(pitchY > 4)) { MH.toast('这三点挨得太近了，重新点一次', 'warn'); return; }
+    const A2 = window.MurdokuAlign;
+    if (!A2) { MH.toast('自动对位模块没加载（js/align.js）', 'error'); return; }
+    const place = A2.suggestPlacement(
+      { ok: true, pitch: { x: pitchX, y: pitchY }, origin: { x: A.x, y: A.y }, confidence: 1 },
+      { cellSize: st.settings.cellSize, srcW: W, srcH: H, bgW: st.bg.w, bgH: st.bg.h,
+        scaleMin: Core.BG_SCALE_MIN || 0.1, scaleMax: Core.BG_SCALE_MAX || 4 });
+    if (!place.ok) { MH.ui.alignInfo = '定标超出范围'; MH.render(); MH.toast(place.message, 'warn'); return; }
+    MH.store.commit('按格定标', s2 => {
+      Core.updateBackground(s2, { scale: place.scale, bound: true });
+      Core.setGridOffset(s2, place.gridX, place.gridY);
+    });
+    MH.ui.alignInfo = '按格定标 · 格距 ' + Math.round(pitchX) + '×' + Math.round(pitchY) + 'px';
+    MH.render();
+    MH.toast('已按三下点定标：格距 ' + Math.round(pitchX) + '×' + Math.round(pitchY) + 'px → 缩放 ' +
+      (Math.round(place.scale * 1000) / 10) + '%', 'ok');
+  }
+
   /** 框选地图范围：在棋盘上拖一个矩形，只在该范围里找网格 */
   function pickRegion() {
     if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (MH.ui.calib) { MH.ui.calib = null; MH.ui.picking = false; document.body.classList.remove('picking'); }
     MH.ui.picking = !MH.ui.picking;
     const box = document.getElementById('regionBox');
     if (box) box.hidden = true;
@@ -673,6 +731,24 @@
       box.style.height = Math.abs(p.y - start.y) + 'px';
     });
     board.addEventListener('pointerup', e => {
+      // 按格定标模式：每次点击记一个点，凑够三个就算
+      if (MH.ui.calib) {
+        const r = viewToRatio(e.clientX, e.clientY);
+        if (r) {
+          MH.ui.calib.pts.push(r);
+          const n = MH.ui.calib.pts.length;
+          if (n < 3) {
+            MH.toast('已记第 ' + n + ' 个点（还差 ' + (3 - n) + ' 个）', 'ok');
+          } else {
+            const pts = MH.ui.calib.pts;
+            MH.ui.calib = null;
+            MH.ui.picking = false;
+            document.body.classList.remove('picking');
+            finishCalibrate(pts);
+          }
+        }
+        return;
+      }
       if (!MH.ui.picking || !start || !startV) return;
       const x0 = Math.min(startV.x, e.clientX), y0 = Math.min(startV.y, e.clientY);
       const w = Math.abs(e.clientX - startV.x), h = Math.abs(e.clientY - startV.y);
@@ -940,6 +1016,7 @@
     'bg-crop'() { cropBackground(); },
     'auto-align'() { runAutoAlign(); },
     'bg-region'() { pickRegion(); },
+    'bg-calibrate'() { startCalibrate(); },
     'bg-scale-step'(el, e) {
       const st = MH.store.state;
       if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
