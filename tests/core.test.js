@@ -24,6 +24,29 @@ test('labelFor 跳过 X', () => {
   assert.ok(labels.every(l => !l.includes('X')), '标签不含 X');
 });
 
+test('默认编号：22 人最后是 V；超过 22 继续按 A–Z 顺序（跳过 X）', () => {
+  // 22 人 = A..V
+  const at22 = C.createState(22, 22);
+  assert.equal(at22.people.length, 22);
+  assert.equal(at22.people[21].label, 'V', '22 人最后一个编号是 V');
+  // 超过 22 → 接着 W / Y / Z（X 留给"不能放人"），再往后 AA、AB…
+  const tail = n => C.createState(n, n).people.map(p => p.label).slice(-4).join(' ');
+  assert.equal(tail(23), 'T U V W');
+  assert.equal(tail(24), 'U V W Y');
+  assert.equal(tail(25), 'V W Y Z');
+  assert.equal(tail(26), 'W Y Z AA');
+  assert.equal(tail(27), 'Y Z AA AB');
+  // 26 人时前 22 个仍是 A..V（不因为超过 22 就整体改变）
+  const at26 = C.createState(26, 26).people.map(p => p.label);
+  assert.deepEqual(at26.slice(0, 22), at22.people.map(p => p.label), '前 22 个编号不变');
+  assert.deepEqual(at26, ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','Y','Z','AA']);
+  // 到 40×40（人手一张大图）也不重复、不含 X
+  const big = C.createState(40, 40).people.map(p => p.label);
+  assert.equal(big.length, 40);
+  assert.equal(new Set(big).size, 40, '40 个编号互不重复');
+  assert.ok(big.every(l => !l.includes('X')), '不含 X');
+});
+
 test('peopleCount = min(rows, cols)', () => {
   assert.equal(C.peopleCount(5, 8), 5);
   assert.equal(C.peopleCount(8, 5), 5);
