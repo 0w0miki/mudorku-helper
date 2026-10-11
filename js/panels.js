@@ -135,9 +135,8 @@
       '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
       '</div>' +
       '<div class="row wrap">' +
-      '<button class="ghost sm" data-act="auto-align" title="在底图上自动找出网格，算好缩放与网格偏移">🪄 自动对位</button>' +
-      '<button class="ghost sm" data-act="bg-region" title="地图只占画面一部分时，先圈出地图范围再识别">框选地图</button>' +
-      '<button class="ghost sm" data-act="bg-calibrate" title="识别不出来时用这个：在地图上点三下（左上交点 → 右边一格 → 下边一格）">按格定标</button>' +
+      '<button class="ghost sm" data-act="bg-region" title="拖动矩形，正好圈住地图外框；再用当前行列数算出格距与偏移">▭ 框地图外框</button>' +
+      '<button class="ghost sm" data-act="bg-calibrate" title="地图外框没截全时用这个：在地图上点三下（左上交点 → 右边一格 → 下边一格）">按格定标</button>' +
       (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
       '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
@@ -627,6 +626,43 @@
     MH.toast(place.message + (det.inverted ? '（已自动纠正反相）' : ''), 'ok');
   }
 
+  /**
+   * 按「地图外框」定标 —— 主路径，不需要任何识别。
+   * 框的左上角 = 网格原点，框宽 ÷ 列数 = 格距 X，框高 ÷ 行数 = 格距 Y。
+   * 用整幅跨度算格距，框边差 1~2px 摊到每格可以忽略；行列数来自题面（手填），
+   * 所以整条路没有任何"猜"的成分。
+   */
+  async function applyBoxGeometry(rectRatio) {
+    const A2 = window.MurdokuAlign;
+    if (!A2) { MH.toast('几何模块没加载（js/align.js）', 'error'); return; }
+    const st = MH.store.state;
+    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (!(st.rows > 0) || !(st.cols > 0)) { MH.toast('先在左侧填好行 / 列并生成地图', 'warn'); return; }
+    let raster;
+    try { raster = await bgRaster(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    const W = raster.width, H = raster.height;
+    const box = { x: rectRatio.x * W, y: rectRatio.y * H, w: rectRatio.w * W, h: rectRatio.h * H };
+    const pitchX = box.w / st.cols;
+    const pitchY = box.h / st.rows;
+    if (!(pitchX > 4) || !(pitchY > 4)) { MH.toast('框太小了，重新框一次', 'warn'); return; }
+    const place = A2.suggestPlacement(
+      { ok: true, pitch: { x: pitchX, y: pitchY }, origin: { x: box.x, y: box.y }, confidence: 1 },
+      { cellSize: st.settings.cellSize, srcW: W, srcH: H, bgW: st.bg.w, bgH: st.bg.h,
+        scaleMin: Core.BG_SCALE_MIN || 0.1, scaleMax: Core.BG_SCALE_MAX || 4 });
+    if (!place.ok) { MH.ui.alignInfo = '外框定标超出范围'; MH.render(); MH.toast(place.message, 'warn'); return; }
+    MH.store.commit('按地图外框定标', s2 => {
+      Core.updateBackground(s2, { scale: place.scale, bound: true });
+      Core.setGridOffset(s2, place.gridX, place.gridY);
+    });
+    const pct = Math.round(place.scale * 1000) / 10;
+    MH.ui.alignInfo = '格距 ' + pitchX.toFixed(1) + '/' + pitchY.toFixed(1) + 'px · 缩放 ' + pct + '%';
+    MH.render();
+    const skew = pitchX / pitchY;
+    MH.toast('已按外框定标：' + st.cols + ' 列 × ' + st.rows + ' 行，格距 ' + pitchX.toFixed(1) + '×' +
+      pitchY.toFixed(1) + 'px → 缩放 ' + pct + '%' +
+      (Math.abs(skew - 1) > 0.12 ? '（格子明显不是方的：行列数是不是填反了？）' : ''), 'ok');
+  }
+
   /** 视口坐标 → 底图比例（0..1，相对底图左上角与显示尺寸） */
   function viewToRatio(clientX, clientY) {
     const st = MH.store.state;
@@ -691,7 +727,7 @@
     const box = document.getElementById('regionBox');
     if (box) box.hidden = true;
     document.body.classList.toggle('picking', MH.ui.picking);
-    MH.toast(MH.ui.picking ? '在地图上拖一个矩形圈住地图范围（再点一次取消）' : '已取消框选',
+    MH.toast(MH.ui.picking ? '拖一个矩形，正好圈住地图外框（再点按钮取消）' : '已取消框选',
       MH.ui.picking ? 'ok' : 'warn');
   }
 
@@ -769,7 +805,7 @@
       const c01 = v => Math.max(0, Math.min(1, v));
       const rectRatio = { x: c01(fx), y: c01(fy), w: c01(Math.min(fw, 1 - c01(fx))), h: c01(Math.min(fh, 1 - c01(fy))) };
       if (rectRatio.w <= 0.02 || rectRatio.h <= 0.02) { MH.toast('框到底图外面了，重新框一次', 'warn'); return; }
-      runAutoAlign(rectRatio);
+      applyBoxGeometry(rectRatio);
     });
   }
 
