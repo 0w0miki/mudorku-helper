@@ -201,8 +201,10 @@ button.block { display: block; width: 100%; text-align: center; }
 .heads { position: absolute; z-index: 2; display: none; }
 .board.has-heads .heads { display: flex; }
 
+/* 行统计在网格右边，列统计在网格下面：画布只向右/下长，
+   左上角保持是网格原点，对底图没有任何干扰 */
 .row-heads {
-  left: calc(var(--headw) * -1);
+  left: 100%;
   top: 0;
   width: var(--headw);
   height: 100%;
@@ -210,18 +212,18 @@ button.block { display: block; width: 100%; text-align: center; }
 }
 .col-heads {
   left: 0;
-  top: calc(var(--headh) * -1);
+  top: 100%;
   width: 100%;
   height: var(--headh);
   flex-direction: row;
 }
 .head-corner {
-  left: calc(var(--headw) * -1);
-  top: calc(var(--headh) * -1);
+  left: 100%;
+  top: 100%;
   width: var(--headw);
   height: var(--headh);
-  border-right: 1px solid var(--line-strong);
-  border-bottom: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
   background: #f8fafc;
 }
 
@@ -239,14 +241,18 @@ button.block { display: block; width: 100%; text-align: center; }
 .row-head {
   width: var(--headw);
   height: var(--cell);
-  border-right: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
   border-bottom: 1px solid var(--line);
+  justify-content: flex-start;
+  padding-left: 2px;
 }
 .col-head {
   width: var(--cell);
   height: var(--headh);
-  border-bottom: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
   border-right: 1px solid var(--line);
+  align-content: flex-start;
+  padding-top: 2px;
 }
 .head i {
   font-style: normal;

@@ -25,9 +25,10 @@
   const CELL_STEP = 6;
 
   // 底图（衬在网格下方的图片 / PDF 页面）
-  const HEAD_W_MAX = 96, HEAD_W_MIN = 46;   // 行标题条宽度（随格子大小缩放）
-  const HEAD_H_MAX = 60, HEAD_H_MIN = 26;   // 列标题条高度
-  const HEAD_LABELS = 4;                    // 一条里最多显示几个人，多出来的折成 +N
+  const HEAD_W_MAX = 132, HEAD_W_MIN = 56;  // 行统计条宽度（随格子大小缩放）
+  const HEAD_H_MAX = 72, HEAD_H_MIN = 34;   // 列统计条高度
+  const HEAD_LABELS = 6;                    // 一条里最多显示几个人，多出来的折成 +N
+  const HEAD_CHIP_W = 22, HEAD_CHIP_H = 13; // 一个标签大致占的宽 / 高（估算容量用）
   const BG_SCALE_MIN = 0.1;
   const BG_SCALE_MAX = 4;
   const BG_OPACITY_MIN = 0.1;
@@ -419,6 +420,24 @@
     return { rows, cols };
   }
 
+  /**
+   * 一条提示实际能放下几个标签。格子很小时文字面积也小，超过就会溢出格子，
+   * 所以这里按「表头尺寸 × 格子尺寸」估个容量，多出来的折成 +N。
+   */
+  function headCapacity(state) {
+    const cell = state.settings.cellSize;
+    const hs = headSize(state);
+    const lines = n => Math.max(1, Math.floor(n / HEAD_CHIP_H));
+    const perLine = n => Math.max(1, Math.floor(n / HEAD_CHIP_W));
+    const cap = n => Math.min(HEAD_LABELS, Math.max(1, n));
+    return {
+      // 行提示：宽度是 headW（可换行），每条高度 = 一个格子
+      rowMax: cap(perLine(hs.w) * lines(cell)),
+      // 列提示：宽度 = 一个格子，每条高度是 headH（可换行）
+      colMax: cap(lines(cell) * lines(hs.h)),
+    };
+  }
+
   function boardLayout(state) {
     const cell = state.settings.cellSize;
     const gridW = state.cols * cell;
@@ -430,14 +449,14 @@
     const minY = Math.min(0, gy);
     const maxX = Math.max(bg.w, gx + gridW);
     const maxY = Math.max(bg.h, gy + gridH);
-    // 表头挂在网格左上角外侧，所以画布要在左/上多留出这一条，
-    // 并且底图与网格整体平移同样距离 —— 两者的相对关系保持不变
+    // 行统计在网格右边、列统计在网格下面：画布只向右/下加宽，
+    // 底图与网格都留在原位（不动原点），对位关系完全不受影响
     const head = headSize(state);
     return {
       cell, gridW, gridH, bgW: bg.w, bgH: bg.h,
       headW: head.w, headH: head.h,
-      bgLeft: (minX < 0 ? -minX : 0) + head.w, bgTop: (minY < 0 ? -minY : 0) + head.h,
-      gridLeft: gx - minX + head.w, gridTop: gy - minY + head.h,
+      bgLeft: minX < 0 ? -minX : 0, bgTop: minY < 0 ? -minY : 0,
+      gridLeft: gx - minX, gridTop: gy - minY,
       width: Math.max(maxX - minX, 1) + head.w, height: Math.max(maxY - minY, 1) + head.h,
     };
   }
@@ -1170,7 +1189,7 @@
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
     normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
-    setCellSize, gridCropRect, headsVisible, headSize, linePeople, HEAD_LABELS,
+    setCellSize, gridCropRect, headsVisible, headSize, linePeople, headCapacity, HEAD_LABELS,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,

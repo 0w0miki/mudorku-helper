@@ -1522,19 +1522,26 @@ test('游玩模式：网格外侧显示每行/每列有哪些候选的人', asyn
   dom.window.close();
 });
 
-test('行列提示最多显示 4 个，多出来的折成 +N', async () => {
+test('行列提示放不下时折成 +N（容量随尺寸变）', async () => {
   const { dom, doc } = await boot();
   const win = dom.window;
-  win.MH.store.replace(win.MurdokuCore.createState(6, 6), '测试');
+  win.MH.store.replace(win.MurdokuCore.createState(8, 8), '测试');
   const st = win.MH.store.state, C = win.MurdokuCore;
-  st.people.forEach((p, i) => C.setCandidate(st, p.id, '0,' + i, true));   // 6 个人都在第 0 行
-  clickSel(dom, '#tabPlay');
+  st.people.forEach((p, i) => C.setCandidate(st, p.id, '0,' + i, true));   // 8 个人都在第 0 行
 
+  // 容量：格子越小能显示的越少，避免溢出格子
+  const at44 = C.headCapacity({ ...st, settings: { ...st.settings, cellSize: 44 }, phase: 'play' });
+  const at12 = C.headCapacity({ ...st, settings: { ...st.settings, cellSize: 12 }, phase: 'play' });
+  assert.ok(at44.rowMax > at12.rowMax, '格子大时能显示更多：' + at44.rowMax + ' vs ' + at12.rowMax);
+  assert.ok(at12.colMax >= 1, '再小也至少显示一个：' + at12.colMax);
+
+  clickSel(dom, '#tabPlay');
   const head = q(doc, '.row-head');
-  const chips = head.querySelectorAll('i');
-  assert.equal(chips.length, 5, '4 个标签 + 1 个 +N（共 ' + chips.length + '）');
-  assert.equal(chips[chips.length - 1].className, 'more');
-  assert.equal(chips[chips.length - 1].textContent, '+2', '6 个人 → +2');
+  const chips = head.querySelectorAll('.hi');
+  const cap = C.headCapacity(win.MH.store.state).rowMax;
+  assert.equal(chips.length, cap + 1, cap + ' 个标签 + 1 个 +N（共 ' + chips.length + '）');
+  assert.ok(chips[chips.length - 1].classList.contains('more'), '最后一个是 +N');
+  assert.equal(chips[chips.length - 1].textContent, '+' + (8 - cap), '8 个人 → +' + (8 - cap));
   assert.match(head.title, /第 1 行/, 'title 里是完整信息');
   dom.window.close();
 });

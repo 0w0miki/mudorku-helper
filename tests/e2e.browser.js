@@ -56,6 +56,17 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
 (async () => {
   const b = await chromium.launch();
   const p = await b.newPage({ viewport: { width: 1460, height: 940 }, deviceScaleFactor: 2 });
+  // 有些断言直接读 getComputedStyle 的颜色，而格子带 .08s 的背景过渡：等 80ms 去读
+  // 会读到过渡中间值（0.4 读成 0.333），偶发失败。测试里直接关掉过渡。
+  await p.addInitScript(() => {
+    const add = () => {
+      const st = document.createElement('style');
+      st.textContent = '*{transition:none !important;animation:none !important}';
+      (document.head || document.documentElement).appendChild(st);
+    };
+    if (document.head) add();
+    else document.addEventListener('DOMContentLoaded', add);
+  });
   const errs = [];
   p.on('pageerror', e => errs.push('pageerror: ' + e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
@@ -663,6 +674,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       c4: Math.round(ch[4].left - cellBox(0, 4).left) + '/' + Math.round(ch[4].width - cellBox(0, 4).width),
       inside: document.querySelector('.row-heads').getBoundingClientRect().left >= board.left - 1
         && document.querySelector('.col-heads').getBoundingClientRect().top >= board.top - 1,
+      rowGap: Math.round(document.querySelector('.row-heads').getBoundingClientRect().left - document.querySelector('#gridBox').getBoundingClientRect().right),
+      colGap: Math.round(document.querySelector('.col-heads').getBoundingClientRect().top - document.querySelector('#gridBox').getBoundingClientRect().bottom),
       row0: [...document.querySelectorAll('.row-head')][0].textContent.trim(),
       col3: [...document.querySelectorAll('.col-head')][3].textContent.trim(),
       row7: [...document.querySelectorAll('.row-head')][7].textContent.trim(),
@@ -672,6 +685,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(hg.rows === 8 && hg.cols === 10, '行列各一条提示：' + hg.rows + '×' + hg.cols);
   ok(hg.r3 === '0/0' && hg.c4 === '0/0', '提示条与格子严格对齐（行 Δtop/Δh=' + hg.r3 + '，列 Δleft/Δw=' + hg.c4 + '）');
   ok(hg.inside, '提示条在画布内，没被裁掉');
+  ok(hg.rowGap === 0, '行统计紧贴网格右侧（间距 ' + hg.rowGap + 'px）');
+  ok(hg.colGap === 0, '列统计紧贴网格下方（间距 ' + hg.colGap + 'px）');
   ok(hg.row0 === 'AB', '第 0 行显示候选 A B：' + hg.row0);
   ok(hg.col3 === 'A', '第 3 列显示候选 A：' + hg.col3);
   ok(hg.row7 === 'D' && hg.done, '已确定的人用实心标出：' + hg.row7);
@@ -697,6 +712,24 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.click('[data-act="toggle-heads"]');
   await p.waitForTimeout(250);
   ok(await p.evaluate(() => getComputedStyle(document.querySelector('.row-heads')).display) === 'flex', '再开回来');
+
+  // 缩小到 12px：标签数受容量限制，不会溢出格子
+  const tiny = await p.evaluate(() => {
+    window.MH.store.setSettings({ cellSize: 12 });
+    window.MH.render();
+    const heads = [...document.querySelectorAll('.head')];
+    return {
+      overflow: heads.filter(h => h.scrollHeight > h.clientHeight + 1 || h.scrollWidth > h.clientWidth + 1).length,
+      cap: window.MurdokuCore.headCapacity(window.MH.store.state),
+    };
+  });
+  ok(tiny.overflow === 0, '格子缩到 12px 也不溢出格子（' + tiny.overflow + ' 条溢出）');
+  ok(tiny.cap.rowMax < 6 && tiny.cap.colMax < 6, '容量随尺寸收紧：' + JSON.stringify(tiny.cap));
+  await p.evaluate(() => { window.MH.store.setSettings({ cellSize: 44 }); window.MH.render(); });
+  await p.waitForTimeout(200);
+
+  // 点行统计里的人 → 清掉这一行别人的候选并标 X
+  const ids = await p.evaluate(() => window.MH.store.state.people.map(x => x.id));
   await p.screenshot({ path: '/tmp/mh-e2e-heads.png' });
 
   console.log(A.join('\n'));

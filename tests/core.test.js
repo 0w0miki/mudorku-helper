@@ -1054,7 +1054,7 @@ test('行列提示只在游玩阶段显示，且可以关掉', () => {
   assert.equal(C.boardLayout(st).headW, 0, '关掉后画布不留表头空间');
 });
 
-test('有表头时画布为它在左上留出空间，底图与网格整体平移（相对关系不变）', () => {
+test('行统计在右、列统计在下：画布只向右下加宽，网格与底图都不动', () => {
   const st = C.createState(6, 8);
   st.settings.cellSize = 50;
   C.setBackground(st, { kind: 'image', name: 'm.png', w: 400, h: 300, scale: 1 });
@@ -1063,15 +1063,13 @@ test('有表头时画布为它在左上留出空间，底图与网格整体平�
 
   st.phase = 'play';
   const after = C.boardLayout(st);
-  const hw = after.headW, hh = after.headH;
-  assert.ok(hw > 0 && hh > 0, '游玩阶段表头有尺寸');
-  assert.equal(after.gridLeft, before.gridLeft + hw, '网格右移一个表头宽');
-  assert.equal(after.gridTop, before.gridTop + hh, '网格下移一个表头高');
-  assert.equal(after.bgLeft, before.bgLeft + hw, '底图同样右移，相对网格不变');
-  assert.equal(after.bgTop, before.bgTop + hh);
-  assert.equal(after.gridLeft - after.bgLeft, before.gridLeft - before.bgLeft, '两者相对偏移不变');
-  assert.equal(after.width, before.width + hw, '画布宽加上表头');
-  assert.equal(after.height, before.height + hh, '画布高加上表头');
+  assert.ok(after.headW > 0 && after.headH > 0, '游玩阶段表头有尺寸');
+  assert.equal(after.gridLeft, before.gridLeft, '网格不被推动');
+  assert.equal(after.gridTop, before.gridTop, '网格不被推动');
+  assert.equal(after.bgLeft, before.bgLeft, '底图也不动 → 对位关系天然不变');
+  assert.equal(after.bgTop, before.bgTop);
+  assert.equal(after.width, before.width + after.headW, '画布向右加宽');
+  assert.equal(after.height, before.height + after.headH, '画布向下加高');
 });
 
 test('表头尺寸随格子大小缩放但有上下限', () => {
@@ -1083,8 +1081,8 @@ test('表头尺寸随格子大小缩放但有上下限', () => {
   const big = C.headSize(st);
   st.settings.cellSize = 30;
   const mid = C.headSize(st);
-  assert.ok(small.w >= 46 && big.w <= 96, '宽度夹在 46–96：' + small.w + ' / ' + big.w);
-  assert.ok(small.h >= 26 && big.h <= 60, '高度夹在 26–60：' + small.h + ' / ' + big.h);
+  assert.ok(small.w >= 56 && big.w <= 132, '宽度夹在 56–132：' + small.w + ' / ' + big.w);
+  assert.ok(small.h >= 34 && big.h <= 72, '高度夹在 34–72：' + small.h + ' / ' + big.h);
   assert.ok(big.w > mid.w && mid.w >= small.w, '随格子变大而变宽');
 });
 

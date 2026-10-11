@@ -211,6 +211,7 @@
       if (!this.rowHeadEls || !this.rowHeadEls.length) return;
       const esc = MH.esc;
       const LP = Core.linePeople(st);
+      const cap = Core.headCapacity(st);
       const fill = (el, info, axis, i) => {
         if (!el) return;
         const items = [];
@@ -222,7 +223,8 @@
           const p = Core.person(st, pid);
           if (p) items.push({ label: p.label, color: p.color, done: false });
         }
-        const max = Core.HEAD_LABELS;
+        // 容量按格子大小估算：格子小了就少显示几个，免得溢出格子（多出来的折成 +N）
+        const max = axis === 'r' ? cap.rowMax : cap.colMax;
         const shown = items.slice(0, max);
         const rest = items.length - shown.length;
         el.innerHTML = shown.map(it =>
