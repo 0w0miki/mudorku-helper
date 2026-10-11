@@ -197,7 +197,7 @@ button.block { display: block; width: 100%; text-align: center; }
 /* ------------------------------------------------------------ 行列候选提示
    贴在网格外侧：行标题在左、列标题在上。画布已经为它们留出 --headw/--headh
    的空间（见 Core.boardLayout），所以这里用负偏移即可。 */
-.grid-box { --headw: 0px; --headh: 0px; }
+.grid-box { --headw: 0px; --headh: 0px; --headfont: 10px; }
 .heads { position: absolute; z-index: 2; display: none; }
 .board.has-heads .heads { display: flex; }
 
@@ -256,9 +256,9 @@ button.block { display: block; width: 100%; text-align: center; }
 }
 .head .hi {
   font: inherit;
-  font-size: 10px;
+  font-size: var(--headfont, 10px);
   font-weight: 700;
-  line-height: 12px;
+  line-height: calc(var(--headfont, 10px) + 2px);
   padding: 0 3px;
   border: 0;
   border-radius: 4px;
@@ -267,6 +267,7 @@ button.block { display: block; width: 100%; text-align: center; }
   box-shadow: inset 0 0 0 1px currentColor;
   max-width: 100%;
   overflow: hidden;
+  white-space: nowrap;
 }
 button.hi { cursor: pointer; }
 button.hi:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }

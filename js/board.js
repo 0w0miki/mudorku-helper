@@ -139,6 +139,7 @@
       // 表头贴在网格外侧：行标题在左边，列标题在上边，靠 CSS 变量定位
       this.gridBox.style.setProperty('--headw', L.headW + 'px');
       this.gridBox.style.setProperty('--headh', L.headH + 'px');
+      this.gridBox.style.setProperty('--headfont', (Core.headFont(st.settings.cellSize) || 10) + 'px');
       this.boardEl.classList.toggle('has-heads', L.headW > 0);
       this.handleEl.style.left = (L.gridLeft + L.gridW) + 'px';
       this.handleEl.style.top = (L.gridTop + L.gridH) + 'px';

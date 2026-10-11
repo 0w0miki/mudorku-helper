@@ -1042,7 +1042,7 @@ test('linePeople：统计每行/每列有哪些人的候选，以及是否已有
 test('行列提示只在游玩阶段显示，且可以关掉', () => {
   const st = C.createState(6, 6);
   assert.equal(C.headsVisible(st), false, '准备阶段不显示');
-  assert.deepEqual(C.headSize(st), { w: 0, h: 0 });
+  assert.deepEqual(C.headSize(st), { w: 0, h: 0, font: 10 });
 
   st.phase = 'play';
   assert.equal(C.headsVisible(st), true, '游玩阶段显示');

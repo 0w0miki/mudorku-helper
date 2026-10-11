@@ -763,6 +763,89 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(backFilter.other === '3,5,3,6' && backFilter.x === null, '一次撤销全部还原：' + JSON.stringify(backFilter));
   await p.screenshot({ path: '/tmp/mh-e2e-heads.png' });
 
+  // 22) 统计条按内容变大：正常尺寸下全部显示，不要 +N
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(24, 24), 'e2e 24 人'));
+  await p.click('#tabPlay');
+  await p.waitForTimeout(200);
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    st.people.forEach((x, i) => C.setCandidate(st, x.id, i + ',0', true));   // 24 个都在第 0 列
+    window.MH.render();
+  });
+  await p.waitForTimeout(300);
+  const allShown = await p.evaluate(() => {
+    const head = document.querySelector('.col-head');
+    const grid = document.querySelector('#gridBox').getBoundingClientRect();
+    const strip = document.querySelector('.col-heads').getBoundingClientRect();
+    return {
+      chips: head.querySelectorAll('.hi').length,
+      more: head.querySelectorAll('.hi.more').length,
+      stripH: Math.round(strip.height),
+      overflow: [...document.querySelectorAll('.head')].filter(h => h.scrollHeight > h.clientHeight + 1 || h.scrollWidth > h.clientWidth + 1).length,
+      gap: Math.round(strip.top - grid.bottom),
+    };
+  });
+  ok(allShown.more === 0 && allShown.chips === 24, '44px 下 24 个标签全部显示、没有 +N：' + allShown.chips + ' 个');
+  ok(allShown.stripH > 34, '统计条按内容变高：' + allShown.stripH + 'px');
+  ok(allShown.overflow === 0 && allShown.gap === 0, '不溢出格子且仍紧贴网格；溢出 ' + allShown.overflow + ' 条');
+  const tinyHead = await p.evaluate(() => {
+    window.MH.store.setSettings({ cellSize: 12 });
+    window.MH.render();
+    const head = document.querySelector('.col-head');
+    return {
+      chips: head.querySelectorAll('.hi').length,
+      more: head.querySelectorAll('.hi.more').length,
+      cap: window.MurdokuCore.headCapacity(window.MH.store.state).colMax,
+      h: Math.round(document.querySelector('.col-heads').getBoundingClientRect().height),
+      font: document.querySelector('#gridBox').style.getPropertyValue('--headfont'),
+    };
+  });
+  ok(tinyHead.more === 1 && tinyHead.chips === tinyHead.cap + 1, '12px 放不下才折 +N：' + tinyHead.chips + ' 个（容量 ' + tinyHead.cap + '）');
+  ok(tinyHead.h <= 260 && parseFloat(tinyHead.font) < 10, '高度有上限 ' + tinyHead.h + 'px，字号缩到 ' + tinyHead.font);
+  await p.evaluate(() => { window.MH.store.setSettings({ cellSize: 44 }); window.MH.render(); });
+  await p.waitForTimeout(150);
+
+  // 23) 对齐模式下抓手只缩放网格（底图裁切过 bound=true 也不跟着动）
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(8, 6), 'e2e 对齐'));
+  await p.click('#tabPrep');
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  await p.evaluate(() => {
+    const s = window.MH.store.state;
+    s.settings.cellSize = 40; s.bg.scale = 1;
+    window.MurdokuCore.setGridOffset(s, 20, 15);
+    window.MH.store.setSettings({}); window.MH.render();
+  });
+  await p.click('[data-act="bg-crop"]');
+  await p.waitForFunction(() => window.MH.store.state.bg && window.MH.store.state.bg.bound === true, null, { timeout: 15000 });
+  await p.click('[data-act="bg-align"]');
+  await p.waitForTimeout(200);
+  const cut = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    return { scale: s.bg.scale, w: s.bg.w, h: s.bg.h, cell: s.settings.cellSize, x: s.grid.x, y: s.grid.y };
+  });
+  const hb2 = await p.locator('#alignHandle').boundingBox();
+  await p.mouse.move(hb2.x + hb2.width / 2, hb2.y + hb2.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(hb2.x + hb2.width / 2 + 80, hb2.y + hb2.height / 2 + 60, { steps: 8 });
+  await p.mouse.up();
+  await p.waitForTimeout(250);
+  const dragged = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    return { scale: s.bg.scale, w: s.bg.w, h: s.bg.h, cell: s.settings.cellSize, x: s.grid.x, y: s.grid.y };
+  });
+  ok(dragged.cell > cut.cell, '抓手放大了网格：cell ' + cut.cell + ' → ' + dragged.cell);
+  ok(dragged.scale === cut.scale && dragged.w === cut.w && dragged.h === cut.h, '对齐时底图完全不跟着缩放');
+  ok(dragged.x === cut.x && dragged.y === cut.y, '网格偏移也没被带着缩放');
+  await p.click('[data-act="bg-align"]');       // 退出对齐
+  await p.waitForTimeout(200);
+  const bz = await p.evaluate(() => ({ cell: window.MH.store.state.settings.cellSize, scale: window.MH.store.state.bg.scale }));
+  await p.click('#btnZoomIn');
+  await p.waitForTimeout(200);
+  const az = await p.evaluate(() => ({ cell: window.MH.store.state.settings.cellSize, scale: window.MH.store.state.bg.scale }));
+  const kz = az.cell / bz.cell;
+  ok(Math.abs(az.scale / bz.scale - kz) < 0.02, '退出对齐后仍按绑定缩放：k=' + kz.toFixed(3) + '，scale ' + bz.scale.toFixed(3) + '→' + az.scale.toFixed(3));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

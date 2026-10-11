@@ -25,10 +25,10 @@
   const CELL_STEP = 6;
 
   // 底图（衬在网格下方的图片 / PDF 页面）
-  const HEAD_W_MAX = 132, HEAD_W_MIN = 56;  // 行统计条宽度（随格子大小缩放）
-  const HEAD_H_MAX = 72, HEAD_H_MIN = 34;   // 列统计条高度
-  const HEAD_LABELS = 6;                    // 一条里最多显示几个人，多出来的折成 +N
-  const HEAD_CHIP_W = 22, HEAD_CHIP_H = 13; // 一个标签大致占的宽 / 高（估算容量用）
+  const HEAD_W_MIN = 56, HEAD_W_MAX = 132;  // 行统计条的基础宽度（随格子大小缩放）
+  const HEAD_H_MIN = 34, HEAD_H_MAX = 72;   // 列统计条的基础高度
+  const HEAD_W_CAP = 380, HEAD_H_CAP = 260; // 为了"显示全"允许长到多大（上限）
+  const HEAD_LABELS = 40;                   // 一件里最多渲染几个标签（兜底，正常靠自适应不触发）
   const BG_SCALE_MIN = 0.1;
   const BG_SCALE_MAX = 4;
   const BG_OPACITY_MIN = 0.1;
@@ -382,14 +382,69 @@
     return state.phase === 'play' && state.settings.showHeads !== false;
   }
 
-  /** 行列提示表头占用的空间（隐藏时为 0）；随格子大小缩放，免得小格子时显得离谱 */
+  /** 标签字号：随格子缩放（小格子用更小的字，才塞得进一格宽） */
+  function headFont(cell) {
+    return Math.round(Math.min(10, Math.max(8, cell * 0.55)) * 10) / 10;
+  }
+
+  /** 一个标签大约占多宽：ASCII 约 0.62em，中文按 1em，再加左右 padding */
+  function chipWidth(label, font) {
+    let w = 0;
+    for (const ch of String(label == null ? '' : label)) w += ch.charCodeAt(0) < 128 ? font * 0.62 : font;
+    return Math.ceil(w) + 8;
+  }
+
+  /** 把若干标签宽度按 limit 折行，返回行数（放不下就自己占一行） */
+  function wrapLines(widths, limit) {
+    let lines = 1, cur = 0;
+    for (const w of widths) {
+      if (cur === 0) cur = w;
+      else if (cur + 2 + w <= limit) cur += 2 + w;
+      else { lines += 1; cur = w; }
+    }
+    return lines;
+  }
+
+  /**
+   * 行列统计条占用的空间（隐藏时为 0）。
+   *
+   * 基础尺寸随格子缩放，然后**按内容长大**：行统计靠变宽、列统计靠变高，
+   * 目的是尽量把所有标签都显示出来（不再动不动折成 +N）。
+   * 只有长到上限还放不下时，界面才会折成 +N。
+   */
   function headSize(state) {
-    if (!headsVisible(state)) return { w: 0, h: 0 };
+    if (!headsVisible(state)) return { w: 0, h: 0, font: 10 };
     const cell = state.settings.cellSize;
-    return {
-      w: Math.round(Math.min(HEAD_W_MAX, Math.max(HEAD_W_MIN, cell * 1.25))),
-      h: Math.round(Math.min(HEAD_H_MAX, Math.max(HEAD_H_MIN, cell * 0.78))),
-    };
+    const font = headFont(cell);
+    const chipH = font + 6;
+    let w = Math.round(Math.min(HEAD_W_MAX, Math.max(HEAD_W_MIN, cell * 1.25)));
+    let h = Math.round(Math.min(HEAD_H_MAX, Math.max(HEAD_H_MIN, cell * 0.78)));
+
+    if (state.people && state.people.length) {
+      const LP = linePeople(state);
+      const widthsOf = info => {
+        const list = [];
+        if (info.placed) { const p = person(state, info.placed); if (p) list.push(chipWidth(p.label, font)); }
+        for (const id of info.cands) { const p = person(state, id); if (p) list.push(chipWidth(p.label, font)); }
+        return list;
+      };
+      // 行统计：高度固定 = 一个格子，能排 chipLines 行文字 → 反推需要多宽
+      const chipLines = Math.max(1, Math.floor(cell / chipH));
+      for (const info of LP.rows) {
+        const ws = widthsOf(info);
+        if (!ws.length) continue;
+        let need = w;
+        while (need < HEAD_W_CAP && wrapLines(ws, need) > chipLines) need += 8;
+        w = Math.max(w, Math.min(HEAD_W_CAP, need));
+      }
+      // 列统计：宽度固定 = 一个格子 → 放不下就往下堆，需要多高
+      for (const info of LP.cols) {
+        const ws = widthsOf(info);
+        if (!ws.length) continue;
+        h = Math.max(h, Math.min(HEAD_H_CAP, wrapLines(ws, cell) * chipH + 4));
+      }
+    }
+    return { w: Math.round(w), h: Math.round(h), font: font };
   }
 
   /**
@@ -427,14 +482,16 @@
   function headCapacity(state) {
     const cell = state.settings.cellSize;
     const hs = headSize(state);
-    const lines = n => Math.max(1, Math.floor(n / HEAD_CHIP_H));
-    const perLine = n => Math.max(1, Math.floor(n / HEAD_CHIP_W));
-    const cap = n => Math.min(HEAD_LABELS, Math.max(1, n));
+    const font = hs.font || headFont(cell);
+    const chipH = font + 6;
+    const chipW = font * 0.62 + 8;
+    const n = (size, chip) => Math.max(1, Math.floor(size / chip));
+    const cap = v => Math.min(HEAD_LABELS, Math.max(1, v));
     return {
-      // 行提示：宽度是 headW（可换行），每条高度 = 一个格子
-      rowMax: cap(perLine(hs.w) * lines(cell)),
-      // 列提示：宽度 = 一个格子，每条高度是 headH（可换行）
-      colMax: cap(lines(cell) * lines(hs.h)),
+      // 行统计：宽 headW 里一行能放几个 × 一个格子高能排几行
+      rowMax: cap(n(hs.w, chipW) * n(cell, chipH)),
+      // 列统计：一格宽里一行能放几个 × headH 高能排几行
+      colMax: cap(n(cell, chipW) * n(hs.h, chipH)),
     };
   }
 
@@ -1231,7 +1288,7 @@
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,
     normalizeBg, setBackground, updateBackground, bgDisplaySize, setGridOffset, nudgeGrid, boardLayout,
-    setCellSize, gridCropRect, headsVisible, headSize, linePeople, headCapacity, applyLineChoice, HEAD_LABELS,
+    setCellSize, gridCropRect, headsVisible, headSize, headFont, chipWidth, linePeople, headCapacity, applyLineChoice, HEAD_LABELS,
     person, region, item, regionsAt, itemsAt, itemAt, personAt, placeOwners, rowColOwners,
     normalizeLabel, setPersonLabel, LABEL_MAX,
     isAutoX, xSource, isX, candidatesAt, personCandidateCount, legalCells,

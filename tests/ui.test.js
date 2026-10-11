@@ -1522,27 +1522,36 @@ test('游玩模式：网格外侧显示每行/每列有哪些候选的人', asyn
   dom.window.close();
 });
 
-test('行列提示放不下时折成 +N（容量随尺寸变）', async () => {
+test('统计条按内容自动变大，尽量把标签显示全（只有极端情况才折 +N）', async () => {
   const { dom, doc } = await boot();
   const win = dom.window;
-  win.MH.store.replace(win.MurdokuCore.createState(8, 8), '测试');
+  win.MH.store.replace(win.MurdokuCore.createState(24, 24), '测试 24 人');
   const st = win.MH.store.state, C = win.MurdokuCore;
-  st.people.forEach((p, i) => C.setCandidate(st, p.id, '0,' + i, true));   // 8 个人都在第 0 行
+  // 24 个人全部把候选放在第 0 列 —— 最容易放不下的情况
+  st.people.forEach((p, i) => C.setCandidate(st, p.id, i + ',0', true));
 
-  // 容量：格子越小能显示的越少，避免溢出格子
-  const at44 = C.headCapacity({ ...st, settings: { ...st.settings, cellSize: 44 }, phase: 'play' });
-  const at12 = C.headCapacity({ ...st, settings: { ...st.settings, cellSize: 12 }, phase: 'play' });
-  assert.ok(at44.rowMax > at12.rowMax, '格子大时能显示更多：' + at44.rowMax + ' vs ' + at12.rowMax);
-  assert.ok(at12.colMax >= 1, '再小也至少显示一个：' + at12.colMax);
+  const play = { ...st, phase: 'play' };
+  const at44 = { ...play, settings: { ...st.settings, cellSize: 44 } };
+  const at12 = { ...play, settings: { ...st.settings, cellSize: 12 } };
+  const h44 = C.headSize(at44), h12 = C.headSize(at12);
+  assert.ok(h44.h > 34, '格子里放得下时统计条会变高：' + h44.h);
+  assert.ok(C.headCapacity(at44).colMax >= 24, '44px 时能显示全部 24 个：' + C.headCapacity(at44).colMax);
+  assert.ok(C.headCapacity(at12).colMax < 24, '缩到 12px 才放不下：' + C.headCapacity(at12).colMax);
+  assert.ok(h12.h <= 260, '高度有上限，不会无限长：' + h12.h);
 
   clickSel(dom, '#tabPlay');
-  const head = q(doc, '.row-head');
-  const chips = head.querySelectorAll('.hi');
-  const cap = C.headCapacity(win.MH.store.state).rowMax;
-  assert.equal(chips.length, cap + 1, cap + ' 个标签 + 1 个 +N（共 ' + chips.length + '）');
+  const head = q(doc, '.col-head');
+  assert.equal(head.querySelectorAll('.hi.more').length, 0, '正常尺寸下没有 +N');
+  assert.equal(head.querySelectorAll('.hi').length, 24, '24 个标签全部渲染出来');
+  const font = C.headFont(win.MH.store.state.settings.cellSize);
+  assert.equal(q(doc, '#gridBox').style.getPropertyValue('--headfont'), font + 'px', '字号随格子走：' + font);
+
+  // 缩到 12px：超出上限才折成 +N
+  win.MH.store.setSettings({ cellSize: 12 });
+  const cap = C.headCapacity(win.MH.store.state).colMax;
+  const chips = qa(doc, '.col-head .hi');
+  assert.equal(chips.length, cap + 1, '12px 下是 ' + cap + ' 个标签 + 1 个 +N（共 ' + chips.length + '）');
   assert.ok(chips[chips.length - 1].classList.contains('more'), '最后一个是 +N');
-  assert.equal(chips[chips.length - 1].textContent, '+' + (8 - cap), '8 个人 → +' + (8 - cap));
-  assert.match(head.title, /第 1 行/, 'title 里是完整信息');
   dom.window.close();
 });
 
