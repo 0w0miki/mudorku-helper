@@ -1012,6 +1012,20 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const srW4 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
   ok(srW4 === 372, '双击还原 372px：' + srW4);
 
+  // 27) 列统计标签按内容宽度（不撑满）
+  const chipW = await p.evaluate(() => {
+    const head = document.querySelector('.col-head[data-c="2"]');
+    const chip = head.querySelector('.hi');
+    const hb = head.getBoundingClientRect(), cb = chip.getBoundingClientRect();
+    return {
+      headW: Math.round(hb.width), chipW: Math.round(cb.width),
+      leftGap: Math.round(cb.left - hb.left), rightGap: Math.round(hb.right - cb.right),
+      sameAsCell: Math.round(hb.width) === Math.round(document.querySelector('.cell[data-k="0,2"]').getBoundingClientRect().width),
+    };
+  });
+  ok(chipW.sameAsCell, '列统计条宽度仍等于列宽：' + chipW.headW + 'px');
+  ok(chipW.chipW < chipW.headW - 2, '标签按内容宽度不撑满：' + chipW.chipW + ' < ' + chipW.headW);
+  ok(Math.abs(chipW.leftGap - chipW.rightGap) <= 1, '标签居中：左右 ' + chipW.leftGap + '/' + chipW.rightGap);
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

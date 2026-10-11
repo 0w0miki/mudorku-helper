@@ -270,6 +270,9 @@ button.block { display: block; width: 100%; text-align: center; }
   flex-wrap: nowrap;
   align-content: center;
   justify-content: flex-start;
+  /* 纵向排列时交叉轴是水平方向，默认 stretch 会把标签撑满整格宽；
+     改回居中的按内容宽度，和以前一样 */
+  align-items: center;
   gap: 1px 0;
 }
 .head.none { background: #f1f5f9; }
