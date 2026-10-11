@@ -647,9 +647,15 @@
     const dirty = st.regions.length || st.items.length ||
       Object.keys(st.play.xmarks).length || Object.keys(st.play.placed).length ||
       Object.values(st.play.candidates || {}).some(a => a && a.length);
-    if (dirty && !confirm('重新生成地图会清空区域、物品、人物关联与所有标记（含候选），确定继续？')) return;
+    if (dirty && !confirm('重新生成地图会清空区域、物品、人物关联与所有标记（含候选），确定继续？\n\n底图和网格对位会保留。')) return;
     MH.ui.draft = null;
-    MH.store.replace(Core.createState(rows, cols), '生成地图');
+    // 生成的只是"题面"，底图（导入的图片 / PDF）与网格对位、显示偏好都保留，
+    // 免得每次改行列出错就要重新导入、重新对齐一次
+    const next = Core.createState(rows, cols);
+    if (st.bg) next.bg = st.bg;
+    if (st.grid) next.grid = { x: st.grid.x, y: st.grid.y };
+    next.settings = Object.assign({}, next.settings, st.settings || {});
+    MH.store.replace(next, '生成地图');
     MH.toast('已生成 ' + rows + '×' + cols + ' 地图，人物 ' + Core.peopleCount(rows, cols) + ' 个', 'ok');
   }
 

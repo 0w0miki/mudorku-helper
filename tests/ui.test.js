@@ -1927,3 +1927,59 @@ test('游玩阶段的「操作」卡片不再重复放「回到准备阶段」�
   assert.equal(win.MH.store.state.phase, 'play', '再切回游玩');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 重新生成地图保留底图
+
+test('生成地图：保留底图、网格对位与显示偏好', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  withBg(dom, { scale: 1.35, opacity: 0.6, visible: false });
+  const C = win.MurdokuCore;
+  win.MH.store.commit('调', s => {
+    C.setGridOffset(s, 24, 18);
+    C.updateBackground(s, { page: 2, pages: 3, kind: 'pdf', bound: true });
+    return { ok: true };
+  });
+  win.MH.store.setSettings({ cellSize: 60, showHeads: false });
+
+  setInput(dom, '#rowsInput', 9);
+  setInput(dom, '#colsInput', 11);
+  clickSel(dom, '[data-act="gen"]');
+
+  const st = win.MH.store.state;
+  assert.equal(st.rows, 9, '行数变了');
+  assert.equal(st.cols, 11, '列数变了');
+  assert.equal(st.people.length, 9, '人物按 min(行,列) 重建');
+  // 底图完整保留
+  assert.ok(st.bg, '底图还在');
+  assert.equal(st.bg.scale, 1.35, '缩放保留');
+  assert.equal(st.bg.opacity, 0.6, '透明度保留');
+  assert.equal(st.bg.visible, false, '显示状态保留');
+  assert.equal(st.bg.page, 2, 'PDF 页码保留');
+  assert.equal(st.bg.bound, true, '裁切绑定标记保留');
+  assert.equal(win.MH.store.bgData, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==', '底图数据没被清掉');
+  // 对位与显示偏好
+  assert.equal(st.grid.x, 24, '网格偏移保留');
+  assert.equal(st.grid.y, 18);
+  assert.equal(st.settings.cellSize, 60, '格子大小保留');
+  assert.equal(st.settings.showHeads, false, '行列提示开关保留');
+  // 题面确实清空了
+  assert.equal(st.regions.length, 0);
+  assert.equal(st.items.length, 0);
+  assert.deepEqual(Object.keys(st.play.xmarks), []);
+  dom.window.close();
+});
+
+test('生成地图：没有底图时一切照旧', async () => {
+  const { dom } = await boot();
+  const win = dom.window;
+  setInput(dom, '#rowsInput', 7);
+  setInput(dom, '#colsInput', 5);
+  clickSel(dom, '[data-act="gen"]');
+  const st = win.MH.store.state;
+  assert.equal(st.rows, 7);
+  assert.equal(st.cols, 5);
+  assert.equal(st.bg, null, '本来没有底图，也不该凭空出现');
+  assert.equal(win.MH.store.bgData, null);
+  dom.window.close();
+});

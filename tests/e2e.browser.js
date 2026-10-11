@@ -1038,6 +1038,55 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForTimeout(200);
   ok(await p.evaluate(() => window.MH.store.state.phase) === 'play', '再切回游玩');
 
+  // 28) 重新生成地图：保留底图与网格对位
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(6, 8), 'e2e 保留底图'));
+  await p.click('#tabPrep');
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  await p.evaluate(() => {
+    const s = window.MH.store.state, C = window.MurdokuCore;
+    s.settings.cellSize = 50;
+    C.updateBackground(s, { scale: 1.2, opacity: 0.7, bound: true });
+    C.setGridOffset(s, 12, 9);
+    C.placePerson(s, s.people[0].id, '0,0');     // 弄脏，让生成时弹确认
+    window.MH.store.setSettings({});
+    window.MH.render();
+  });
+  const beforeGen = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    return { bg: { w: s.bg.w, h: s.bg.h, scale: s.bg.scale, opacity: s.bg.opacity, bound: s.bg.bound },
+             grid: { ...s.grid }, cell: s.settings.cellSize, data: (window.MH.store.bgData || '').length };
+  });
+  let confirmMsg = '';
+  p.once('dialog', async d => { confirmMsg = d.message(); await d.accept(); });
+  await p.fill('#rowsInput', '8'); await p.fill('#colsInput', '10');
+  await p.click('[data-act="gen"]');
+  await p.waitForTimeout(400);
+  const afterGen = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    return { rows: s.rows, cols: s.cols, people: s.people.length,
+             bg: s.bg ? { w: s.bg.w, h: s.bg.h, scale: s.bg.scale, opacity: s.bg.opacity, bound: s.bg.bound } : null,
+             grid: { ...s.grid }, cell: s.settings.cellSize,
+             data: (window.MH.store.bgData || '').length,
+             regions: s.regions.length, placed: Object.keys(s.play.placed).length };
+  });
+  ok(/底图/.test(confirmMsg), '确认框里说明了会保留底图：' + confirmMsg.split('\n').pop());
+  ok(afterGen.rows === 8 && afterGen.cols === 10 && afterGen.people === 8, '题面重建：' + afterGen.rows + '×' + afterGen.cols + '，人物 ' + afterGen.people);
+  ok(afterGen.bg && afterGen.bg.w === beforeGen.bg.w && afterGen.bg.h === beforeGen.bg.h, '底图还在且尺寸不变');
+  ok(afterGen.bg.scale === beforeGen.bg.scale && afterGen.bg.opacity === beforeGen.bg.opacity && afterGen.bg.bound === beforeGen.bg.bound,
+     '底图缩放/透明度/绑定都保留：' + JSON.stringify(afterGen.bg));
+  ok(afterGen.grid.x === beforeGen.grid.x && afterGen.grid.y === beforeGen.grid.y, '网格对位保留：' + JSON.stringify(afterGen.grid));
+  ok(afterGen.cell === beforeGen.cell, '格子大小保留：' + afterGen.cell);
+  ok(afterGen.data === beforeGen.data && afterGen.data > 100, '底图数据没被清掉：' + afterGen.data + ' 字符');
+  ok(afterGen.regions === 0 && afterGen.placed === 0, '题面数据确实清空了');
+  ok(await p.locator('#bgLayer').isVisible(), '底图仍然显示在棋盘下方');
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(600);
+  const afterReload = await p.evaluate(() => {
+    const s = window.MH.store.state;
+    return { rows: s.rows, bg: !!s.bg, scale: s.bg && s.bg.scale, grid: { ...s.grid } };
+  });
+  ok(afterReload.rows === 8 && afterReload.bg && afterReload.scale === beforeGen.bg.scale, '刷新后底图与对位都还在：' + JSON.stringify(afterReload));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
