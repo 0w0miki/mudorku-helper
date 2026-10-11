@@ -1522,7 +1522,7 @@ test('游玩模式：网格外侧显示每行/每列有哪些候选的人', asyn
   dom.window.close();
 });
 
-test('统计条按内容自动变大，尽量把标签显示全（只有极端情况才折 +N）', async () => {
+test('列统计排成单列（一个标签一行），且按内容长高把标签显示全', async () => {
   const { dom, doc } = await boot();
   const win = dom.window;
   win.MH.store.replace(win.MurdokuCore.createState(24, 24), '测试 24 人');
@@ -1533,24 +1533,26 @@ test('统计条按内容自动变大，尽量把标签显示全（只有极端�
   const play = { ...st, phase: 'play' };
   const at44 = { ...play, settings: { ...st.settings, cellSize: 44 } };
   const at12 = { ...play, settings: { ...st.settings, cellSize: 12 } };
-  const h44 = C.headSize(at44), h12 = C.headSize(at12);
-  assert.ok(h44.h > 34, '格子里放得下时统计条会变高：' + h44.h);
-  assert.ok(C.headCapacity(at44).colMax >= 24, '44px 时能显示全部 24 个：' + C.headCapacity(at44).colMax);
-  assert.ok(C.headCapacity(at12).colMax < 24, '缩到 12px 才放不下：' + C.headCapacity(at12).colMax);
-  assert.ok(h12.h <= 260, '高度有上限，不会无限长：' + h12.h);
+  assert.ok(C.headCapacity(at44).colMax >= 24, '44px 下 24 个全放得下：' + C.headCapacity(at44).colMax);
+  assert.ok(C.headCapacity(at12).colMax >= 24, '12px 下也够高放得下（单列会自己长高）：' + C.headCapacity(at12).colMax);
+  assert.ok(C.headSize(at12).h <= 460, '高度有上限：' + C.headSize(at12).h);
 
   clickSel(dom, '#tabPlay');
   const head = q(doc, '.col-head');
-  assert.equal(head.querySelectorAll('.hi.more').length, 0, '正常尺寸下没有 +N');
   assert.equal(head.querySelectorAll('.hi').length, 24, '24 个标签全部渲染出来');
-  const font = C.headFont(win.MH.store.state.settings.cellSize);
-  assert.equal(q(doc, '#gridBox').style.getPropertyValue('--headfont'), font + 'px', '字号随格子走：' + font);
+  assert.equal(head.querySelectorAll('.hi.more').length, 0, '正常情况下没有 +N');
+  // 单列：样式上就是纵向排（jsdom 能读到样式表里的 flex-direction）
+  assert.equal(win.getComputedStyle(head).flexDirection, 'column', '列统计是单列布局');
 
-  // 缩到 12px：超出上限才折成 +N
+  // 40 个人塞进一列 + 12px 才真的超上限，这时才折 +N
+  win.MH.store.replace(C.createState(40, 40), '测试 40 人');
+  const st40 = win.MH.store.state;
+  st40.people.forEach((p, i) => C.setCandidate(st40, p.id, i + ',0', true));
   win.MH.store.setSettings({ cellSize: 12 });
   const cap = C.headCapacity(win.MH.store.state).colMax;
   const chips = qa(doc, '.col-head .hi');
-  assert.equal(chips.length, cap + 1, '12px 下是 ' + cap + ' 个标签 + 1 个 +N（共 ' + chips.length + '）');
+  assert.ok(cap < 40, '极端情况确实放不下：容量 ' + cap);
+  assert.equal(chips.length, cap + 1, cap + ' 个标签 + 1 个 +N（共 ' + chips.length + '）');
   assert.ok(chips[chips.length - 1].classList.contains('more'), '最后一个是 +N');
   dom.window.close();
 });

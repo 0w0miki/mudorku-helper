@@ -27,7 +27,7 @@
   // 底图（衬在网格下方的图片 / PDF 页面）
   const HEAD_W_MIN = 56, HEAD_W_MAX = 132;  // 行统计条的基础宽度（随格子大小缩放）
   const HEAD_H_MIN = 34, HEAD_H_MAX = 72;   // 列统计条的基础高度
-  const HEAD_W_CAP = 380, HEAD_H_CAP = 260; // 为了"显示全"允许长到多大（上限）
+  const HEAD_W_CAP = 380, HEAD_H_CAP = 460; // 为了"显示全"允许长到多大（上限）
   const HEAD_LABELS = 40;                   // 一件里最多渲染几个标签（兜底，正常靠自适应不触发）
   const BG_SCALE_MIN = 0.1;
   const BG_SCALE_MAX = 4;
@@ -440,11 +440,11 @@
         while (need < HEAD_W_CAP && wrapLines(ws, need) > chipLines) need += 8;
         w = Math.max(w, Math.min(HEAD_W_CAP, need));
       }
-      // 列统计：宽度固定 = 一个格子 → 放不下就往下堆，需要多高
+      // 列统计排成单列（一个标签一行）→ 高度 = 标签数 × 行高
       for (const info of LP.cols) {
         const ws = widthsOf(info);
         if (!ws.length) continue;
-        h = Math.max(h, Math.min(HEAD_H_CAP, wrapLines(ws, cell) * chipH + 4));
+        h = Math.max(h, Math.min(HEAD_H_CAP, ws.length * chipH + 4));
       }
     }
     return { w: Math.round(w), h: Math.round(h), font: font };
@@ -493,8 +493,8 @@
     return {
       // 行统计：宽 headW 里一行能放几个 × 一个格子高能排几行
       rowMax: cap(n(hs.w, chipW) * n(cell, chipH)),
-      // 列统计：一格宽里一行能放几个 × headH 高能排几行
-      colMax: cap(n(cell, chipW) * n(hs.h, chipH)),
+      // 列统计是单列：一个标签一行，能排几行就是几个
+      colMax: cap(n(hs.h, chipH)),
     };
   }
 

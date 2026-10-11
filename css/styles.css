@@ -237,6 +237,14 @@ button.block { display: block; width: 100%; text-align: center; }
   background: #f8fafc;
   transition: background-color .1s linear;
 }
+/* 列统计排成一列（一个标签一行），和行统计"一行"对称，读起来位置稳定 */
+.col-head {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-content: center;
+  justify-content: flex-start;
+  gap: 1px 0;
+}
 .head.none { background: #f1f5f9; }
 .row-head {
   width: var(--headw);

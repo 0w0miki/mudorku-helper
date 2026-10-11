@@ -800,8 +800,28 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       font: document.querySelector('#gridBox').style.getPropertyValue('--headfont'),
     };
   });
-  ok(tinyHead.more === 1 && tinyHead.chips === tinyHead.cap + 1, '12px 放不下才折 +N：' + tinyHead.chips + ' 个（容量 ' + tinyHead.cap + '）');
-  ok(tinyHead.h <= 260 && parseFloat(tinyHead.font) < 10, '高度有上限 ' + tinyHead.h + 'px，字号缩到 ' + tinyHead.font);
+  // 单列会自己长高，所以 12px 下 24 个也能全显示；上限 460px
+  ok(tinyHead.more === 0 && tinyHead.chips === 24 && tinyHead.cap >= 24,
+     '12px 下也放得下 24 个（统计条长到 ' + tinyHead.h + 'px）：' + tinyHead.chips + ' 个');
+  ok(tinyHead.h <= 460 && parseFloat(tinyHead.font) < 10, '高度有上限 ' + tinyHead.h + 'px，字号缩到 ' + tinyHead.font);
+  // 40 个人挤一列 + 12px 才真的超上限 → 折 +N
+  await p.evaluate(() => {
+    window.MH.store.replace(window.MurdokuCore.createState(40, 40), 'e2e 40 人');
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    st.people.forEach((x, i) => C.setCandidate(st, x.id, i + ',0', true));
+    window.MH.store.setSettings({ cellSize: 12 });
+  });
+  await p.waitForTimeout(300);
+  const overflowHead = await p.evaluate(() => {
+    const head = document.querySelector('.col-head');
+    return {
+      chips: head.querySelectorAll('.hi').length,
+      more: head.querySelectorAll('.hi.more').length,
+      cap: window.MurdokuCore.headCapacity(window.MH.store.state).colMax,
+    };
+  });
+  ok(overflowHead.more === 1 && overflowHead.chips === overflowHead.cap + 1,
+     '40 人一列 + 12px 超上限才折 +N：' + overflowHead.chips + ' 个（容量 ' + overflowHead.cap + '）');
   await p.evaluate(() => { window.MH.store.setSettings({ cellSize: 44 }); window.MH.render(); });
   await p.waitForTimeout(150);
 
