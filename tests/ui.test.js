@@ -987,15 +987,25 @@ test('底图透明度 / 显示隐藏 / 网格归位 / 移除', async () => {
   dom.window.close();
 });
 
-test('游玩阶段也能开关底图显示', async () => {
+test('游玩阶段不再放底图卡片（开关在准备阶段那张卡片里）', async () => {
   const { dom, doc } = await boot();
+  const win = dom.window;
   withBg(dom);
   clickSel(dom, '#tabPlay');
-  const box = q(doc, 'input[data-act="bg-toggle"]');
-  assert.ok(box, '游玩阶段应有底图显示开关');
-  assert.equal(box.checked, true);
-  clickSel(dom, 'input[data-act="bg-toggle"]');
-  assert.equal(dom.window.MH.store.state.bg.visible, false);
+
+  // 游玩侧栏里不该再有底图卡片与那个复选框
+  const headings = qa(doc, '.sidebar .card h2').map(h => h.textContent.trim());
+  assert.equal(headings.some(t => t.startsWith('底图')), false, '没有底图卡片：' + headings.join(' / '));
+  assert.equal(q(doc, 'input[data-act="bg-toggle"]'), null, '没有显示底图的复选框');
+
+  // 功能没丢：准备阶段那张卡片里还有隐藏 / 显示按钮
+  clickSel(dom, '#tabPrep');
+  const toggle = q(doc, '[data-act="bg-toggle"]');
+  assert.ok(toggle, '准备阶段仍有显示/隐藏底图');
+  clickSel(dom, '[data-act="bg-toggle"]');
+  assert.equal(win.MH.store.state.bg.visible, false, '准备阶段能隐藏');
+  clickSel(dom, '[data-act="bg-toggle"]');
+  assert.equal(win.MH.store.state.bg.visible, true, '也能再显示');
   dom.window.close();
 });
 

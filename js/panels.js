@@ -328,11 +328,8 @@
       '<button class="ghost" data-act="clear-marks">清空全部标记</button>' +
       '</div></section>' +
 
-      (st.bg
-        ? '<section class="card"><h2>底图 <span class="muted">' + esc(st.bg.kind === 'pdf' ? 'PDF' : '图片') + '</span></h2>' +
-          '<label class="check"><input type="checkbox" data-act="bg-toggle" ' + (st.bg.visible ? 'checked' : '') + '> 显示底图</label>' +
-          '<p class="hint">对齐与透明度在「地图准备」阶段调整。</p></section>'
-        : '') +
+      // 底图相关操作（导入 / 对齐 / 透明度 / 显示隐藏）都在准备阶段那张卡片里，
+      // 游玩阶段不再重复放一个只有复选框的卡片
 
       (st.settings.liveValidate ? issueCard(issues) : '') +
 
