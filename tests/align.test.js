@@ -255,3 +255,65 @@ test('真实感地图：区域纹理 + 图标 + 图例文字都不能骗到检�
   assert.ok(Math.abs(d.pitch.y - P) < 2, 'pitchY=' + d.pitch.y.toFixed(2));
   assert.ok(d.cols >= N - 1 && d.cols <= N + 1, '可见列数 ' + d.cols);
 });
+
+test('框选区域：地图只占画面一部分时，别的方向的文字不再带偏', () => {
+  const r = makeRaster(1200, 900);
+  fillBg(r, 250);
+  // 左边一块 10×8 的地图（pitch 60），右边全是"文字行"（短横杠）
+  drawGrid(r, { pitch: 60, x0: 100, y0: 80, lineWidth: 2, ink: 60 });
+  const rand = rng(99);
+  for (let row = 0; row < 40; row++) {
+    for (let i = 0; i < 26; i++) {
+      const x = 760 + i * 16, y = 60 + row * 21;
+      if (rand() < 0.6) continue;
+      for (let d = 0; d < 9; d++) put(r, x + d, y, 90);
+    }
+  }
+  const boxed = A.detectGrid(r, { region: { x: 100, y: 80, w: 600, h: 480 } });
+  assert.ok(boxed.ok, '框选后应检出：' + boxed.reason);
+  assert.ok(Math.abs(boxed.pitch.x - 60) < 2, 'pitchX=' + boxed.pitch.x);
+  assert.ok(Math.abs(boxed.pitch.y - 60) < 2, 'pitchY=' + boxed.pitch.y);
+  assert.ok(Math.abs(boxed.origin.x - 100) < 6, 'originX 要含框选偏移：' + boxed.origin.x);
+  assert.ok(Math.abs(boxed.origin.y - 80) < 6, 'originY 要含框选偏移：' + boxed.origin.y);
+});
+
+test('暗色主题（整页反相）也能检出，并报告已反相', () => {
+  const r = makeRaster(800, 600);
+  fillBg(r, 20);                                   // 暗底
+  drawGrid(r, { pitch: 45, x0: 20, y0: 15, lineWidth: 2, ink: 235 });   // 亮线
+  const d = A.detectGrid(r);
+  assert.equal(d.inverted, true, '应识别出反相');
+  assert.ok(d.ok, '反相图也应检出：' + d.reason);
+  assert.ok(Math.abs(d.pitch.x - 45) < 2, 'pitchX=' + d.pitch.x);
+  assert.equal(A.detectGrid(makeRaster(4, 4) && r).inverted, true);
+});
+
+test('suggestPlacement：把 pitch/origin 换算成 bg.scale 与网格偏移', () => {
+  const det = { ok: true, pitch: { x: 66, y: 66 }, origin: { x: 33, y: 132 }, confidence: 0.8 };
+  const p = A.suggestPlacement(det, { cellSize: 44, srcW: 2048, srcH: 1400, bgW: 1600, bgH: 1094 });
+  assert.ok(p.ok, p.message);
+  // f = 44/66 = 0.6667；scale = f × 2048 / 1600 = 0.8533
+  assert.ok(Math.abs(p.scale - 0.8533) < 0.002, 'scale=' + p.scale);
+  assert.equal(p.gridX, 22);                       // 33 × 0.6667
+  assert.equal(p.gridY, 88);                       // 132 × 0.6667
+  // 检测失败时不能返回可用的落位
+  assert.equal(A.suggestPlacement({ ok: false, reason: '未检出' }, {}).ok, false);
+  // 超出缩放范围要明确拒绝，而不是硬夹
+  const bad = A.suggestPlacement({ ok: true, pitch: { x: 4, y: 4 }, origin: { x: 0, y: 0 } },
+    { cellSize: 44, srcW: 2048, srcH: 1400, bgW: 1600, bgH: 1094 });
+  assert.equal(bad.ok, false);
+  assert.ok(/超出范围/.test(bad.message), bad.message);
+});
+
+test('图片边缘有伪线时，原点不能被挪错一格', () => {
+  const P = 60, X0 = 70, Y0 = 60;
+  const r = makeRaster(900, 700);
+  fillBg(r, 250);
+  drawGrid(r, { pitch: P, x0: X0, y0: Y0, lineWidth: 2, ink: 40 });
+  // 左边缘一条又短又淡的伪线（图片边框/阴影的典型样子）
+  for (let y = 0; y < 60; y++) for (let d = 0; d < 1; d++) put(r, 8 + d, y, 225);
+  const d = A.detectGrid(r);
+  assert.ok(d.ok, '应检出：' + d.reason);
+  assert.ok(Math.abs(d.pitch.x - P) < 2, 'pitchX=' + d.pitch.x);
+  assert.ok(Math.abs(d.origin.x - X0) < 6, '原点不该被伪线挪一格：' + d.origin.x);
+});

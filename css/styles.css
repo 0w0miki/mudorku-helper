@@ -844,3 +844,14 @@ kbd {
   .brand { display: none; }
   .snipper-panel { width: min(300px, 78vw); }
 }
+
+/* 自动对位：框选地图范围时的橡皮筋（只在框选模式下出现） */
+.region-box {
+  position: absolute;
+  z-index: 6;
+  border: 2px dashed var(--accent);
+  background: rgba(37, 99, 235, 0.12);
+  border-radius: 4px;
+  pointer-events: none;
+}
+body.picking #board { cursor: crosshair; }

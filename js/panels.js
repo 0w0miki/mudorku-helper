@@ -134,6 +134,11 @@
       '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分；裁完图片与网格绑定，缩放一起变">✂ 裁切到网格</button>' +
       '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
       '</div>' +
+      '<div class="row wrap">' +
+      '<button class="ghost sm" data-act="auto-align" title="在底图上自动找出网格，算好缩放与网格偏移">🪄 自动对位</button>' +
+      '<button class="ghost sm" data-act="bg-region" title="地图只占画面一部分时，先圈出地图范围再识别">框选地图</button>' +
+      (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
+      '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
       ' · ' + b.w + '×' + b.h + (b.kind === 'pdf' ? '（第 ' + b.page + '/' + b.pages + ' 页）' : '') + '</p>' +
       (b.kind === 'pdf' && b.pages > 1
@@ -559,6 +564,137 @@
   /** 裁切时四周多留的边距（屏幕 px）——留一点是为了不把网格线切掉 */
   const CROP_MARGIN = 16;
 
+  // ---------------------------------------------------------------- 自动对位（P0）
+
+  /** 把底图数据解码成像素，供识别使用（存档里的底图 ≤1600px，几何识别够用） */
+  async function bgRaster() {
+    if (!MH.store.bgData) throw new Error('底图数据不在内存里，请重新导入');
+    const img = await loadDataUrl(MH.store.bgData);
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height);
+    return { data: d.data, width: d.width, height: d.height };
+  }
+
+  /**
+   * 自动对位：在底图上找出网格 → 换算成 bg.scale 与网格偏移 → 一次提交（可撤销）。
+   * @param {{x:number,y:number,w:number,h:number}} [rectRatio]
+   *        相对底图左上角、以底图显示尺寸为单位的框选比例（省略则整张图找）
+   */
+  async function runAutoAlign(rectRatio) {
+    const A = window.MurdokuAlign;
+    if (!A) { MH.toast('自动对位模块没加载（js/align.js）', 'error'); return; }
+    const st = MH.store.state;
+    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+    let raster;
+    try { raster = await bgRaster(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    const region = rectRatio && rectRatio.w > 0
+      ? { x: rectRatio.x * raster.width, y: rectRatio.y * raster.height,
+          w: rectRatio.w * raster.width, h: rectRatio.h * raster.height }
+      : null;
+    const t0 = Date.now();
+    const det = A.detectGrid(raster, region ? { region } : undefined);
+    if (!det.ok) {
+      MH.ui.alignInfo = '未认出网格';
+      MH.render();
+      MH.toast('没认出网格（' + det.reason + '）：可以点「框选地图」圈出地图范围再试', 'warn');
+      return;
+    }
+    const place = A.suggestPlacement(det, {
+      cellSize: st.settings.cellSize,
+      srcW: raster.width, srcH: raster.height, bgW: st.bg.w, bgH: st.bg.h,
+      scaleMin: Core.BG_SCALE_MIN || 0.1, scaleMax: Core.BG_SCALE_MAX || 4,
+    });
+    if (!place.ok) {
+      MH.ui.alignInfo = '缩放超出范围';
+      MH.render();
+      MH.toast(place.message, 'warn');
+      return;
+    }
+    MH.store.commit('自动对位', s => {
+      Core.updateBackground(s, { scale: place.scale, bound: true });
+      Core.setGridOffset(s, place.gridX, place.gridY);
+    });
+    MH.ui.alignInfo = (det.cols && det.rows ? det.cols + '×' + det.rows + ' · ' : '') +
+      '置信度 ' + det.confidence.toFixed(2) + ' · ' + (Date.now() - t0) + 'ms' +
+      (det.inverted ? ' · 已纠反相' : '');
+    MH.render();
+    MH.toast(place.message + (det.inverted ? '（已自动纠正反相）' : ''), 'ok');
+  }
+
+  /** 框选地图范围：在棋盘上拖一个矩形，只在该范围里找网格 */
+  function pickRegion() {
+    if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
+    MH.ui.picking = !MH.ui.picking;
+    const box = document.getElementById('regionBox');
+    if (box) box.hidden = true;
+    document.body.classList.toggle('picking', MH.ui.picking);
+    MH.toast(MH.ui.picking ? '在地图上拖一个矩形圈住地图范围（再点一次取消）' : '已取消框选',
+      MH.ui.picking ? 'ok' : 'warn');
+  }
+
+  function initRegionPick() {
+    const board = document.getElementById('board');
+    const box = document.getElementById('regionBox');
+    const gb = document.getElementById('gridBox');
+    if (!board || !box || !gb) return;
+    let start = null;
+    let startV = null;
+    const local = (e) => {
+      const r = board.getBoundingClientRect();
+      return { x: e.clientX - r.left + board.scrollLeft, y: e.clientY - r.top + board.scrollTop };
+    };
+    const end = () => {
+      start = null;
+      MH.ui.picking = false;
+      document.body.classList.remove('picking');
+      box.hidden = true;
+    };
+    board.addEventListener('pointerdown', e => {
+      if (!MH.ui.picking) return;
+      start = local(e);
+      startV = { x: e.clientX, y: e.clientY };
+      box.hidden = false;
+      box.style.left = start.x + 'px';
+      box.style.top = start.y + 'px';
+      box.style.width = '0px';
+      box.style.height = '0px';
+      try { board.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault();
+    });
+    board.addEventListener('pointermove', e => {
+      if (!MH.ui.picking || !start) return;
+      const p = local(e);
+      box.style.left = Math.min(start.x, p.x) + 'px';
+      box.style.top = Math.min(start.y, p.y) + 'px';
+      box.style.width = Math.abs(p.x - start.x) + 'px';
+      box.style.height = Math.abs(p.y - start.y) + 'px';
+    });
+    board.addEventListener('pointerup', e => {
+      if (!MH.ui.picking || !start || !startV) return;
+      const x0 = Math.min(startV.x, e.clientX), y0 = Math.min(startV.y, e.clientY);
+      const w = Math.abs(e.clientX - startV.x), h = Math.abs(e.clientY - startV.y);
+      end();
+      if (w < 20 || h < 20) { MH.toast('框太小了，重新点「框选地图」再试', 'warn'); return; }
+      // 视口坐标 → 场景坐标：gridBox 的 rect 就对应场景里的 gridLeft/gridTop
+      const st = MH.store.state;
+      const lay = Core.boardLayout(st);
+      const rect = gb.getBoundingClientRect();
+      const sx = lay.gridLeft + (x0 - rect.left);
+      const sy = lay.gridTop + (y0 - rect.top);
+      const fx = (sx - lay.bgLeft) / Math.max(1, lay.bgW);
+      const fy = (sy - lay.bgTop) / Math.max(1, lay.bgH);
+      const fw = w / Math.max(1, lay.bgW);
+      const fh = h / Math.max(1, lay.bgH);
+      const c01 = v => Math.max(0, Math.min(1, v));
+      const rectRatio = { x: c01(fx), y: c01(fy), w: c01(Math.min(fw, 1 - c01(fx))), h: c01(Math.min(fh, 1 - c01(fy))) };
+      if (rectRatio.w <= 0.02 || rectRatio.h <= 0.02) { MH.toast('框到底图外面了，重新框一次', 'warn'); return; }
+      runAutoAlign(rectRatio);
+    });
+  }
+
   function loadDataUrl(url) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -802,6 +938,8 @@
       });
     },
     'bg-crop'() { cropBackground(); },
+    'auto-align'() { runAutoAlign(); },
+    'bg-region'() { pickRegion(); },
     'bg-scale-step'(el, e) {
       const st = MH.store.state;
       if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
@@ -1120,6 +1258,7 @@
   const P = {
     init() {
       initSidebarResizer();
+      initRegionPick();
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);

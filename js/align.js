@@ -46,7 +46,18 @@
         gray[y * w + x] = n ? sum / n : 255;
       }
     }
-    return { gray, w, h, scale: k };
+    // 暗色主题截图/反相扫描件：纸面（主导色调）偏暗说明整页被反相了，先纠正，
+    // 否则区域颜色与网格对比的极性全是反的。用中位数判断，比均值抗大片深色图。
+    const hist = new Int32Array(256);
+    for (let i = 0; i < gray.length; i++) hist[Math.min(255, Math.round(gray[i]))]++;
+    let acc = 0, median = 255;
+    for (let b = 0; b < 256; b++) {
+      acc += hist[b];
+      if (acc >= gray.length / 2) { median = b; break; }
+    }
+    const inverted = median < 110;
+    if (inverted) for (let i = 0; i < gray.length; i++) gray[i] = 255 - gray[i];
+    return { gray, w, h, scale: k, inverted, median };
   }
 
   // ---------------------------------------------------------------- 背景与墨迹
@@ -358,6 +369,14 @@
     return lines;
   }
 
+  /** 中位数（去掉两端弱线时用） */
+  function median(values) {
+    if (!values.length) return 0;
+    const a = [...values].sort((x, y) => x - y);
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
   /** 最小二乘：位置 = intercept + slope × 线序号 */
   function linfit(lines) {
     const n = lines.length;
@@ -478,9 +497,17 @@
     const contrast = mean > 0 ? peakBase.score / mean : 0;       // >1 说明线上确实更"墨"
     const strengthFloor = Math.max(mean * 0.6, peakBase.score * 0.35);
     const lines = refineLines(prof, peakBase.pitch, peakBase.phase, strengthFloor);
+    // 去掉两端明显偏弱的线：图片边缘/阴影/贴边纹理常常造出一条伪线，
+    // 它会把"第一条线"的整体原点整整挪一格（pitch 对、位置全错一格）
+    const med = median(lines.map(l => l.strength));
+    while (lines.length > 2 && lines[0].strength < med * 0.4) lines.shift();
+    while (lines.length > 2 && lines[lines.length - 1].strength < med * 0.4) lines.pop();
     const fit = linfit(lines);
     if (!fit) return { ok: false, reason: '线太少' };
-    const want = Math.floor((prof.length - 1 - fit.intercept) / fit.slope) + 1;
+    // 原点取**第一条真实线的位置**，而不是梳状 k=0 的外推位置：
+    // 外推位置可能落在图外（比第一条线早一格），调用方会整体偏一格。
+    const origin = lines.length ? lines[0].pos : fit.intercept;
+    const want = Math.floor((prof.length - 1 - origin) / fit.slope) + 1;
     const ratio = want > 0 ? Math.min(1, lines.length / want) : 0;
     const residN = Math.min(1, (fit.rms / Math.max(1e-6, fit.slope)) * 20);
     const conf = Math.max(0, Math.min(1,
@@ -491,7 +518,7 @@
       // 对比度太低说明"线"只是噪声的偶然堆积；覆盖太低说明周期对不上实际线位
       ok: lines.length >= opts.minLines && ratio >= 0.4 && contrast >= 2.0 && conf >= 0.45,
       pitch: fit.slope,
-      origin: fit.intercept,
+      origin,
       lines: lines.map(l => l.pos),
       count: lines.length,
       expected: want,
@@ -513,7 +540,23 @@
   function detectGrid(raster, options) {
     const opts = Object.assign({}, DEFAULTS, options || {});
     const t0 = Date.now();
-    const { gray, w, h, scale } = toGray(raster, opts.analyzeSide);
+    const full = toGray(raster, opts.analyzeSide);
+    let gray = full.gray, w = full.w, h = full.h;
+    const scale = full.scale;
+    // 框选：只在这个矩形里找网格（地图常只占画面一部分，图例/文字会把周期带偏）
+    let ox = 0, oy = 0;
+    if (opts.region && opts.region.w > 1 && opts.region.h > 1) {
+      const r = opts.region;
+      const x0 = Math.max(0, Math.min(w - 1, Math.floor(r.x / scale)));
+      const y0 = Math.max(0, Math.min(h - 1, Math.floor(r.y / scale)));
+      const x1 = Math.max(x0 + 1, Math.min(w, Math.ceil((r.x + r.w) / scale)));
+      const y1 = Math.max(y0 + 1, Math.min(h, Math.ceil((r.y + r.h) / scale)));
+      const sub = new Float32Array((x1 - x0) * (y1 - y0));
+      for (let y = y0; y < y1; y++) {
+        sub.set(gray.subarray(y * w + x0, y * w + x1), (y - y0) * (x1 - x0));
+      }
+      gray = sub; w = x1 - x0; h = y1 - y0; ox = x0; oy = y0;
+    }
 
     // 1) 倾角：先估，必要时把图摆正再找周期
     const ang = estimateAngle(gray, w, h);
@@ -568,26 +611,62 @@
     const cols = okX ? Math.max(1, ax.expected) : 0;
     const rows = okY ? Math.max(1, ay.expected) : 0;
 
-    // 全部换算回**原图像素**坐标（分析时可能降过采样），调用方直接用
+    // 全部换算回**原图像素**坐标（分析时可能降过采样 + 框选偏移），调用方直接用
     const K = scale;
+    const offX = ox * K, offY = oy * K;
     const at = v => Math.round(v * K * 100) / 100;
+    const atX = v => Math.round((v * K + offX) * 100) / 100;
+    const atY = v => Math.round((v * K + offY) * 100) / 100;
     return {
-      ok: good, squareness: Math.round(squareness * 1000) / 1000,
+      ok: good, inverted: full.inverted, squareness: Math.round(squareness * 1000) / 1000,
       mismatch: both && !good,
       reason: good ? '' : (ok ? 'x/y 格距不一致，可能没框到地图' : (ax.reason || ay.reason || '未检出')),
       confidence: Math.round(conf * 1000) / 1000,
       pitch: { x: at(pitchX), y: at(pitchY) },
-      origin: { x: at(ax.origin || 0), y: at(ay.origin || 0) },
+      origin: { x: atX(ax.origin || 0), y: atY(ay.origin || 0) },
       angle,
       sharpness: ang.sharpness,
       cols, rows,
-      lines: { x: (ax.lines || []).map(at), y: (ay.lines || []).map(at) },
+      lines: { x: (ax.lines || []).map(atX), y: (ay.lines || []).map(atY) },
+      inverted: full.inverted,
+      region: opts.region || null,
       x: ax, y: ay,
       scale,                                   // 分析图相对原图的降采样倍数
       elapsedMs: Date.now() - t0,
     };
   }
 
-  return { detectGrid, toGray, boxBlur, inkMap, project, otsu, runProfile, detrend, combStats, autocorr, combScore, findPitch, refineLines, linfit,
+  /**
+   * 把检测结果换算成 app 需要的落位参数。
+   * @param {{pitch:{x:number,y:number},origin:{x:number,y:number}}} det
+   * @param {{cellSize:number,srcW:number,srcH:number,bgW:number,bgH:number,
+   *          scaleMin?:number,scaleMax?:number}} opts
+   * 模型：底图显示尺寸 = bgW × scale（bgW 是存档里的基准宽），原图 srcW 像素铺满这个尺寸。
+   * 所以"原图像素 → 显示像素"的倍率 f = cellSize / pitch，且 scale = f × srcW / bgW。
+   * grid.x/y 就是网格原点相对底图左上角的显示像素偏移。
+   */
+  function suggestPlacement(det, opts) {
+    const o = Object.assign({ scaleMin: 0.1, scaleMax: 4 }, opts || {});
+    if (!det || !det.ok) return { ok: false, message: (det && det.reason) || '没有可用的检测结果' };
+    const pitch = (det.pitch.x + det.pitch.y) / 2;
+    if (!(pitch > 0)) return { ok: false, message: '格距不可用' };
+    const f = o.cellSize / pitch;                       // 原图像素 → 显示像素
+    const scale = (f * o.srcW) / o.bgW;
+    if (!Number.isFinite(scale) || scale < o.scaleMin || scale > o.scaleMax) {
+      return { ok: false, scale, message: '算出的缩放 ' + (Math.round(scale * 1000) / 10) + '% 超出范围（' +
+        Math.round(o.scaleMin * 100) + '%–' + Math.round(o.scaleMax * 100) + '%），请先框选地图范围' };
+    }
+    return {
+      ok: true,
+      scale: Math.round(scale * 10000) / 10000,
+      gridX: Math.round(det.origin.x * f),
+      gridY: Math.round(det.origin.y * f),
+      pitch, cellSize: o.cellSize, factor: f,
+      confidence: det.confidence,
+      message: '已按识别结果对位：格距 ' + pitch.toFixed(1) + 'px → 格子 ' + o.cellSize + 'px',
+    };
+  }
+
+  return { detectGrid, toGray, suggestPlacement, boxBlur, inkMap, project, otsu, runProfile, detrend, combStats, autocorr, combScore, findPitch, refineLines, linfit,
            estimateAngle, rotateGray, DEFAULTS };
 });
