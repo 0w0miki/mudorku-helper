@@ -320,6 +320,9 @@ button.hi:active { background: var(--accent); color: #fff; }
   height: 100%;
   pointer-events: none;
   overflow: visible;
+  /* 压住右下角的统计条：区域描边是居中描边，会有半个线宽探出网格外沿，
+     z-index 低于统计条时那半个线宽就被吃掉了 */
+  z-index: 3;
 }
 .grid-lines { fill: none; stroke: var(--line-strong); stroke-width: 1; }
 .grid-outer { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
