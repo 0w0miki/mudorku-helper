@@ -1286,7 +1286,7 @@
     CELL_MIN, CELL_MAX, CELL_DEFAULT, CELL_STEP,
     BG_SCALE_MIN, BG_SCALE_MAX, BG_OPACITY_MIN, GRID_LIMIT,
     PERSON_COLORS, REGION_COLORS, ITEM_COLORS,
-    key, unkey, isValidKey, clampInt, hexToRgb, rgba,
+    key, unkey, isValidKey, clampInt, clampNum, hexToRgb, rgba,
     labelFor, peopleCount, neighbors, isConnected, largestComponent,
     regionOutlineSegments, segmentsToPath, mergeRuns,
     createState, nextId, sanitizeId, sanitizeColor,

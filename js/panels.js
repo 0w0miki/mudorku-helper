@@ -116,7 +116,7 @@
 
   function bgCard(st) {
     const b = st.bg;
-    const pct = v => Math.round(v * 100) + '%';
+    const pct = v => (Math.round(v * 1000) / 10).toFixed(1) + '%';
     if (!b) {
       return '<section class="card">' +
         '<h2>底图 <span class="muted">图片 / PDF 衬在网格下方</span></h2>' +
@@ -142,8 +142,16 @@
           '<button class="ghost sm" data-act="bg-page" data-dir="1">下一页 ▶</button></div>'
         : '') +
       '<label class="field">底图透明度 <input type="range" id="bgOpacity" min="10" max="100" step="5" value="' + Math.round(b.opacity * 100) + '"></label>' +
-      '<label class="field">底图缩放 <input type="range" id="bgScale" min="10" max="200" step="5" value="' + Math.round(b.scale * 100) + '">' +
-      '<span class="meta">' + pct(b.scale) + '</span></label>' +
+      // 步长 0.1%：底图对齐需要能落在精确的比例上（5% 一步对地图来说太粗了，
+      // 一张 1000px 宽的图一步就是 50px 的误差，怎么都对不上）
+      '<label class="field">底图缩放 <input type="range" id="bgScale" min="10" max="400" step="0.1" value="' + (Math.round(b.scale * 1000) / 10) + '">' +
+      '<span class="meta" data-bg="scale">' + pct(b.scale) + '</span></label>' +
+      '<div class="row wrap">' +
+      '<button class="ghost sm" data-act="bg-scale-step" data-dir="-1" title="缩小 0.1%（按住 Shift 1%）">−</button>' +
+      '<button class="ghost sm" data-act="bg-scale-step" data-dir="1" title="放大 0.1%（按住 Shift 1%）">+</button>' +
+      '<span class="grow"></span>' +
+      '<button class="ghost sm" data-act="bg-scale-reset" title="回到 100%">还原 100%</button>' +
+      '</div>' +
       '<label class="check"><input type="checkbox" data-act="bg-align" ' + (MH.ui.aligning ? 'checked' : '') + '> <b>对齐底图</b>（拖动移动网格 · 拖右下角手柄缩放 · 方向键微调）</label>' +
       (MH.ui.aligning
         ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
@@ -792,6 +800,17 @@
       });
     },
     'bg-crop'() { cropBackground(); },
+    'bg-scale-step'(el, e) {
+      const st = MH.store.state;
+      if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+      const step = (e && e.shiftKey ? 1 : 0.1) / 100;       // Shift = 粗调 1%
+      applyBgScale(st.bg.scale + (Number(el.dataset.dir) || 1) * step);
+    },
+    'bg-scale-reset'() {
+      const st = MH.store.state;
+      if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+      applyBgScale(1);
+    },
     'bg-remove'() {
       if (!confirm('移除底图？（网格与题目内容不受影响）')) return;
       MH.store.setBgData(null);
@@ -884,6 +903,20 @@
     fn(el, e);
   }
 
+  /** 设置底图缩放：拖动滑块、精调按钮、还原都走这里，顺带刷新数值显示 */
+  function applyBgScale(v) {
+    const st = MH.store.state;
+    if (!st.bg) return;
+    const next = Math.round(Core.clampNum(v, 0.1, 4, 1) * 1000) / 1000;
+    MH.store.preview(s => { Core.updateBackground(s, { scale: next }); });
+    MH.board.rebuildIfNeeded();
+    MH.board.paint();
+    const slider = document.getElementById('bgScale');
+    if (slider) slider.value = String(Math.round(next * 1000) / 10);
+    const meta = document.querySelector('[data-bg="scale"]');
+    if (meta) meta.textContent = (Math.round(next * 1000) / 10).toFixed(1) + '%';
+  }
+
   function onDocumentInput(e) {
     const t = e.target;
     if (t.id === 'draftName') {
@@ -893,12 +926,9 @@
       MH.store.preview(s => { Core.updateBackground(s, { opacity: v }); });
       MH.board.syncBackground(MH.store.state);
     } else if (t.id === 'bgScale') {
-      const v = Core.clampInt(t.value, 10, 200, 100) / 100;
-      MH.store.preview(s => { Core.updateBackground(s, { scale: v }); });
-      MH.board.rebuildIfNeeded();
-      MH.board.paint();
-      const meta = t.parentNode && t.parentNode.querySelector('.meta');
-      if (meta) meta.textContent = Math.round(v * 100) + '%';
+      // 注意用浮点 clamp：以前用 clampInt 会把值取整到 1%，细步长等于白调
+      const v = Core.clampNum(t.value, 10, 400, 100) / 100;
+      applyBgScale(v);
     } else if (t.id === 'cellSize') {
       MH.store.live(s => Core.setCellSize(s, t.value, { gridOnly: !!MH.ui.aligning }));
     }

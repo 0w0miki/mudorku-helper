@@ -846,6 +846,57 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const kz = az.cell / bz.cell;
   ok(Math.abs(az.scale / bz.scale - kz) < 0.02, '退出对齐后仍按绑定缩放：k=' + kz.toFixed(3) + '，scale ' + bz.scale.toFixed(3) + '→' + az.scale.toFixed(3));
 
+  // 24) 底图缩放的精调：0.1% 步长（以前 5%，一张 1000px 的图一步就是 50px 误差）
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(6, 8), 'e2e 精调'));
+  await p.click('#tabPrep');
+  await p.setInputFiles('#bgFileInput', { name: 'map.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  await p.waitForTimeout(250);
+  const stepAttr = await p.evaluate(() => {
+    const el = document.getElementById('bgScale');
+    return { step: parseFloat(el.step), min: parseFloat(el.min), max: parseFloat(el.max) };
+  });
+  ok(stepAttr.step <= 0.1, '滑块步长 ' + stepAttr.step + '%（原 5%）');
+  ok(stepAttr.max === 400, '上限 ' + stepAttr.max + '%（与核心一致）');
+
+  const s0 = await p.evaluate(() => window.MH.store.state.bg.scale);
+  await p.click('[data-act="bg-scale-step"][data-dir="1"]');
+  const s1 = await p.evaluate(() => window.MH.store.state.bg.scale);
+  ok(Math.abs(s1 - s0 - 0.001) < 1e-9, '± 按钮精确 +0.1%：' + s0 + ' → ' + s1);
+  ok(/\.\d%$/.test(await p.textContent('[data-bg="scale"]')), '数值显示到小数：' + (await p.textContent('[data-bg="scale"]')));
+  await p.click('[data-act="bg-scale-step"][data-dir="1"]', { modifiers: ['Shift'] });
+  const s2 = await p.evaluate(() => window.MH.store.state.bg.scale);
+  ok(Math.abs(s2 - s1 - 0.01) < 1e-9, 'Shift + 是 1%：' + s1 + ' → ' + s2);
+
+  await p.evaluate(() => {
+    const el = document.getElementById('bgScale');
+    el.value = '88.3';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await p.waitForTimeout(200);
+  const s3 = await p.evaluate(() => window.MH.store.state.bg.scale);
+  ok(Math.abs(s3 - 0.883) < 1e-9, '滑块 88.3% 精确生效（旧实现会取整成 88%）：' + s3);
+  await p.click('[data-act="bg-scale-reset"]');
+  await p.waitForTimeout(150);
+  ok(await p.evaluate(() => window.MH.store.state.bg.scale) === 1, '还原 100%');
+
+  // 精调到"图片像素 = 网格像素"后应当严丝合缝
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    st.settings.cellSize = 50;                       // 8 列 × 50 = 400 = 图宽
+    C.updateBackground(st, { scale: 1 });
+    C.setGridOffset(st, 0, 0);
+    window.MH.store.setSettings({});
+    window.MH.render();
+  });
+  await p.waitForTimeout(250);
+  const fits = await p.evaluate(() => {
+    const L = window.MurdokuCore.boardLayout(window.MH.store.state);
+    return { gw: L.gridW, gh: L.gridH, bw: L.bgW, bh: L.bgH };
+  });
+  ok(fits.gw === fits.bw && fits.gh === fits.bh,
+     '对齐到像素级：网格 ' + fits.gw + '×' + fits.gh + ' vs 底图 ' + fits.bw + '×' + fits.bh);
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

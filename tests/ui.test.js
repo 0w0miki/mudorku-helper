@@ -1723,3 +1723,60 @@ test('行列统计里没什么可做的时候：给出提示且不写入撤销�
   assert.equal(win.MH.core.xSource(win.MH.store.state, '0,1'), 'user', '已有的 X 不受影响');
   dom.window.close();
 });
+
+// ------------------------------------------------------------ 底图缩放的精调
+
+test('底图缩放：滑块 0.1% 步长，且不会被取整吃掉', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  withBg(dom);
+  const slider = q(doc, '#bgScale');
+  assert.equal(slider.step, '0.1', '滑块步长 0.1%（原 5%）');
+  assert.equal(slider.max, '400', '上限与核心一致（400%）');
+  assert.equal(slider.min, '10');
+
+  // 直接给个非整数百分比：以前 clampInt 会取整成 88%，细步长等于白调
+  setInput(dom, '#bgScale', 88.3);
+  assert.equal(win.MH.store.state.bg.scale, 0.883, '88.3% 精确生效');
+  assert.equal(q(doc, '[data-bg="scale"]').textContent, '88.3%', '数值显示到小数');
+  assert.equal(slider.value, '88.3', '滑块位置同步');
+});
+
+test('底图缩放：± 按钮精调 0.1%，Shift 粗调 1%', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  withBg(dom);
+  const scale = () => win.MH.store.state.bg.scale;
+
+  clickSel(dom, '[data-act="bg-scale-step"][data-dir="1"]');
+  assert.equal(scale(), 1.001, '点 + 是 +0.1%');
+  clickSel(dom, '[data-act="bg-scale-step"][data-dir="-1"]');
+  assert.equal(scale(), 1, '点 − 回到 100%');
+
+  // Shift 粗调（事件委托会把 shiftKey 透传给动作）
+  const plus = q(doc, '[data-act="bg-scale-step"][data-dir="1"]');
+  plus.dispatchEvent(new win.MouseEvent('click', { bubbles: true, shiftKey: true }));
+  assert.equal(scale(), 1.01, 'Shift + 是 +1%');
+
+  // 连续细调能精确累加（旧实现会被取整抹平）
+  for (let i = 0; i < 10; i++) clickSel(dom, '[data-act="bg-scale-step"][data-dir="1"]');
+  assert.equal(scale(), 1.02, '10 次 +0.1% 正好 +1%');
+
+  clickSel(dom, '[data-act="bg-scale-reset"]');
+  assert.equal(scale(), 1, '还原按钮回到 100%');
+  assert.equal(q(doc, '[data-bg="scale"]').textContent, '100.0%');
+  dom.window.close();
+});
+
+test('底图缩放：上下限仍然夹住', async () => {
+  const { dom } = await boot();
+  const win = dom.window;
+  withBg(dom, { scale: 0.101 });
+  clickSel(dom, '[data-act="bg-scale-step"][data-dir="-1"]');
+  assert.equal(win.MH.store.state.bg.scale, 0.1, '下限 10%');
+  setInput(dom, '#bgScale', 399.9);
+  assert.equal(win.MH.store.state.bg.scale, 3.999, '上限 400%');
+  setInput(dom, '#bgScale', 9999);
+  assert.equal(win.MH.store.state.bg.scale, 4, '超过上限被夹住');
+  dom.window.close();
+});
