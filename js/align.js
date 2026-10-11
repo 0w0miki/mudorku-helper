@@ -149,15 +149,19 @@
    * 用 runLength² 加权后，一条贯穿的地图网格线会把纹理压下去（无需调参）。
    * axis='x' → 逐列沿 y 找竖线行程；axis='y' 反之。
    */
-  function runProfile(ink, w, h, axis, thresh) {
+  function runProfile(ink, w, h, axis, thresh, bounds) {
     const vert = axis === 'x';
     const outer = vert ? w : h;          // 有多少条"列/行"
     const inner = vert ? h : w;          // 每条里走多远
+    // bounds=[lo,hi] 时只统计这一段：地图常只占画面一部分，图例/文字区会把
+    // 另一个方向的周期带偏（真实例子里 y 就这样被文字行骗成半格距）
+    const j0 = bounds ? Math.max(0, Math.floor(bounds[0])) : 0;
+    const j1 = bounds ? Math.min(inner - 1, Math.ceil(bounds[1])) : inner - 1;
     const prof = new Float64Array(outer);
     const at = vert ? (i, j) => j * w + i : (i, j) => i * w + j;
     for (let i = 0; i < outer; i++) {
       let run = 0, sum = 0;
-      for (let j = 0; j < inner; j++) {
+      for (let j = j0; j <= j1; j++) {
         if (ink[at(i, j)] >= thresh) run++;
         else {
           if (run > 1) sum += run * run;   // 短行程贡献极小
@@ -222,26 +226,36 @@
   }
 
   /**
-   * 墨迹捕获率：梳状位置 ±win 窗口内捕获的墨迹 / 全部墨迹。
-   * 比"取平均"稳：取平均会偏爱"只采到少数最强线"的大格距，捕获率不会。
+   * 梳状统计：给出两个互补指标
+   * - capture  = 梳齿窗口捕获的墨迹 / 全部墨迹（整倍数会漏掉一半线 → 掉下来）
+   * - hitRatio = 真的落在墨迹上的梳齿比例（约数会有半数梳齿落在空处 → 掉下来）
+   * 真周期两个都高；约数赢在 capture 输在 hitRatio，整倍数反之。两个都用才能定位基本周期。
    */
-  function combCapture(prof, pitch, phase, win) {
+  function combStats(prof, pitch, phase, win, inkThresh) {
     const n = prof.length;
+    // "有墨"必须是相对的：横线会在每一列都留一丁点墨，用 >0 判据会让命中率永远满分
+    const t = inkThresh > 0 ? inkThresh : 0;
+    const has = v => v > t;
     let total = 0;
-    for (let i = 0; i < n; i++) if (prof[i] > 0) total += prof[i];
-    if (total <= 0) return 0;
+    for (let i = 0; i < n; i++) if (has(prof[i])) total += prof[i];
     const used = new Uint8Array(n);
-    let cap = 0;
+    let cap = 0, positions = 0, hits = 0;
     for (let k = 0; ; k++) {
       const c = Math.round(phase + k * pitch);
       if (c > n - 1) break;
+      positions++;
+      let hit = false;
       for (let i = Math.max(0, c - win); i <= Math.min(n - 1, c + win); i++) {
-        if (used[i]) continue;
-        used[i] = 1;
-        if (prof[i] > 0) cap += prof[i];
+        if (has(prof[i])) hit = true;
+        if (!used[i]) { used[i] = 1; if (has(prof[i])) cap += prof[i]; }
       }
+      if (hit) hits++;
     }
-    return cap / total;
+    return {
+      capture: total > 0 ? cap / total : 0,
+      hitRatio: positions ? hits / positions : 0,
+      positions,
+    };
   }
 
   /**
@@ -260,43 +274,62 @@
     let maxAc = 0, argmax = lo;
     for (let l = lo; l <= hi; l++) if (ac[l] > maxAc) { maxAc = ac[l]; argmax = l; }
     if (maxAc <= 0.05) return null;
-    // 候选：自相关的局部极大（真实周期及其整数倍都会在这里）
-    const cands = [];
+
+    // 候选 = 自相关局部极大 + 它们的 /2、/3（真周期可能根本没进自相关：区域粗边框
+    // 会让"隔一条线"的结构更强，把真周期压下去）
+    const set = new Set([argmax]);
     for (let l = lo; l <= hi; l++) {
-      if (ac[l] >= maxAc * 0.3 && ac[l] >= ac[l - 1] && ac[l] >= ac[l + 1]) cands.push(l);
+      if (ac[l] >= maxAc * 0.3 && ac[l] >= ac[l - 1] && ac[l] >= ac[l + 1]) set.add(l);
     }
-    if (!cands.length) cands.push(argmax);
+    for (const l of [...set]) {
+      for (const d of [2, 3]) {
+        const q = l / d;
+        if (q >= lo) set.add(Math.round(q * 100) / 100);
+      }
+    }
+
+    let sumProf = 0;
+    for (let i = 0; i < n; i++) sumProf += prof[i];
+    const inkThresh = (sumProf / n) * 1.5;      // 只有明显高出平均的列才算"线"
+
     const scored = [];
-    for (const cand of cands.slice(0, 16)) {
-      const win = Math.max(1, Math.min(3, Math.round(cand * 0.15)));
-      let bCap = -1, bPhase = 0;
+    for (const cand of set) {
+      // 相位：用"取最大"精修（±1px 窗口比宽窗口准）
+      let bScore = -1, bPhase = 0;
       const span = Math.max(1, Math.round(cand));
       for (let ph = 0; ph < span; ph++) {
-        const cr = combCapture(prof, cand, ph, win);
-        if (cr > bCap) { bCap = cr; bPhase = ph; }
+        const sc = combScore(prof, cand, ph);
+        if (sc > bScore) { bScore = sc; bPhase = ph; }
       }
-      scored.push({ pitch: cand, phase: bPhase, capture: bCap, score: combScore(prof, cand, bPhase) });
+      const win = Math.max(1, Math.min(2, Math.round(cand * 0.06)));
+      const st = combStats(prof, cand, bPhase, win, inkThresh);
+      scored.push({ pitch: cand, phase: bPhase, score: bScore,
+                    capture: st.capture, hitRatio: st.hitRatio });
     }
-    let bestCap = 0;
-    for (const c of scored) if (c.capture > bestCap) bestCap = c.capture;
-    // 捕获率并列时取**最小** pitch：整倍数（2×、3×）常常也能"捕获全部墨迹"
-    // （弱线被阈值滤掉后更明显），只有取最小才不会把 2 倍格距当格距。
-    // 而真周期的约数很少出现在自相关候选里（AC 局部极大 ≥30% 峰高才入选），
-    // 所以"取最小"不会把格距缩小一半。
-    const close = scored.filter(c => c.capture >= bestCap * 0.97).sort((a, b) => a.pitch - b.pitch);
+
+    // 判据：**min(命中率, 捕获率)** 在真周期上最大。
+    //  真周期：两者都接近 1；约数（p/2）：捕获率满分但半数梳齿落在空处 → 命中率腰斩；
+    //  整倍数（2p）：命中率满分但漏掉一半的线 → 捕获率腰斩。只有基本周期两者都高。
+    //  这个判据自带区分能力，不需要额外的阈值。并列时取最小 pitch。
+    for (const c of scored) c.fit = Math.min(c.hitRatio, c.capture);
+    let bestFit = -1;
+    for (const c of scored) if (c.fit > bestFit) bestFit = c.fit;
+    const close = scored.filter(c => c.fit >= bestFit * 0.98).sort((a, b) => a.pitch - b.pitch);
     const pick = close[0];
-    const ip = Math.round(pick.pitch);
-    const a0 = ac[ip - 1] || 0, a1 = ac[ip] || 0, a2 = ac[ip + 1] || 0;
+
+    const ip = Math.max(1, Math.min(ac.length - 2, Math.round(pick.pitch)));
+    const a0 = ac[ip - 1] || 0, a1 = ac[ip], a2 = ac[ip + 1] || 0;
     const den = a0 - 2 * a1 + a2;
-    const pitch = den ? pick.pitch + 0.5 * (a0 - a2) / den : pick.pitch;
-    // 周期用捕获率定（不受线的强弱不均影响），相位用"取最大"精修（±1px 窗口更准）
-    let bScore = -1, bPhase = pick.phase;
-    const span = Math.max(1, Math.round(pick.pitch));
-    for (let ph = 0; ph < span; ph++) {
-      const sc = combScore(prof, pick.pitch, ph);
-      if (sc > bScore) { bScore = sc; bPhase = ph; }
+    // 抛物线精修的偏移必须夹在 ±0.5：den 接近 0 时偏移会爆掉，把 pitch 变成负数/超大，
+    // 下游按 pitch 步进的循环就再也走不到头（曾经把测试挂死在这）
+    let pitch = pick.pitch;
+    if (den) {
+      const off = 0.5 * (a0 - a2) / den;
+      if (Number.isFinite(off) && Math.abs(off) <= 0.5) pitch += off;
     }
-    return { pitch, phase: bPhase, score: bScore, capture: pick.capture, ac: maxAc };
+    if (!(pitch > 0)) pitch = pick.pitch;
+    return { pitch, phase: pick.phase, score: pick.score, capture: pick.capture,
+             hitRatio: pick.hitRatio, ac: maxAc, candidates: scored.length };
   }
 
   // ---------------------------------------------------------------- 峰值精修与拟合
@@ -305,6 +338,7 @@
   function refineLines(prof, pitch, phase, strengthFloor) {
     const n = prof.length;
     const lines = [];
+    if (!(pitch > 0) || !Number.isFinite(pitch)) return lines;
     const half = Math.max(2, Math.round(pitch / 4));
     for (let k = -Math.ceil(phase / pitch); ; k++) {
       const c = Math.round(phase + k * pitch);
@@ -455,7 +489,7 @@
       0.2 * (1 - residN)));
     return {
       // 对比度太低说明"线"只是噪声的偶然堆积；覆盖太低说明周期对不上实际线位
-      ok: lines.length >= opts.minLines && ratio >= 0.6 && contrast >= 1.35 && conf >= 0.45,
+      ok: lines.length >= opts.minLines && ratio >= 0.4 && contrast >= 2.0 && conf >= 0.45,
       pitch: fit.slope,
       origin: fit.intercept,
       lines: lines.map(l => l.pos),
@@ -484,18 +518,41 @@
     // 1) 倾角：先估，必要时把图摆正再找周期
     const ang = estimateAngle(gray, w, h);
     // 锐度太低时这个角度没有意义（空白图、纯噪声），不要瞎转
-    const angle = (Math.abs(ang.angle) >= 0.3 && ang.sharpness >= 0.05) ? ang.angle : 0;
-    const base = angle ? rotateGray(gray, w, h, -angle) : gray;
+    const guess = (Math.abs(ang.angle) >= 0.3 && ang.sharpness >= 0.05) ? ang.angle : 0;
 
     // 2) 墨迹 + 投影（背景核取短边的 ~1/30，至少 4px）
     const radius = Math.max(4, Math.round(Math.min(w, h) / 30));
-    const ink = inkMap(base, w, h, radius);
-    // 只认长直线：纹理/文字/图标的短行程会被 runLength² 压下去
-    const thresh = Math.max(10, otsu(ink) * 0.6);
-    const profX = runProfile(ink, w, h, 'x', thresh);
-    const profY = runProfile(ink, w, h, 'y', thresh);
-    const ax = analyzeAxis(profX, opts);
-    const ay = analyzeAxis(profY, opts);
+    const runAxes = (img) => {
+      const ink = inkMap(img, w, h, radius);
+      // 只认长直线：纹理/文字/图标的短行程会被 runLength² 压下去
+      const thresh = Math.max(10, otsu(ink) * 0.6);
+      const span = (ax) => (ax.ok && ax.lines && ax.lines.length >= 3)
+        ? [Math.floor(ax.lines[0]), Math.ceil(ax.lines[ax.lines.length - 1])] : null;
+      const ax0 = analyzeAxis(runProfile(ink, w, h, 'x', thresh), opts);
+      // y 只统计 x 网格覆盖的那一段，避免右侧/下方图例与文字把周期带偏
+      const ay = analyzeAxis(runProfile(ink, w, h, 'y', thresh, span(ax0)), opts);
+      let ax = ax0;
+      const yb = span(ay);
+      if (yb) {
+        const ax2 = analyzeAxis(runProfile(ink, w, h, 'x', thresh, yb), opts);
+        if (ax2.ok || !ax0.ok) ax = ax2.ok ? ax2 : ax0;
+      }
+      return { x: ax, y: ay };
+    };
+    // 伪倾角会把线抹开反而更差：旋转前后各分析一次，按"两个方向都成立且置信度高"取更好的
+    const scoreOf = r => {
+      const okBoth = r.x.ok && r.y.ok;
+      const sq = okBoth && r.x.pitch && r.y.pitch
+        ? Math.min(r.x.pitch, r.y.pitch) / Math.max(r.x.pitch, r.y.pitch) : 0;
+      return (okBoth ? 1 : 0) * 10 + sq + (r.x.confidence || 0) + (r.y.confidence || 0);
+    };
+    let angle = 0;
+    let best = runAxes(gray);
+    if (guess) {
+      const rotated = runAxes(rotateGray(gray, w, h, -guess));
+      if (scoreOf(rotated) > scoreOf(best)) { best = rotated; angle = guess; }
+    }
+    const ax = best.x, ay = best.y;
 
     const pitchX = ax.pitch || 0, pitchY = ay.pitch || 0;
     const okX = !!ax.ok, okY = !!ay.ok;
@@ -531,6 +588,6 @@
     };
   }
 
-  return { detectGrid, toGray, boxBlur, inkMap, project, otsu, runProfile, detrend, combCapture, autocorr, combScore, findPitch, refineLines, linfit,
+  return { detectGrid, toGray, boxBlur, inkMap, project, otsu, runProfile, detrend, combStats, autocorr, combScore, findPitch, refineLines, linfit,
            estimateAngle, rotateGray, DEFAULTS };
 });
