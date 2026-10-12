@@ -128,3 +128,25 @@ test('孤立的小格子（会被并进邻居）不能让识别崩溃', () => {
   assert.equal(res.regions.length, 1, '单格应被并进邻居，实际 ' + res.regions.length + ' 个区域');
   assert.equal(res.regions[0].size, 25, '应覆盖全部 25 格：' + res.regions[0].size);
 });
+
+test('同色地面 + 粗隔墙（car-repair 风格）：靠隔墙切分，不靠颜色', () => {
+  // 6×6，地面**完全同色**，用粗黑隔墙分成三块（每块 2 列）
+  const pitch = 60, x0 = 30, y0 = 30, N = 6;
+  const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
+  const FLOOR = [200, 215, 225];
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  fillRect(r, x0, y0, N * pitch, N * pitch, FLOOR);
+  // 细网格线（2px，深色）——不能被当成隔墙
+  for (let c = 0; c <= N; c++) fillRect(r, x0 + c * pitch - 1, y0, 2, N * pitch, [90, 86, 80]);
+  for (let rr = 0; rr <= N; rr++) fillRect(r, x0, y0 + rr * pitch - 1, N * pitch, 2, [90, 86, 80]);
+  // 粗隔墙（6px，更深）：第 2|3 列、第 4|5 列之间
+  for (const c of [2, 4]) fillRect(r, x0 + c * pitch - 3, y0, 6, N * pitch, [40, 42, 46]);
+  const geom = { x0, y0, pitchX: pitch, pitchY: pitch, cols: N, rows: N };
+  const out = R.detectRegions(r, geom);
+  assert.ok(out.ok, '应识别出区域：' + out.reason);
+  assert.equal(out.regions.length, 3, '应为 3 块（被两道隔墙分开），实际 ' + out.regions.length +
+    ' 大小[' + out.stats.sizes.join(',') + '] 粗线边 ' + out.stats.boldEdges);
+  const cols = out.regions.map(reg => [...new Set(reg.cells.map(k => Number(k.split(',')[1])))].sort((a, b) => a - b));
+  assert.deepEqual(cols.map(c => c.join('-')), ['0-1', '2-3', '4-5'], '每块的列范围应等于真值：' + JSON.stringify(cols));
+  for (const reg of out.regions) assert.equal(reg.size, 12, '每块 12 格：' + reg.size);
+});

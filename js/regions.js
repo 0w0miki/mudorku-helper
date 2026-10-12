@@ -148,6 +148,72 @@
     return (bestT + 1) / bins * maxV;
   }
 
+  /** 格子的中位亮度（由取到的中位色算） */
+  function cellLuma(cell) {
+    return 0.299 * cell.rgb[0] + 0.587 * cell.rgb[1] + 0.114 * cell.rgb[2];
+  }
+
+  /**
+   * 探两格共享边上有没有"粗隔墙"。
+   *
+   * 区域边框/隔墙是画在格界上的深色粗线，而网格线往往也是深色——区别在**粗细**：
+   * 取跨边 ±band 的窄带（band=2 → 5px），用【中位数】作代表值：
+   *   · 细网格线（1~2px）只占窄带少数 → 中位数仍是格子颜色 → drop≈0，不算粗线
+   *   · 粗隔墙（≥4px）占满窄带     → 中位数落在墙上     → drop 大，算边界
+   * 两格颜色可以完全一样（car-repair 的地面就是），所以"有没有这条线"是比颜色更根本的判据。
+   */
+  function borderProbe(raster, geom, r, c, dir, lumaA, lumaB, options) {
+    const opt = Object.assign(
+      { span: 6, samples: 5, depthAbs: 22, depthRel: 0.09, minWidth: 4 }, options || {});
+    const { data, width: W, height: H } = raster;
+    const { x0, y0, pitchX, pitchY } = geom;
+    const px0 = Math.round(x0 + c * pitchX), py0 = Math.round(y0 + r * pitchY);
+    const px1 = Math.round(x0 + (c + 1) * pitchX), py1 = Math.round(y0 + (r + 1) * pitchY);
+    const span = Math.max(2, Math.round(opt.span));
+    const n = span * 2 + 1;
+    const acc = new Float64Array(n);
+    const cnt = new Int32Array(n);
+    const lumaAt = (x, y) => {
+      const o = (y * W + x) * 4;
+      return 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+    };
+    const samples = Math.max(3, Math.round(opt.samples));
+    for (let s2 = 0; s2 < samples; s2++) {
+      const t = 0.25 + 0.5 * (samples === 1 ? 0.5 : s2 / (samples - 1));   // 沿边取 25%~75%
+      if (dir === 'right') {
+        const y = Math.round(py0 + (py1 - py0) * t);
+        for (let i = 0; i < n; i++) {
+          const x = px1 - span + i;
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          acc[i] += lumaAt(x, y); cnt[i]++;
+        }
+      } else {
+        const x = Math.round(px0 + (px1 - px0) * t);
+        for (let i = 0; i < n; i++) {
+          const y = py1 - span + i;
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          acc[i] += lumaAt(x, y); cnt[i]++;
+        }
+      }
+    }
+    const prof = [];
+    for (let i = 0; i < n; i++) prof.push(cnt[i] ? acc[i] / cnt[i] : 255);
+    const cellsLuma = (lumaA + lumaB) / 2;
+    const need = Math.max(opt.depthAbs, cellsLuma * opt.depthRel);
+    // 找"比两格明显更暗"的连续段，最长的一段就是线宽
+    let best = 0, cur = 0;
+    for (let i = 0; i < n; i++) {
+      if (prof[i] < cellsLuma - need) { cur++; if (cur > best) best = cur; }
+      else cur = 0;
+    }
+    const minLuma = Math.min.apply(null, prof);
+    return {
+      width: best,
+      depth: Math.round((cellsLuma - minLuma) * 10) / 10,
+      bold: best >= opt.minWidth,
+    };
+  }
+
   function unionFind(n) {
     const p = new Int32Array(n);
     for (let i = 0; i < n; i++) p[i] = i;
@@ -182,26 +248,44 @@
       for (let c = 0; c < cols; c++) {
         const i = idx[r * cols + c];
         if (i < 0) continue;
+        const li = list[i], lumI = cellLuma(li);
         if (c + 1 < cols) {
           const j = idx[r * cols + c + 1];
-          if (j >= 0) edges.push({ i, j, d: cellDistance(list[i], list[j]) });
+          if (j >= 0) {
+            const bd = borderProbe(raster, geom, r, c, 'right', lumI, cellLuma(list[j]), opt);
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop });
+          }
         }
         if (r + 1 < rows) {
           const j = idx[(r + 1) * cols + c];
-          if (j >= 0) edges.push({ i, j, d: cellDistance(list[i], list[j]) });
+          if (j >= 0) {
+            const bd = borderProbe(raster, geom, r, c, 'down', lumI, cellLuma(list[j]), opt);
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop });
+          }
         }
       }
     }
     if (!edges.length) return { ok: false, reason: '没有相邻格', regions: [] };
-    // 阈值：同区域内的相邻格距离小、跨边界大 → Otsu 自动切（拿不到双峰时退到 55 分位）
-    const ds = edges.map(e => e.d);
+    // 阈值只用"没有粗线"的相邻对来标定：这样它反映的是这张地图**同一个区域内部**的
+    // 颜色波动，而不是被跨区域的巨大色差拉偏（拿不到双峰时退到 45 分位）
+    const open = edges.filter(e => !e.bold);
+    const ds = (open.length >= 4 ? open : edges).map(e => e.d);
     const maxD = Math.max.apply(null, ds);
     let t = otsu1d(ds, Math.max(1, maxD)) * 1.15;
     const sorted = [...ds].sort((a, b) => a - b);
-    if (!(t > 0) || t >= maxD) t = sorted[Math.floor(sorted.length * 0.55)] || maxD * 0.5;
+    if (!(t > 0) || t >= maxD) t = sorted[Math.floor(sorted.length * 0.45)] || maxD * 0.5;
 
+    // 判据按地图风格自适应：
+    //  · 有粗隔墙的地图（car-repair：地面同色，靠墙分区）→ **只看粗线**，颜色不参与
+    //    （隔墙两侧颜色一模一样，颜色判据必然连成一片）
+    //  · 只有颜色差异的地图（contest 那种色块）→ 靠颜色，阈值由"无粗线"的相邻对标定
+    const boldRatio = edges.length ? edges.filter(e => e.bold).length / edges.length : 0;
+    const walls = boldRatio >= 0.06;
     const uf = unionFind(list.length);
-    for (const e of edges) if (e.d <= t) uf.union(e.i, e.j);
+    for (const e of edges) {
+      const same = walls ? !e.bold : e.d <= t;
+      if (same) uf.union(e.i, e.j);
+    }
 
     const groups = new Map();
     list.forEach((cell, i) => {
@@ -229,9 +313,11 @@
       comps.forEach((cp, ci) => { if (cp) cp.ids.forEach(i => compOf.set(i, ci)); });
     };
     rebuild();
+    // 只沿"没有粗隔墙"的边找邻居：否则会把隔墙两侧、但平均色相近的两个区域重新并起来
     const adjacentComps = ci => {
       const out = new Map();
       for (const e of edges) {
+        if (e.bold) continue;
         const a = compOf.get(e.i), b = compOf.get(e.j);
         if (a === ci && b !== ci) out.set(b, Math.min(out.get(b) ?? Infinity, e.d));
         if (b === ci && a !== ci) out.set(a, Math.min(out.get(a) ?? Infinity, e.d));
@@ -300,6 +386,7 @@
       regions,
       stats: {
         sampled: list.length, total: cols * rows, edges: edges.length,
+        boldEdges: edges.filter(e => e.bold).length, walls,
         threshold: Math.round(t * 10) / 10,
         sizes: regions.map(r => r.size),
         medianEdge: Math.round((list.reduce((s, c) => s + c.edge, 0) / list.length) * 1000) / 1000,
@@ -307,5 +394,5 @@
     };
   }
 
-  return { detectRegions, sampleCells, cellDistance, srgbToLab, otsu1d };
+  return { detectRegions, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
 });
