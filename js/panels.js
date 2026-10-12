@@ -246,6 +246,11 @@
       '<section class="card">' +
       '<h2>物品 <span class="muted">可占据 / 不可占据</span></h2>' +
       '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 新建物品</button>' +
+      (!d && MH.store.state.bg
+        ? '<button class="ghost block" data-act="item-sample" ' + (MH.ui.itemPicking ? 'disabled' : '') +
+            ' title="这类地图上同一件物品是同一张画反复贴的：点一个样例格子，自动把长得一样的格子都圈出来（结果进草稿，可手改）">' +
+            (MH.ui.itemPicking ? '🔍 请在棋盘上点一个物品格子…' : '🔍 从样例找同类') + '</button>'
+        : '') +
       (d && d.kind === 'item' ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('item', st) + '</ul>' +
       '</section>' +
@@ -398,6 +403,36 @@
       return;
     }
     MH.store.touch('选择人物');
+  }
+
+  /**
+   * 用某一格当样例，找图上所有"同一件物品"的格子 → 直接填进物品草稿。
+   * 这类地图上同一件物品是同一张画反复贴的，模板匹配（NCC + 形状复核）非常可靠；
+   * 用户点一下样例即可，结果的格子还能在草稿里手工加减。
+   */
+  async function pickItemSample(k) {
+    const I2 = window.MurdokuItems;
+    if (!I2) { MH.toast('物品模块没加载（js/items.js）', 'error'); return; }
+    const st = MH.store.state;
+    if (!requireAligned(st)) return;
+    const [r, c] = String(k).split(',').map(Number);
+    let geo;
+    try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    const t0 = Date.now();
+    let res;
+    try { res = I2.findSimilar(geo.raster, geo.geom, r, c); } catch (err) {
+      MH.toast('找同类出错：' + (err && err.message ? err.message : err), 'error');
+      return;
+    }
+    if (!res.ok || !res.cells.length) { MH.toast('没找到同类：' + (res.reason || '未知原因'), 'warn'); return; }
+    startDraft('item');
+    MH.ui.draft.cells = new Set(res.cells);
+    MH.ui.draft.sample = { r, c };
+    MH.ui.lastItemMatch = { sample: { r, c }, cells: res.cells, stats: res.stats, template: res.template };
+    MH.render();
+    MH.toast('找到 ' + res.cells.length + ' 格同类（' + (Date.now() - t0) + 'ms · 阈值 ' + res.stats.threshold +
+      '）草稿里已圈好：可在棋盘上加减，改完点「保存」', 'ok');
   }
 
   function startDraft(kind, editingId) {
@@ -1307,6 +1342,16 @@
     },
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
+    'item-sample'() {
+      if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
+      if (!requireAligned(MH.store.state)) return;
+      MH.ui.itemPicking = !MH.ui.itemPicking;
+      document.body.classList.toggle('picking', MH.ui.itemPicking);
+      MH.toast(MH.ui.itemPicking
+        ? '点棋盘上任意一个物品所在的格子（就以它为样例找同类；再点一次按钮取消）'
+        : '已取消取样', MH.ui.itemPicking ? 'ok' : 'warn');
+      MH.render();
+    },
     'edit-region'(el) { startDraft('region', el.dataset.id); },
     'edit-item'(el) { startDraft('item', el.dataset.id); },
     'draft-save'() { saveDraft(); },
@@ -1799,6 +1844,8 @@
         largest.style.display = (!Core.isConnected(cells) && cells.length) ? '' : 'none';
       }
     },
+    /** 棋盘上点了一个样例格（board.js 调进来） */
+    itemSample(k) { guard(pickItemSample)(k); },
   };
 
   MH.panels = P;

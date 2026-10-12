@@ -523,6 +523,16 @@
       const k = cellEl.dataset.k;
       const st = MH.store.state;
 
+      // 物品取样模式：这一下就是"选样例格"（优先于草稿刷格 / 标 X）
+      if (MH.ui.itemPicking) {
+        e.preventDefault();
+        MH.ui.itemPicking = false;
+        document.body.classList.remove('picking');
+        MH.render();
+        if (MH.panels && MH.panels.itemSample) MH.panels.itemSample(k);
+        return;
+      }
+
       // 对齐模式：拖动 = 移动网格（此时不做区域/物品的刷选）
       if (MH.ui.aligning && st.bg) {
         e.preventDefault();

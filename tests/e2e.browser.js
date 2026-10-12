@@ -1229,6 +1229,23 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForFunction(() => window.MH.store.state.regions.length === 17, null, { timeout: 60000 });
   ok(Date.now() - t2 < 5000, '再点一次走缓存、不重新 OCR：' + (Date.now() - t2) + 'ms');
 
+  // 32) 物品：点一个样例格 → 自动找出同类 → 存成物品（结果进草稿，可手改）
+  await p.evaluate(() => { window.MH.ui.itemPicking = false; window.MH.ui.lastItemMatch = null; });
+  await p.click('[data-act="item-sample"]');
+  ok(await p.evaluate(() => !!window.MH.ui.itemPicking), '点「从样例找同类」进入取样模式');
+  await p.locator('.cell[data-k="18,20"]').click();           // 酒馆里的白椅子
+  await p.waitForFunction(() => window.MH.ui.lastItemMatch, null, { timeout: 60000 });
+  const im = await p.evaluate(() => window.MH.ui.lastItemMatch);
+  ok(im.cells.length >= 3, '白椅子找到 ' + im.cells.length + ' 格同类（≥3）：' + im.cells.join(' '));
+  ok(im.cells.includes('18,20'), '样例格自己在结果里');
+  const draftN = await p.evaluate(() => (window.MH.ui.draft && window.MH.ui.draft.cells.size) || 0);
+  ok(draftN === im.cells.length, '草稿里已圈好同样的格子：' + draftN);
+  await p.fill('#draftName', '椅子');
+  await p.click('[data-act="draft-save"]');
+  const savedItems = await p.evaluate(() => window.MH.store.state.items.map(i => i.name + ':' + i.cells.length + ':' + i.occupiable));
+  ok(savedItems.length === 1 && /^椅子:\d+:true$/.test(savedItems[0]) && Number(savedItems[0].split(':')[1]) >= 3,
+    '保存成物品（名字 + 格子数 + 可占据）：' + savedItems.join(' / '));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
