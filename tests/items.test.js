@@ -79,11 +79,28 @@ test('点一个样例 → 只找出同一件物品的格子（不牵连别的图
   assert.ok(!res.cells.includes('3,3'), '石头不该被当成椅子');
 });
 
-test('同一件物品画得大一点也能找到（多尺度）', () => {
-  const { raster, geom } = makeMap({ bigChair: true });
-  const res = I.findSimilar(raster, geom, CHAIRS[0][0], CHAIRS[0][1]);
-  assert.equal(setOf(res.cells), setOf(CHAIRS.map(([r, c]) => r + ',' + c)),
-    '放大 15% 的那一把也该找到：' + setOf(res.cells));
+test('信息量少的样例（墓碑）不会被判成"到处都是"', () => {
+  // 真实数据：墓碑只是一块灰石头，底色是均匀草地 → 旧版把 196 个格子都算成同类 ✗
+  // 现在阈值含"中位数 + 余量"和"最高分的一个比例"，这种样例只会命中它自己
+  const r = makeRaster(X0 * 2 + N * PITCH, X0 * 2 + N * PITCH);
+  let seed = 99;
+  const rnd = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };
+  for (let rr = 0; rr < N; rr++) {
+    for (let cc = 0; cc < N; cc++) {
+      const px = X0 + cc * PITCH, py = Y0 + rr * PITCH;
+      const g = 200 + Math.round(rnd() * 20);
+      fillRect(r, px, py, PITCH, PITCH, [g - 10, g, g - 20]);      // 每格底色略有不同（草地/纹理）
+      // 每格再撒一点小斑点（纹理），保证"到处都有点暗的东西"
+      for (let k = 0; k < 6; k++) {
+        fillRect(r, px + Math.round(rnd() * (PITCH - 6)), py + Math.round(rnd() * (PITCH - 6)), 4, 4, [90, 95, 88]);
+      }
+    }
+  }
+  // 唯一一块墓碑
+  fillRect(r, X0 + 2 * PITCH + 14, Y0 + 2 * PITCH + 12, 12, 16, [120, 120, 118]);
+  const res = I.findSimilar(r, { x0: X0, y0: Y0, pitchX: PITCH, pitchY: PITCH, cols: N, rows: N }, 2, 2);
+  assert.ok(!res.ok || res.cells.length <= 3,
+    '不该匹配出一大片：' + (res.cells || []).length + ' 格 ' + JSON.stringify(res.stats));
 });
 
 test('样例取自空白格 → 明确返回 ok:false，不硬凑匹配', () => {

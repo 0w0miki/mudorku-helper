@@ -130,7 +130,9 @@
     if (bx1 < 0) return null;
     const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
     if (bw < 5 || bh < 5) return null;
-    if (Math.max(bw, bh) / Math.min(bw, bh) > 3.2) return null;      // 细长条 = 线
+    // 细长条 = 格线/区域边框；但"长桌/大床"这类大件同样是细长的，
+    // 区别在**它没那么薄**：只有既细长、又比格子短边还薄很多，才当成线拒掉
+    if (Math.max(bw, bh) / Math.min(bw, bh) > 3.2 && Math.min(bw, bh) < Math.min(w, h) * 0.28) return null;
     const ch = [[], [], []];
     for (let y = by0; y <= by1; y++) {
       for (let x = bx0; x <= bx1; x++) {
@@ -315,7 +317,7 @@
    * @returns {{ok:boolean,reason?:string,cells:string[],scores:number[],template:{x,y,w,h},stats:object}}
    */
   function findSimilar(raster, geom, sampleR, sampleC, options) {
-    const opt = Object.assign({ iou: 0.8, fillTol: 0.1, colourTol: 30, strongNcc: 0.9, minScore: 0.6, step: 1, coarse: 4, topK: 200, radius: 7 }, options || {});
+    const opt = Object.assign({ iou: 0.8, fillTol: 0.1, colourTol: 30, strongNcc: 0.9, minScore: 0.6, margin: 0.25, relMin: 0.8, step: 1, coarse: 4, topK: 200, radius: 7 }, options || {});
     const { width: W, height: H } = raster;
     if (!(W > 8) || !(H > 8)) return { ok: false, reason: '底图太小', cells: [], scores: [] };
     const gray = toGray(raster);
@@ -329,11 +331,18 @@
     // 实测这类浅色物品的掩码只有十几像素，靠它匹配会把所有同类都否掉。
     const sampleMask = cellMask(raster, gray, W, H, rx0, ry0, rw, rh);
     const insX = Math.max(1, Math.round(rw * 0.14)), insY = Math.max(1, Math.round(rh * 0.14));
-    if (!sampleMask) return { ok: false, reason: '这一格里看不出明显的物品（换个格子取样）', cells: [], scores: [] };
-    const tx0 = Math.max(0, sampleMask.box.within.x0 + sampleMask.box.x0 - 1);
-    const ty0 = Math.max(0, sampleMask.box.within.y0 + sampleMask.box.y0 - 1);
-    const tw = Math.min(W - tx0, sampleMask.box.x1 - sampleMask.box.x0 + 3);
-    const th = Math.min(H - ty0, sampleMask.box.y1 - sampleMask.box.y0 + 3);
+    // 掩码拿不到（物品**占满整格**：长桌/大床，最常出现的颜色就是物品自己）→
+    // 退化成"整格内部"当模板：此时不做掩码复核（useMask 为 false），只靠 NCC + 阈值
+    let tx0, ty0, tw, th;
+    if (sampleMask) {
+      tx0 = Math.max(0, sampleMask.box.within.x0 + sampleMask.box.x0 - 1);
+      ty0 = Math.max(0, sampleMask.box.within.y0 + sampleMask.box.y0 - 1);
+      tw = Math.min(W - tx0, sampleMask.box.x1 - sampleMask.box.x0 + 3);
+      th = Math.min(H - ty0, sampleMask.box.y1 - sampleMask.box.y0 + 3);
+    } else {
+      tx0 = rx0 + insX; ty0 = ry0 + insY;
+      tw = rw - insX * 2; th = rh - insY * 2;
+    }
     if (tw < 6 || th < 6 || tx0 < 0 || ty0 < 0 || tx0 + tw > W || ty0 + th > H) {
       return { ok: false, reason: '这一格的物品太小，换个格子取样', cells: [], scores: [] };
     }
@@ -381,10 +390,15 @@
     //    实测真实地图：同类 0.98~1.00，其它格子 ≤0.45，中间是空的 → 非常好分
     const vals = [...best.values()].map(v => v.s);
     const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-    const thr = Math.max(0.6, otsu01(vals, lo, hi));
+    const sorted = [...vals].sort((a, b) => a - b);
+    const med = sorted[sorted.length >> 1];
+    // 三档取大：绝对下限 / 这张图自己的 Otsu / 中位数+余量 / 最高分的一个比例。
+    // 后两项是治"模板信息量太少"的：墓碑 vs 均匀草地时所有位置分都不低，
+    // 只看 Otsu 会把 196 个格子都算成同类 ✗
+    const thr = Math.max(opt.minScore, otsu01(vals, lo, hi), med + opt.margin, hi * opt.relMin);
     // ④ 复核（只在样例的掩码足够"厚实"时做）：比形状 IoU + 实心程度 + 颜色。
     //    掩码太薄（浅色物品只有轮廓）时不比 —— 那会把真同类全否掉（白椅子踩过这个坑）。
-    const useMask = sampleMask.pixels >= 120;
+    const useMask = !!sampleMask && sampleMask.pixels >= 120;
     const sampleDesc = useMask ? shapeDesc(sampleMask) : null;
     const hits = [];
     for (const v of [...best.values()].filter(v2 => v2.s >= thr).sort((a, b) => b.s - a.s)) {
@@ -403,6 +417,16 @@
       }
       hits.push({ key: v.r + ',' + v.c, iou: v.s, ncc: v.s });
     }
+    // 只命中它自己 = 实质没找到同类（空格子、或这件物品全图只有一份）→ 明确说清楚
+    if (hits.length <= 1) {
+      return {
+        ok: false,
+        reason: '只找到它自己：这一格可能是空格，或者这件物品在这张图上只有一份',
+        cells: [], scores: [],
+        template: { x: tx0, y: ty0, w: tw, h: th }, sample: { r: sampleR, c: sampleC },
+        stats: { sampled: best.size, matches: hits.length, threshold: Math.round(thr * 1000) / 1000, maxScore: Math.round(hi * 1000) / 1000 },
+      };
+    }
     if (!hits.length) {
       return { ok: false, reason: '没有别的格子像它（换一个更"独特"的样例试试）', cells: [], scores: [],
                template: { x: tx0, y: ty0, w: tw, h: th }, sample: { r: sampleR, c: sampleC },
@@ -417,7 +441,8 @@
       sample: { r: sampleR, c: sampleC },
       stats: {
         sampled: best.size, matches: hits.length, maskChecked: useMask,
-        threshold: Math.round(thr * 1000) / 1000, maxScore: Math.round(hi * 1000) / 1000,
+        threshold: Math.round(thr * 1000) / 1000, median: Math.round(med * 1000) / 1000,
+        maxScore: Math.round(hi * 1000) / 1000,
       },
     };
   }
