@@ -11,7 +11,9 @@
   const MH = window.MH;
   const SVGNS = 'http://www.w3.org/2000/svg';
 
+  // 长按判定时长。可以被 MH.ui.longPressMs 覆盖 —— 单元测试把它调小，跑得快很多 ✓
   const LONG_PRESS_MS = 700;
+  const longPressMs = () => (MH.ui && MH.ui.longPressMs) || LONG_PRESS_MS;
   const MOVE_CANCEL_PX = 12;
   const CAND_SHOW_MAX = 4;
   const HL_POS = 'rgba(22,163,74,.40)';
@@ -755,7 +757,7 @@
       this.showRing(k);
       const tick = now => {
         if (this.press !== press || press.done) return;
-        const t = Math.min(1, (now - press.start) / LONG_PRESS_MS);
+        const t = Math.min(1, (now - press.start) / longPressMs());
         this.setRing(t);
         if (t >= 1) {
           press.done = true;

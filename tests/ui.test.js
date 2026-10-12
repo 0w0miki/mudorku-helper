@@ -30,6 +30,8 @@ async function boot() {
   });
   dom.window.confirm = () => true;
   dom.window.prompt = () => '新名字';
+  // 长按阈值调小：单元测试不必真等 700ms ✓（这也是 board.js 里 MH.ui.longPressMs 的用途）
+  dom.window.MH.ui.longPressMs = 80;
   return { dom, win: dom.window, doc: dom.window.document, errors };
 }
 
@@ -305,7 +307,7 @@ test('游玩阶段：长按出现进度环，走满后确定人物并在同行�
   assert.ok(ring, '按下应出现圆形进度条');
   assert.equal(ring.style.display, 'block');
 
-  await sleep(950); // 长按阈值 700ms
+  await sleep(150); // 长按阈值被 boot() 调成 80ms
 
   assert.equal(dom.window.MH.core.personAt(st, '1,2'), pid, '人物确定在该格');
   for (const c of [0, 1, 3, 4, 5, 6, 7]) {
@@ -327,7 +329,7 @@ test('短按不会误触发确定', async () => {
   const st = dom.window.MH.store.state;
   const pid = st.selectedPersonId;
   pointer(dom, 'pointerdown', cellEl(dom, 5, 5));
-  await sleep(120);
+  await sleep(30);                        // 必须短于 boot() 设的长按阈值（80ms）
   pointer(dom, 'pointerup', cellEl(dom, 5, 5));
   assert.equal(Object.keys(st.play.placed).length, 0, '不应该确定位置');
   assert.equal(dom.window.MH.core.personCandidateCount(st, pid), 1, '而应记为候选');
@@ -340,7 +342,7 @@ test('长按过程中移动会取消', async () => {
   clickSel(dom, '#tabPlay');
   pointer(dom, 'pointerdown', cellEl(dom, 1, 1), { clientX: 0, clientY: 0 });
   pointer(dom, 'pointermove', cellEl(dom, 1, 2), { clientX: 40, clientY: 0 });
-  await sleep(850);
+  await sleep(150);
   assert.equal(Object.keys(dom.window.MH.store.state.play.placed).length, 0);
   pointer(dom, 'pointerup');
   dom.window.close();
@@ -363,7 +365,7 @@ test('确定人物时若同行列已有他人会被拒绝', async () => {
   st.play.placed[st.people[0].id] = '0,0';
   clickSel(dom, '.plist li[data-id="' + st.people[1].id + '"]');
   pointer(dom, 'pointerdown', cellEl(dom, 0, 5));
-  await sleep(950);
+  await sleep(150);
   assert.equal(dom.window.MH.core.personAt(st, '0,5'), null, '同行不能放第二个人');
   pointer(dom, 'pointerup');
   dom.window.close();
@@ -423,7 +425,7 @@ test('悬停人物高亮其关联：正向绿色，负向红色', async () => {
   const st = dom.window.MH.store.state;
   const a = st.people[0].id;
   pointer(dom, 'pointerdown', cellEl(dom, 7, 7));
-  await sleep(950);
+  await sleep(150);
   pointer(dom, 'pointerup');
 
   const chip = q(doc, '.cell[data-k="7,7"] .person-chip');
@@ -453,7 +455,7 @@ test('实时检查会列出同行冲突', async () => {
   const st = dom.window.MH.store.state;
   const [a, b] = [st.people[0].id, st.people[1].id];
   pointer(dom, 'pointerdown', cellEl(dom, 0, 0));
-  await sleep(950);
+  await sleep(150);
   pointer(dom, 'pointerup');
   st.play.placed[b] = '0,5'; // 手工制造非法状态，验证校验器
   dom.window.MH.render();
@@ -484,7 +486,7 @@ test('确定人物后可「取消确定」并恢复被排除的 X', async () => 
   const st = dom.window.MH.store.state;
   const pid = st.selectedPersonId;
   pointer(dom, 'pointerdown', cellEl(dom, 2, 2));
-  await sleep(950);
+  await sleep(150);
   pointer(dom, 'pointerup');
   assert.ok(q(doc, '[data-act="unplace-person"][data-id="' + pid + '"]'));
   clickSel(dom, '[data-act="unplace-person"][data-id="' + pid + '"]');
@@ -567,7 +569,7 @@ test('place ✕ 不能单独擦除，取消确定后才消失（界面提示）'
   const st = dom.window.MH.store.state;
   const pid = st.selectedPersonId;
   pointer(dom, 'pointerdown', cellEl(dom, 0, 0));
-  await sleep(950);
+  await sleep(150);
   pointer(dom, 'pointerup');
   assert.equal(dom.window.MH.core.xSource(st, '0,1'), 'place');
   // 右键尝试擦掉
@@ -665,7 +667,7 @@ test('B-5 pointercancel 会取消长按，不会误放人物', async () => {
   assert.equal(q(doc, '.ring').style.display, 'block');
   dom.window.dispatchEvent(new dom.window.Event('pointercancel', { bubbles: true }));
   assert.equal(q(doc, '.ring').style.display, 'none', '取消后进度环立刻消失');
-  await sleep(900);
+  await sleep(150);
   assert.equal(Object.keys(dom.window.MH.store.state.play.placed).length, 0, '不应确定任何人物');
   assert.equal(dom.window.MH.core.personCandidateCount(dom.window.MH.store.state, pid), 0, '也不该算作点击');
   pointer(dom, 'pointerup');
@@ -793,7 +795,7 @@ test('⑤ 标 X 模式下长按不会放人（也不出现进度环）', async (
   pointer(dom, 'pointerdown', cellEl(dom, 3, 3));
   const ring = q(doc, '.ring');
   assert.ok(!ring || ring.style.display === 'none', 'X 模式不该出现长按进度环');
-  await sleep(900);
+  await sleep(150);
   assert.equal(Object.keys(dom.window.MH.store.state.play.placed).length, 0, '不应确定人物');
   pointer(dom, 'pointerup');
   assert.equal(dom.window.MH.core.xSource(dom.window.MH.store.state, '3,3'), 'user', '松开时按单击处理');
@@ -806,7 +808,7 @@ test('⑤ 候选模式下长按仍然正常（回归）', async () => {
   const st = dom.window.MH.store.state;
   pointer(dom, 'pointerdown', cellEl(dom, 3, 3));
   assert.equal(q(dom, '.ring').style.display, 'block', '候选模式应出现进度环');
-  await sleep(950);
+  await sleep(150);
   pointer(dom, 'pointerup');
   assert.equal(dom.window.MH.core.personAt(st, '3,3'), st.selectedPersonId);
   dom.window.close();

@@ -625,12 +625,17 @@
 
   async function runLegendAuto() {
     const Lg = window.MurdokuLegend;
-    if (!Lg) { MH.toast('图例模块没加载（js/legend.js）', 'error'); return; }
+    // 每个"没做成"的分支都要留下 MH.ui.lastLegend —— 否则外部（e2e / 探针）会一直等结果 ✗
+    const giveUp = (why) => {
+      MH.ui.lastLegend = { via: 'none', icons: 0, items: 0, names: [], headings: [], skipped: 0, unknowns: 0, reason: why };
+      MH.toast(why, 'warn');
+    };
+    if (!Lg) { giveUp('图例模块没加载（js/legend.js）'); return; }
     const pins = (window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || [];
     const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
     const isPdf = !!(Sn && Sn.file && /pdf/i.test(Sn.file.type || Sn.file.name || ''));
     if (!pins.length && !isPdf) {
-      MH.toast('还没有图例：在右侧「PDF 摘录」导入图例那一页（PDF 最好，能直接读文字层）', 'warn');
+      giveUp('还没有图例：在右侧「PDF 摘录」导入图例那一页（PDF 最好，能直接读文字层）');
       return;
     }
     let out = null, via = '';
@@ -712,12 +717,12 @@
     // ② 其次：图例卡片（截图来源）→ 切分 + OCR
     if (!out || !out.items.length) {
       if (!pins.length) {
-        MH.toast('这张图例没有文字层，也还没有卡片：框选图例做成卡片再试', 'warn');
+        giveUp('这张图例没有文字层，也还没有卡片：框选图例做成卡片再试');
         return;
       }
       let raster;
       try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
-      if (!raster) { MH.toast('读不到图例卡片', 'error'); return; }
+      if (!raster) { giveUp('读不到图例卡片'); return; }
       MH.toast('正在切分图例卡片…', 'ok');
       let sp;
       try { sp = Lg.split(raster); } catch (err) { MH.toast('切分失败：' + err.message, 'error'); return; }
