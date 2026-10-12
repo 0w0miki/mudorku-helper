@@ -490,6 +490,117 @@
     return { x: ix0, y: iy0, w: bw, h: bh, n, mask };
   }
 
+  /** 行投影：把 y 方向连续的"有墨"段找出来（每段 = 一排图标 或 一排名字） */
+  function rowBands(mask, W, x0, x1, y0, y1, minInk) {
+    const bands = [];
+    let start = -1;
+    for (let y = y0; y <= y1 + 1; y++) {
+      let ink = 0;
+      if (y <= y1) {
+        for (let x = x0; x <= x1; x++) if (mask[y * W + x]) ink++;
+      }
+      const on = y <= y1 && ink >= (minInk || 2);
+      if (on && start < 0) start = y;
+      if (!on && start >= 0) { bands.push({ y0: start, y1: y - 1, h: y - start }); start = -1; }
+    }
+    return bands;
+  }
+
+  /** 列投影：在一个 y 段里，把 x 方向连续的"有墨"段找出来（每段 = 一个图标 或 一个名字） */
+  function colBands(mask, W, x0, x1, y0, y1, minInk, gap) {
+    const segs = [];
+    let start = -1;
+    for (let x = x0; x <= x1 + 1; x++) {
+      let ink = 0;
+      if (x <= x1) {
+        for (let y = y0; y <= y1; y++) if (mask[y * W + x]) ink++;
+      }
+      const on = x <= x1 && ink >= (minInk || 1);
+      if (on && start < 0) start = x;
+      if (!on && start >= 0) { segs.push([start, x - 1]); start = -1; }
+    }
+    const out = [];
+    for (const s2 of segs) {
+      const last = out[out.length - 1];
+      if (last && s2[0] - last[1] <= (gap || 3)) { last[1] = s2[1]; continue; }
+      out.push(s2.slice());
+    }
+    return out;
+  }
+
+  /**
+   * **卡片图例解析（多排也能处理）**：contest 的图例是"一个说明行 + 两排图标"，
+   * 直接对整张卡片做列投影会把两排的图标并成一根根跨排的柱子 ✗。
+   * 正确顺序：先按**行投影**切出每一排（图标排 / 名字排），再在每排内部做**列投影**，
+   * 然后把"图标排"与紧跟在它下面的"名字排"一一配对（按 x 中心最近）✓
+   * @returns {Array<{box:{x,y,w,h}, nameBox:{x,y,w,h}|null}>}
+   */
+  function readCardLegend(raster, rect, options) {
+    const opt = options || {};
+    const W = raster.width, H = raster.height;
+    const x0 = Math.max(0, Math.round(rect.x)), x1 = Math.min(W - 1, Math.round(rect.x + rect.w - 1));
+    const y0 = Math.max(0, Math.round(rect.y)), y1 = Math.min(H - 1, Math.round(rect.y + rect.h - 1));
+    if (x1 - x0 < 12 || y1 - y0 < 12) return [];
+    const dm = detailMask(raster, opt);
+    let bands = rowBands(dm.mask, W, x0, x1, y0, y1, Math.max(2, (x1 - x0) * 0.01));
+    // 丢掉太薄的噪声带
+    bands = bands.filter(b => b.h >= 5);
+    if (!bands.length) return [];
+    const hs = bands.map(b => b.h).sort((a, b) => a - b);
+    const maxH = hs[hs.length - 1];
+    // 名字排 = 明显矮的那些（名字字号远小于图标）。阈值取"最高排的 65%"：
+    // 细节掩码的阴晕会把名字排抬高几像素，取 0.5 会把名字排误判成图标排 ✗
+    // （两排图例因此被切成 12 个碎片，踩过）
+    const isName = b => b.h <= Math.max(8, maxH * 0.65);
+    const rows = [];
+    for (let i = 0; i < bands.length; i++) {
+      const b = bands[i];
+      if (isName(b)) continue;
+      // 紧跟在它下面的名字排（间隙不超过 1.5 个名字高）
+      const next = bands[i + 1];
+      const name = next && isName(next) && (next.y0 - b.y1) <= Math.max(6, next.h * 2.5) ? next : null;
+      rows.push({ icons: b, name });
+    }
+    const out = [];
+    for (const row of rows) {
+      // **用"名字排"当骨架**：名字之间有明显空隙，切得准；图标本身是几块拼的（椅子=靠背+坐垫+腿），
+      // 直接切图标会被内部空隙切成好几块 ✗（踩过）。所以：名字列 → 该列上方那一段墨水的外接框 = 图标 ✓
+      if (row.name) {
+        const nc = colBands(dm.mask, W, x0, x1, row.name.y0, row.name.y1, 1, Math.max(4, row.name.h * 0.8));
+        for (const ns of nc) {
+          const w = ns[1] - ns[0] + 1;
+          if (w < 4) continue;
+          const pad = Math.max(4, Math.round(row.name.h * 0.8));
+          const bx0 = Math.max(x0, ns[0] - pad), bx1 = Math.min(x1, ns[1] + pad);
+          let ix0 = W, ix1 = -1, iy0 = H, iy1 = -1, n = 0;
+          for (let x = bx0; x <= bx1; x++) {
+            for (let y = row.icons.y0; y <= row.icons.y1; y++) {
+              if (!dm.mask[y * W + x]) continue;
+              n++;
+              if (x < ix0) ix0 = x; if (x > ix1) ix1 = x;
+              if (y < iy0) iy0 = y; if (y > iy1) iy1 = y;
+            }
+          }
+          if (n < 20 || ix1 < 0) continue;
+          out.push({
+            box: { x: ix0, y: iy0, w: ix1 - ix0 + 1, h: iy1 - iy0 + 1 },
+            nameBox: { x: ns[0], y: row.name.y0, w, h: row.name.h },
+          });
+        }
+        continue;
+      }
+      // 没有名字排（图例不写名字）→ 退回图标排的列投影
+      const ic = colBands(dm.mask, W, x0, x1, row.icons.y0, row.icons.y1,
+        Math.max(1, row.icons.h * 0.06), Math.max(3, row.icons.h * 0.12));
+      for (const s2 of ic) {
+        const w = s2[1] - s2[0] + 1;
+        if (w < Math.max(6, row.icons.h * 0.3)) continue;
+        out.push({ box: { x: s2[0], y: row.icons.y0, w, h: row.icons.h }, nameBox: null });
+      }
+    }
+    return out;
+  }
+
   /**
    * 卡片框内没有文字名时（contest 那种：图例物品在文字层里没名字）：
    * 用**列投影**把一排图标切开 —— 一维投影比二维连通域稳得多：
@@ -573,7 +684,9 @@
     // 空隙阈值给得宽一点（1.8 倍字高）：物品名内部的词间空隙不会这么大，不会把名字拆开 ✓
     const heads = [], nameParts = [];
     for (const ln of lines) {
-      for (const part of splitByGaps(ln, 1.8)) {
+      // 间隙阈值 0.6 个字高：既能拆开相邻的两件物品名（contest 的 flowers/shark），
+      // 又不会把多词名字（Oil Slick / Garbage bin）拆散 ✓
+      for (const part of splitByGaps(ln, 0.6)) {
         part.line = ln;                   // 记住它来自哪一行（成段判定要跳过自己那一行）
         const cls = classifyLabel(part.str);
         if (cls !== 'unknown' && part.str.split(/\s+/).length <= 6) {
@@ -606,6 +719,10 @@
       const words = t2.split(/\s+/).filter(Boolean);
       if (words.length > 3) return true;
       if (/[.,;:!?…]/.test(t2)) return true;
+      // 全大写 = 地图上的**区域名**（RECEPTION / WAITING AREA / TEACHER'S AREA…），不是物品名 ✗
+      // （这三份真实 PDF 里图例物品名都是 Title case 或小写；区域名一律全大写）
+      const letters = t2.replace(/[^A-Za-z]/g, '');
+      if (letters.length >= 4 && letters === letters.toUpperCase()) return true;
       return false;
     };
     const isStacked = (piece) => lines.some(ln => {
@@ -624,15 +741,20 @@
       let head = null, bestD = Infinity;
       for (const h of heads) {
         const ov = Math.min(h.x + h.w, nm.x1) - Math.max(h.x, nm.x0);
-        // 横向重叠 → 就是这组；否则按"横向还差多远"选最近的（说明行往往比它那列窄）
         const gapX = ov > 0 ? 0 : Math.min(Math.abs(nm.x0 - (h.x + h.w)), Math.abs(h.x - nm.x1));
-        const d = gapX + Math.abs(nm.y - (h.y + h.h)) * 0.3;
+        // **优先"名字正上方的说明行"**：真实图例里说明行就在那一组的上面
+        // （contest：上两排属于 can't be occupied，下面那排属于 can be occupied）。
+        // 只看横向距离会按 x 归错组 ✗（左边的 fire/tree 会被归到右边那条说明下）
+        const above = h.y < nm.y && (nm.y - h.y) < 40 * h.h;
+        const d = above ? (nm.y - h.y) + gapX * 0.05 : 1e6 + gapX + Math.abs(nm.y - (h.y + h.h)) * 0.3;
         if (d < bestD) { bestD = d; head = h; }
       }
       const nameH = Math.max(6, nm.h);
       const pad = nameH * opt.nameBoxPad;
       // 名字上方的带子：从"最近的说明下沿"到"名字上沿"
-      const bandTop = head ? Math.max(head.y + head.h, nm.y - nameH * 9) : nm.y - nameH * 9;
+      // 图标带：**只取名字正上方一小条**（4.5 个字高）。取太高会把上一排的图标和名字
+      // 都包进来 → 外接框巨大 → 被尺寸判据否掉 ✗（contest 的两排图例就是这样只剩 5 件）
+      const bandTop = head ? Math.max(head.y + head.h, nm.y - nameH * 4.5) : nm.y - nameH * 4.5;
       const bandBottom = nm.y - nameH * 0.6;
       let icon = findIconInBand(raster, nm.x0 - pad - nameH * 0.5, bandTop, nm.x1 + pad + nameH * 0.5, bandBottom, opt);
       // 横排图例：图标在名字左边
@@ -665,10 +787,10 @@
       if (!g) { g = { y: nm.y, list: [] }; groups.push(g); }
       g.list.push(it);
     }
-    const biggest = groups.reduce((a, g2) => Math.max(a, g2.list.length), 0);
-    // 图例至少要有 3 个排成一排/一列的物品名，才认为"找到了图例" ✓
-    // （少于 3 个时基本都是误报：contest 第 2 页的文字层里根本没有物品名）
-    if (items.length >= 2 && biggest < Math.max(3, items.length * 0.6)) {
+    // 判据：**成排的比例**要够高。真实图例是 1~3 排（contest 就是 7+7+3 三排），
+    // 而"把散落的正文当物品"时几乎个个单独成排 ✗ → 用"至少 2 个一组的比例"来区分 ✓
+    const aligned = groups.reduce((a, g2) => a + (g2.list.length >= 2 ? g2.list.length : 0), 0);
+    if (items.length >= 2 && aligned < items.length * 0.6) {
       return {
         items: [], headings, skipped: skipped.concat(items.map(it => ({ name: it.name, why: '物品名没有排成行/列，这张图可能没有图例' }))),
         method: 'pdf-text', reason: '没找到成排的图例物品名（这一页的文字层里可能没有物品名）',
@@ -681,5 +803,5 @@
   function namePartsOf(it) { return it.__name || { x0: it.icon ? it.icon.x : 0, y: it.icon ? it.icon.y : 0 };
   }
 
-  return { split, annotate, legendFromText, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
+  return { split, annotate, legendFromText, readCardLegend, rowBands, colBands, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
 });

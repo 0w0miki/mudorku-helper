@@ -643,31 +643,47 @@
             }
           }
           if (out.items.length < 2 && rects.length) {
-            // 文字层里没有物品名（contest 就是这样）→ 在卡片框里按**列投影**切出图标
-            MH.toast('这张图的图例物品没有文字名，改按图标切分…', 'ok');
-            const icons = [];
-            for (const r2 of rects) icons.push(...Lg.splitIconsByColumns(out.raster, r2));
-            const heads0 = out.headings || [];
-            // 图例的图标都在"某条说明行下方"那一带；地图上的杂图案不在这条带里 ✓
-            const heads = heads0;
-            const under = heads.length ? icons.filter(b => heads.some(h => {
-              const cy2 = b.y + b.h / 2;
-              return cy2 > h.y + h.h * 0.2 && cy2 < h.y + Math.max(120, h.h * 14);
-            })) : icons;
-            const iconsKept = under.length >= 2 ? under : icons;
-            if (iconsKept.length >= 2) {
+            // 文字层里没有物品名（contest 就是这样）→ 在卡片框里按**行投影 + 列投影**切分：
+            // 先分出"图标排 / 名字排"，再用名字排当骨架（名字之间空隙明显，切得准），
+            // 每个名字正上方那一段墨水的外接框 = 该物品的图标 ✓ 多排图例也能处理 ✓
+            MH.toast('这张图的图例物品没有文字名，改按"排 + 列"切分…', 'ok');
+            const boxes = [];
+            for (const r2 of rects) boxes.push(...Lg.readCardLegend(out.raster, r2));
+            const heads = out.headings || [];
+            // 只保留"落在某条说明行下方"的图标带（地图上的杂图案不在这些带里 ✓）
+            const nearHead = b => {
+              if (!heads.length) return true;
+              const cy2 = b.box.y + b.box.h / 2;
+              return heads.some(h => cy2 > h.y && cy2 < h.y + Math.max(600, h.h * 40));
+            };
+            const kept = boxes.filter(b => nearHead(b));
+            const use = kept.length >= 2 ? kept : boxes;
+            // 名字：每个名字框单独 OCR（比"整条名字行一起 OCR"准得多 ✓ —— 一行几个名字时
+            // 整条丢给 OCR 会认成一串乱码）
+            const names = new Array(use.length).fill('');
+            if (use.length && window.MurdokuOCR && use.some(b => b.nameBox)) {
+              try {
+                const targets = use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 });
+                const got = await window.MurdokuOCR.readBadges(out.raster, targets,
+                  { zoom: 4, onStatus: m => MH.toast(m, 'ok') });
+                got.forEach((r2, i) => { names[i] = String(r2.text || '').replace(/\s+/g, ' ').trim(); });
+              } catch (err) { MH.toast('名字识别失败（名字留空，可手动改）：' + err.message, 'warn'); }
+            }
+            if (use.length >= 2) {
               out = {
-                items: iconsKept.map((b, i) => ({
-                  name: '', occupiable: heads.length ? heads.reduce((best, h) => {
-                    const ov = Math.min(h.x + h.w, b.x + b.w) - Math.max(h.x, b.x);
+                items: use.map((b, i) => ({
+                  name: names[i] || '',
+                  occupiable: heads.length ? heads.reduce((best, h) => {
+                    const ov = Math.min(h.x + h.w, b.box.x + b.box.w) - Math.max(h.x, b.box.x);
                     return ov > (best.ov || -1e9) ? { ov, occ: h.occupiable } : best;
                   }, { ov: -1e9, occ: null }).occ : null,
-                  icon: b,
+                  icon: b.box,
+                  nameBox: b.nameBox || null,
                 })),
                 headings: heads, skipped: out.skipped || [], raster: out.raster, page: out.page,
-                method: 'card-icons',
+                method: 'card-rows',
               };
-              via = 'card-icons';
+              via = 'card-rows';
             }
           }
           if (out.items.length && via === '') via = 'pdf';

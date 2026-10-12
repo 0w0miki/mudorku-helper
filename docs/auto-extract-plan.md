@@ -673,6 +673,33 @@ OCR 只用来**出候选名字**，读错在列表里改名即可。
 残差只有对比度一半（~25），**低于噪声分位** → 切出来是 3×3 噪点碎块；膨胀=0 又碎成 25 块。
 参数互相打架（半径小→被噪声淹没；半径大→阴晕把图标和名字连起来；膨胀→相邻元素粘连），没有稳定解。
 
+**contest 图例的三次误判与最终修复（2026-10-13 第三轮）**
+
+用户发来 contest 的图例截图（一个"can't be occupied"面板里**两排**图标 + 一个"can be occupied"面板），
+当时只读出 bed/chair/hammock 和 pig/table。逐个查出来三个真 bug：
+
+1. **误判"contest 的文字层里没有物品名"** —— 之前的探针只找"首字母大写的词"，
+   而 contest 的图例物品名是**小写**（fire / tree / … / boulder / bed / chair / hammock，共 17 个）✗
+   → 现在走 PDF 文字层 ✓（这才是正路，OCR 只在没有文字层时才用）
+2. **图标取样带太高**：原来从"说明行下沿"一路取到名字上方（≈9 个字高），两排图例时把
+   **上一排的图标和名字都包进去** → 外接框巨大 → 被尺寸判据否掉 ✗
+   → 改成只取"名字正上方 4.5 个字高"那一条 ✓
+3. **两排图例的分组**：原来按"横向距离"把名字归到说明行，contest 的说明行在图例**上方**，
+   左边的 fire/tree 会被归到右边那条说明下 ✗ → 改成**优先"名字正上方的说明行"** ✓
+   另外"排成行/列"那道关原来要求"最大一排 ≥3 且占 60%"，contest 是 7+7+3 三排 → 被误杀 ✗
+   → 改成"至少 2 个成排的比例 ≥60%" ✓
+   "拆词间隙阈值"也从 1.8 个字高收到 0.6（否则 flowers 和 shark 会被并成一个名字 ✗）
+4. 顺带：**地图上的区域名**（RECEPTION / WAITING AREA / TEACHER'S AREA…）会被当成物品 ✗
+   → 加"全大写不算物品名"的判据（这三份 PDF 里图例物品名都是 Title case 或小写）✓
+
+实测（三份真实 PDF，物品名 + 可占据旗标）：
+```
+car-repair     7/7   Oil Slick[可] Car[可] Chair[可] TV[不可] Shelf[不可] Table[不可] Plant[不可]
+familymurdoku  5/5   Window[可] Chair[可] Garbage bin[不可] Desks[不可] Shelf[不可]
+contest 第2页  15/17 fire tree flowers shark sack pig tombstone crate rope shrub table boulder[不可]
+                     bed chair hammock[可]     ← 分组全对 ✓；还差 barrel / shelf 两个（下一步）
+```
+
 **图例区域 = 你框出来的卡片（2026-10-13 第二轮修正）**
 
 用户的疑问点得很准：原来图例识别**完全来自"当前 PDF 页面的文字层"**，跟框选的卡片毫无关系 ✗

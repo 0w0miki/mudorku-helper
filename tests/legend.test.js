@@ -189,3 +189,19 @@ test('图例区域没有文字名时：按列投影切出一排图标（面板�
   assert.ok(xs[0] < 120 && xs[xs.length - 1] > 380, '应覆盖左右两端：' + JSON.stringify(xs));
   boxes.forEach(b => assert.ok(b.h >= 10 && b.w >= 10, '框要像图标：' + JSON.stringify(b)));
 });
+
+test('卡片图例：两排图标各自成排（contest 那种"一个说明行 + 两排图标"）', () => {
+  // 直接对整张卡片做列投影会把两排的图标并成"跨排的柱子" ✗
+  // 正确：先按行投影切出每一排，再在排内做列投影，并把"图标排 ↔ 紧跟其下的名字排"配对
+  const r = makeRaster(560, 320, [190, 120, 120]);
+  [60, 200, 340].forEach(ox => { icon(r, ox, 30, 1); text(r, ox + 4, 78, 40, 11); });   // 第一排
+  [60, 200, 340].forEach(ox => { icon(r, ox, 170, 1); text(r, ox + 4, 218, 40, 11); }); // 第二排
+  const rows = L.readCardLegend(r, { x: 20, y: 20, w: 520, h: 260 });
+  assert.equal(rows.length, 6, '两排各 3 个图标 = 6 个：' + JSON.stringify(rows.map(x => [x.box.x, x.box.y])));
+  const top = rows.filter(x => x.box.y < 120), bottom = rows.filter(x => x.box.y >= 120);
+  assert.equal(top.length, 3, '第一排 3 个');
+  assert.equal(bottom.length, 3, '第二排 3 个');
+  rows.forEach(x => assert.ok(x.nameBox, '每个图标都该配到一个名字框：' + JSON.stringify(x)));
+  const xs = top.map(x => x.box.x).sort((a, b) => a - b);
+  assert.ok(xs[0] < 120 && xs[2] > 320, '第一排按 x 铺开：' + JSON.stringify(xs));
+});
