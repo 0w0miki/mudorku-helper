@@ -218,7 +218,8 @@
       '<h2>区域 <span class="muted">四连通 · 外轮廓加粗</span></h2>' +
       '<button class="ghost block" data-act="new-region" ' + (d ? 'disabled' : '') + '>＋ 新建区域</button>' +
       (!d && MH.store.state.bg
-        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色，把四连通的同色块识别成候选区域（可撤销）">🔍 自动识别区域</button>' +
+        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色；区域名优先读 PDF 文字层，截图则自动找『白底黑字标签』（结果都是候选，可撤销）">🔍 自动识别区域</button>' +
+          '<p class="hint">截图没有文字层：会自动找图上的区域名标签（白底药丸 + 黑描边 + 黑字）。名字先用「区域 1…」，点列表里的「改名」即可。</p>' +
           '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>'
         : '') +
       (MH.ui.diagText
@@ -776,6 +777,41 @@
   }
 
   /**
+   * 找区域名（三路，按可信度排）：
+   *   ① PDF 文字层（最准，能拿到真名）
+   *   ② 截图里的"区域名标签徽章"（白底药丸 + 黑描边 + 黑字；只有位置，名字先用「区域 N」）
+   *   ③ 本地缓存（上一次的结果，按当前区域复筛）
+   * 三者都拿不到就返回空 —— 上层必须明确告诉用户，不能静默降级成"无种子"。
+   */
+  async function resolveLabels(st, geo) {
+    const area = regionArea(geo);
+    let labels = filterLabels(readLabelCache(st), area);
+    if (labels.length) return { labels, from: 'cache' };
+    if (MH.bgPdfFile) {
+      try {
+        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, area);
+        if (labels.length) { writeLabelCache(st, labels); return { labels, from: 'pdf' }; }
+      } catch (_) { labels = []; }
+    }
+    const L2 = window.MurdokuLabels;
+    if (L2 && L2.findLabelBadges) {
+      const pitch = Math.min(geo.geom.pitchX, geo.geom.pitchY);
+      const badges = L2.findLabelBadges(geo.raster, pitch);
+      MH.ui.lastBadges = badges;
+      MH.ui.lastBadgePitch = pitch;
+      if (badges.length >= 2) {
+        return {
+          labels: badges.map((b, i) => ({
+            name: '区域 ' + (i + 1), x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true,
+          })),
+          from: 'badge',
+        };
+      }
+    }
+    return { labels: [], from: '' };
+  }
+
+  /**
    * 边界诊断：把每条相邻边的实测数据摊成文本（可复制发我），
    * 用来**按这张地图自己的分布**定判据，而不是拍脑袋调阈值。
    */
@@ -800,10 +836,7 @@
     let text = R2.formatDiagnosis(dg, assign);
     // 附上"标签 → 落在哪一格"：整体错位（例如整块偏一行）多半是种子格算错了，
     // 这几行能一眼看出来
-    let labels = filterLabels(readLabelCache(MH.store.state), regionArea(geo));
-    if (!labels.length && MH.bgPdfFile) {
-      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, regionArea(geo)); } catch (_) { labels = []; }
-    }
+    let labels = (await resolveLabels(MH.store.state, geo)).labels;
     if (labels.length) {
       const rows2 = ['格 → 种子：'];
       for (const l of labels) {
@@ -833,21 +866,21 @@
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
     if (gridOnBg(geo) < 0.6) { MH.toast('网格大部分落在底图外面，先把网格对准地图', 'warn'); return; }
     const t0 = Date.now();
-    // ① 先从 PDF 文字层读区域名 → 给出 k 个种子
-    //    顺序：本地缓存 → 会话内文件 → 都没有就请用户重选一次这份 PDF
-    //    （读不到名字会退化成"无种子"，区域会碎成几十块——不能静默降级）
-    const area = regionArea(geo);
-    let labels = filterLabels(readLabelCache(st), area);
-    if (!labels.length && MH.bgPdfFile) {
-      try {
-        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, area);
-        if (labels.length) writeLabelCache(st, labels);
-      } catch (err) { labels = []; }
+    // ① 找区域名 → 给出 k 个种子：PDF 文字层 / 截图标签徽章 / 本地缓存（resolveLabels）
+    //    （读不到名字会退化成"无种子"，区域会碎成几十块——所以下面必须明确提示，不能静默降级）
+    const resolved = await resolveLabels(st, geo);
+    let labels = resolved.labels;
+    if (resolved.from === 'badge') {
+      MH.toast('这是截图（没有文字层）：在图里找到 ' + labels.length +
+        ' 个区域名标签，名字先用「区域 1…」，可在左侧改名', 'ok');
     }
     if (!labels.length && st.bg.kind === 'pdf') {
       MH.toast('读区域名需要再选一次这份 PDF（只需一次，之后会记住）', 'ok');
       const inp = document.getElementById('labelFileInput');
       if (inp) { MH.ui.awaitLabels = geo; inp.click(); return; }
+    }
+    if (!labels.length) {
+      MH.toast('没找到区域名：截图请确认区域名是"白底黑字的标签"，或用「＋ 新建区域」手工圈', 'warn');
     }
     const seeds = labels.length && window.MurdokuLabels
       ? window.MurdokuLabels.labelsToSeeds(labels, geo.geom) : [];

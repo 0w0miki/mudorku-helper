@@ -1094,6 +1094,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     window.MH.store.replace(window.MurdokuCore.createState(4, 6), 'e2e 识别');
     window.MH.ui.lastDetect = null;
     // 用桩换掉识别内核：这一节考的是"面板怎么把候选落库"，不是像素识别准不准
+    window.__realDetect = window.MurdokuRegions.detectRegions;      // 第 30 节要还原
     window.MurdokuRegions.detectRegions = () => ({
       ok: true,
       regions: [
@@ -1136,6 +1137,34 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(dlg.length === 1, '候选被动过 → 先弹确认（实际弹了 ' + dlg.length + ' 次）');
   const names = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name));
   ok(names.length === 3 && names[0] === '我改的', '取消确认后区域保持原样：' + names.join('/'));
+
+  // 30) 截图（没有文字层）：自动找出区域名标签徽章 → 当种子用
+  await p.click('#tabPrep');
+  await p.evaluate(() => {
+    window.MH.store.replace(window.MurdokuCore.createState(24, 24), 'e2e 截图');
+    window.MH.ui.lastBadges = null;
+    if (window.__realDetect) window.MurdokuRegions.detectRegions = window.__realDetect;   // 撤掉第 29 节的桩
+  });
+  await p.setInputFiles('#bgFileInput', {
+    name: 'contest-labels.jpg', mimeType: 'image/jpeg',
+    buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'contest-labels.jpg')),
+  });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 20000 });
+  await p.evaluate(() => {
+    const s = window.MH.store.state;
+    s.settings.cellSize = 49; s.bg.scale = 1;                 // 图 1194×1200、格距 49
+    window.MurdokuCore.updateBackground(s, { bound: true });
+    window.MurdokuCore.setGridOffset(s, 2, 2);
+    window.MH.store.setSettings({}); window.MH.render();
+  });
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForFunction(() => window.MH.ui.lastBadges, null, { timeout: 60000 });
+  const nb = await p.evaluate(() => window.MH.ui.lastBadges.length);
+  ok(nb === 17, '截图里找到 17 个区域名标签（实际 ' + nb + '）');
+  const shotLabels = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name + ':' + r.cells.length));
+  ok(shotLabels.length >= 10, '按标签种子分出了候选区域：' + shotLabels.length + ' 个 · ' + shotLabels.slice(0, 4).join(' '));
+  const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
+  ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

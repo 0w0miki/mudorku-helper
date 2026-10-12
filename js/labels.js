@@ -100,5 +100,148 @@
     return seeds;
   }
 
-  return { pickRegionLabels, labelToCell, labelsToSeeds, areaBox, inBox };
+  /**
+   * 找"区域名标签徽章" —— 截图没有文字层，但这类题面把区域名画成
+   * **白底药丸 + 黑描边 + 黑字**（放大看就是一枚贴纸），视觉签名很强，可以直接找：
+   *
+   *   ① 白色连通域的大小 / 长宽比像药丸（高 ≈ 0.2~0.6 格、宽 ≤ 5 格）
+   *   ② 框内有一撮**黑字**：≥3 个高度相近的黑字块（白色物件里没有这个）
+   *   ③ 四条边的中点外侧都是黑描边（药丸的黑边）
+   *   ④ 白色像素占外接框 40%~93%（实心白物件的填充率会更高）
+   *
+   * 找到它就有了 k 与种子格；名字先用「区域 N」，用户在侧栏改名即可。
+   * @param {{data:Uint8ClampedArray,width:number,height:number}} raster
+   * @param {number} pitch 格距（像素）；所有尺寸判据都按它归一，换分辨率不用重调
+   * @returns {Array<{x:number,y:number,w:number,h:number,ink:number,glyphs:number}>}
+   */
+  function findLabelBadges(raster, pitch, options) {
+    const opt = Object.assign({
+      satMax: 48, darkMax: 92, whiteThresh: [248, 240, 230, 218, 206, 194],
+      minH: 0.16, maxH: 0.62, minW: 0.5, maxW: 5.0, minAspect: 1.15,
+      minFill: 0.4, maxFill: 0.94, minInk: 0.2, maxInk: 0.5,
+      ringDark: 135, minGlyphs: 4, minN: 40, iou: 0.25, contain: 0.6,
+    }, options || {});
+    const { data, width: W, height: H } = raster;
+    if (!(W > 8) || !(H > 8) || !(pitch > 4)) return [];
+    const N = W * H;
+    const luma = new Float32Array(N);
+    const sat = new Uint8Array(N);
+    for (let i = 0, o = 0; i < N; i++, o += 4) {
+      const r = data[o], g = data[o + 1], b = data[o + 2];
+      luma[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      sat[i] = Math.max(r, g, b) - Math.min(r, g, b);
+    }
+    // 连通域（4 邻），带外接框；x0..x1 / y0..y1 限定扫描范围（查框内黑字时用）
+    const comps = (mask, minN, x0, y0, x1, y1) => {
+      const seen = new Uint8Array(N), stack = [], out = [];
+      const bx0 = x0 == null ? 0 : x0, by0 = y0 == null ? 0 : y0;
+      const bx1 = x1 == null ? W - 1 : x1, by1 = y1 == null ? H - 1 : y1;
+      for (let sy = by0; sy <= by1; sy++) {
+        for (let sx = bx0; sx <= bx1; sx++) {
+          const s0 = sy * W + sx;
+          if (seen[s0] || !mask[s0]) continue;
+          let n = 0, ax0 = sx, ax1 = sx, ay0 = sy, ay1 = sy;
+          stack.length = 0; stack.push(s0); seen[s0] = 1;
+          while (stack.length) {
+            const i = stack.pop(), ix = i % W, iy = (i - ix) / W;
+            n++;
+            if (ix < ax0) ax0 = ix; if (ix > ax1) ax1 = ix;
+            if (iy < ay0) ay0 = iy; if (iy > ay1) ay1 = iy;
+            const nb = [i - 1, i + 1, i - W, i + W];
+            for (const j of nb) {
+              if (j < 0 || j >= N || Math.abs((j % W) - ix) > 1) continue;
+              if (!seen[j] && mask[j]) { seen[j] = 1; stack.push(j); }
+            }
+          }
+          if (n >= minN) out.push({ n, x0: ax0, y0: ay0, x1: ax1, y1: ay1 });
+        }
+      }
+      return out;
+    };
+    /**
+     * 一条边外侧 1~4px 里最暗的那 1/4 像素（药丸的黑描边就在这附近）。
+     * 不能用"固定 3px 处的中位数"：描边只有 2~3px 厚，3px 处可能已经落到背景上，
+     * 于是标签压在亮底（木甲板/沙地）上时就整条被否掉（FRIGATE A 就是这么漏的）。
+     */
+    const sideDark = (bx0, by0, bx1, by1, side) => {
+      const vals = [];
+      const w = bx1 - bx0 + 1, h = by1 - by0 + 1;
+      for (let off = 1; off <= 4; off++) {
+        if (side === 'top' || side === 'bottom') {
+          const y = side === 'top' ? by0 - off : by1 + off;
+          if (y < 0 || y >= H) continue;
+          for (let x = Math.round(bx0 + w * 0.15); x <= Math.round(bx1 - w * 0.15); x++) if (x >= 0 && x < W) vals.push(luma[y * W + x]);
+        } else {
+          const x = side === 'left' ? bx0 - off : bx1 + off;
+          if (x < 0 || x >= W) continue;
+          for (let y = Math.round(by0 + h * 0.15); y <= Math.round(by1 - h * 0.15); y++) if (y >= 0 && y < H) vals.push(luma[y * W + x]);
+        }
+      }
+      if (!vals.length) return 255;
+      vals.sort((a, b) => a - b);
+      return vals[Math.max(0, Math.floor(vals.length * 0.25) - 1)];
+    };
+    /**
+     * 在某个白阈值下扫一遍。
+     * 为什么要在多个阈值上扫：标签压在**亮背景**（白木甲板、灰石板、沙地）上时，
+     * 白阈值太低会和背景连成一片（外接框巨大 → 被否），太高又会把药丸自己切碎，
+     * 不同标签的合适阈值不一样 —— 各扫一遍再合并最省事，也最稳。
+     */
+    const scan = whiteMin => {
+      const white = new Uint8Array(N);
+      for (let i = 0; i < N; i++) if (luma[i] > whiteMin && sat[i] < opt.satMax) white[i] = 1;
+      const found = [];
+      for (const cp of comps(white, opt.minN)) {
+        const bw = cp.x1 - cp.x0 + 1, bh = cp.y1 - cp.y0 + 1;
+        if (bh < pitch * opt.minH || bh > pitch * opt.maxH) continue;
+        if (bw < pitch * opt.minW || bw > pitch * opt.maxW) continue;
+        if (bw / bh < opt.minAspect) continue;
+        const fill = cp.n / (bw * bh);
+        if (fill < opt.minFill || fill > opt.maxFill) continue;
+        // 框内的黑字：黑像素占比 + 至少 3 个高度相近的字块
+        let ink = 0;
+        for (let y = cp.y0; y <= cp.y1; y++) for (let x = cp.x0; x <= cp.x1; x++) if (luma[y * W + x] < opt.darkMax) ink++;
+        const inkFrac = ink / (bw * bh);
+        if (inkFrac < opt.minInk || inkFrac > opt.maxInk) continue;
+        const inked = [];
+        {
+          const dark = new Uint8Array(N);
+          for (let y = cp.y0; y <= cp.y1; y++) for (let x = cp.x0; x <= cp.x1; x++) if (luma[y * W + x] < opt.darkMax) dark[y * W + x] = 1;
+          for (const g of comps(dark, 4, cp.x0, cp.y0, cp.x1, cp.y1)) {
+            const gh = g.y1 - g.y0 + 1, gw = g.x1 - g.x0 + 1;
+            if (gh >= Math.max(3, bh * 0.18) && gw <= bw * 0.5) inked.push(g);
+          }
+        }
+        if (inked.length < opt.minGlyphs) continue;
+        const hs = inked.map(g => g.y1 - g.y0 + 1).sort((a, b) => a - b);
+        const med = hs[hs.length >> 1];
+        const sameH = inked.filter(g => { const h2 = g.y1 - g.y0 + 1; return h2 >= med * 0.5 && h2 <= med * 1.8; }).length;
+        if (sameH < opt.minGlyphs) continue;
+        // 四条边外侧都要有黑描边（白色家具/枕头没有这个）
+        const ring = ['top', 'bottom', 'left', 'right'].map(s => sideDark(cp.x0, cp.y0, cp.x1, cp.y1, s));
+        if (Math.max.apply(null, ring) > opt.ringDark) continue;
+        found.push({ x: cp.x0, y: cp.y0, w: bw, h: bh, ink: Math.round(inkFrac * 1000) / 1000, glyphs: inked.length });
+      }
+      return found;
+    };
+    const all = [];
+    for (const t of opt.whiteThresh) {
+      for (const bd of scan(t)) {
+        const dup = all.some(o => {
+          const ix = Math.max(0, Math.min(o.x + o.w, bd.x + bd.w) - Math.max(o.x, bd.x));
+          const iy = Math.max(0, Math.min(o.y + o.h, bd.y + bd.h) - Math.max(o.y, bd.y));
+          const inter = ix * iy;
+          if (inter <= 0) return false;
+          const iou = inter / (o.w * o.h + bd.w * bd.h - inter);
+          const cover = inter / Math.min(o.w * o.h, bd.w * bd.h);   // 小框被大框套住
+          return iou >= opt.iou || cover >= opt.contain;
+        });
+        if (!dup) all.push(bd);
+      }
+    }
+    all.sort((a, b) => a.y - b.y || a.x - b.x);
+    return all;
+  }
+
+  return { pickRegionLabels, labelToCell, labelsToSeeds, areaBox, inBox, findLabelBadges };
 });
