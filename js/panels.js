@@ -669,6 +669,24 @@
     };
   }
 
+  const LABEL_KEY = 'murdoku-helper.v1.labels';
+  const labelCacheKey = st => ((st.bg && st.bg.name) || '') + '@' + ((st.bg && st.bg.w) || 0);
+
+  function readLabelCache(st) {
+    try {
+      const raw = localStorage.getItem(LABEL_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      return obj && obj.key === labelCacheKey(st) && Array.isArray(obj.labels) ? obj.labels : null;
+    } catch (_) { return null; }
+  }
+
+  function writeLabelCache(st, labels) {
+    try {
+      localStorage.setItem(LABEL_KEY, JSON.stringify({ key: labelCacheKey(st), labels }));
+    } catch (_) { /* 存不下就算了，下次再选一次 PDF */ }
+  }
+
   /**
    * 从 PDF 文字层读"区域名"。区域名是画在地图上的全大写短标签
    * （RECEPTION / WAITING AREA / STORAGE / TEACHER'S AREA …），
@@ -737,11 +755,20 @@
     try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
     const t0 = Date.now();
-    // ① 先从 PDF 文字层读区域名 → 给出 k 个种子（截图档没有文字层，会跳过）
-    let labels = [];
-    if (MH.bgPdfFile && MH.ui.mapBox) {
-      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox); }
-      catch (err) { labels = []; }
+    // ① 先从 PDF 文字层读区域名 → 给出 k 个种子
+    //    顺序：本地缓存 → 会话内文件 → 都没有就请用户重选一次这份 PDF
+    //    （读不到名字会退化成"无种子"，区域会碎成几十块——不能静默降级）
+    let labels = readLabelCache(st) || [];
+    if (!labels.length && MH.bgPdfFile && MH.ui.mapBox) {
+      try {
+        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox);
+        if (labels.length) writeLabelCache(st, labels);
+      } catch (err) { labels = []; }
+    }
+    if (!labels.length && st.bg.kind === 'pdf' && MH.ui.mapBox) {
+      MH.toast('读区域名需要再选一次这份 PDF（只需一次，之后会记住）', 'ok');
+      const inp = document.getElementById('labelFileInput');
+      if (inp) { MH.ui.awaitLabels = geo; inp.click(); return; }
     }
     const seeds = labels.length && window.MurdokuLabels
       ? window.MurdokuLabels.labelsToSeeds(labels, geo.geom) : [];
@@ -779,6 +806,18 @@
     document.body.classList.toggle('picking', MH.ui.picking);
     MH.toast(MH.ui.picking ? '拖一个矩形，正好圈住地图外框（再点按钮取消）' : '已取消框选',
       MH.ui.picking ? 'ok' : 'warn');
+  }
+
+  function initLabelPick() {
+    const inp = document.getElementById('labelFileInput');
+    if (!inp) return;
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0];
+      inp.value = '';
+      if (!f) return;
+      MH.bgPdfFile = f;
+      guard(detectRegionsFromBg)();
+    });
   }
 
   function initRegionPick() {
@@ -1416,6 +1455,7 @@
     init() {
       initSidebarResizer();
       initRegionPick();
+      initLabelPick();
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);
