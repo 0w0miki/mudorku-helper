@@ -1087,6 +1087,56 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   });
   ok(afterReload.rows === 8 && afterReload.bg && afterReload.scale === beforeGen.bg.scale, '刷新后底图与对位都还在：' + JSON.stringify(afterReload));
 
+  // 29) 重复点「自动识别区域」= 重新出一份候选，不是往后追加
+  //     （曾经的症状：点两次出 6 个区域，其中 3 个重复的显示 0 格）
+  await p.click('#tabPrep');
+  await p.evaluate(() => {
+    window.MH.store.replace(window.MurdokuCore.createState(4, 6), 'e2e 识别');
+    window.MH.ui.lastDetect = null;
+    // 用桩换掉识别内核：这一节考的是"面板怎么把候选落库"，不是像素识别准不准
+    window.MurdokuRegions.detectRegions = () => ({
+      ok: true,
+      regions: [
+        { name: '甲', cells: ['0,0', '0,1'], color: '#e06666' },
+        { name: '乙', cells: ['1,0', '1,1'], color: '#6688e0' },
+        { name: '丙', cells: ['2,0', '2,1'], color: '#66c07a' },
+      ],
+      stats: { sampled: 6 },
+    });
+  });
+  await p.setInputFiles('#bgFileInput', { name: 'regions.png', mimeType: 'image/png', buffer: makeMapPng(400, 300, 8, 6) });
+  await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 15000 });
+  await p.evaluate(() => {                      // 网格摆进底图里并记下对齐（识别的两个前提）
+    const s = window.MH.store.state;
+    s.settings.cellSize = 40; s.bg.scale = 1;
+    window.MurdokuCore.updateBackground(s, { bound: true });
+    window.MurdokuCore.setGridOffset(s, 0, 0);
+    window.MH.store.setSettings({}); window.MH.render();
+  });
+  const dlg = [];
+  p.on('dialog', d => { dlg.push(d.message()); d.dismiss(); });
+
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForFunction(() => window.MH.store.state.regions.length === 3, null, { timeout: 15000 });
+  const r1 = await p.evaluate(() => window.MH.store.state.regions.map(r => ({ id: r.id, n: r.cells.length })));
+  ok(r1.length === 3 && r1.every(r => r.n === 2), '第一次识别：3 个区域各 2 格 ' + JSON.stringify(r1));
+
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForTimeout(800);
+  const r2 = await p.evaluate(() => window.MH.store.state.regions.map(r => ({ id: r.id, n: r.cells.length })));
+  ok(r2.length === 3, '再点一次识别不会追加：区域数仍为 3（实际 ' + r2.length + '）');
+  ok(r2.every(r => r.n > 0), '没有 0 格区域：' + JSON.stringify(r2));
+  ok(r2.map(r => r.id).join() === r1.map(r => r.id).join(), '是同一批 id（真的替换，不是追加）');
+  ok(dlg.length === 0, '上一份候选没被动过 → 直接替换，不弹确认');
+
+  // 手动改过之后：再点识别要先问一句；取消则原样保留
+  await p.evaluate(() => window.MH.store.commit('手动改名', s => { s.regions[0].name = '我改的'; }));
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForTimeout(800);
+  ok(dlg.length === 1, '候选被动过 → 先弹确认（实际弹了 ' + dlg.length + ' 次）');
+  const names = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name));
+  ok(names.length === 3 && names[0] === '我改的', '取消确认后区域保持原样：' + names.join('/'));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

@@ -706,6 +706,26 @@
     return true;
   }
 
+  /**
+   * 识别结果的"指纹"：名字、颜色、格子、id 任一被手动改过都会变。
+   * 面板只在"原封没动"时才敢直接替换，否则先问一句。
+   */
+  function regionKey(reg) {
+    return reg.id + '|' + reg.name + '|' + reg.color + '|' + (reg.cells || []).join(',');
+  }
+
+  /**
+   * 上一次识别出来的区域是否"原封没动"（指纹一致，也没人挂关联）。
+   * 是的话重新识别就直接替换，不必每次弹确认 —— "对好网格再识别一次"正是最常用的循环。
+   */
+  function detectionUntouched(st) {
+    const last = MH.ui.lastDetect;
+    if (!last || !last.length || last.length !== st.regions.length) return false;
+    const ids = new Set(st.regions.map(r => r.id));
+    if (st.people.some(p => (p.links || []).some(l => l.kind === 'region' && ids.has(l.id)))) return false;
+    return st.regions.every((r, i) => regionKey(r) === last[i]);
+  }
+
   const LABEL_KEY = 'murdoku-helper.v1.labels';
   const labelCacheKey = st => ((st.bg && st.bg.name) || '') + '@' + ((st.bg && st.bg.w) || 0);
 
@@ -834,13 +854,24 @@
     // ② 有种子 → 种子约束的层次合并（不需要任何绝对阈值）；没有 → 回到颜色/粗线自适应
     const res = R.detectRegions(geo.raster, geo.geom, seeds.length >= 2 ? { seeds } : {});
     if (!res.ok) { MH.toast('没认出区域：' + (res.reason || '未知原因'), 'warn'); return; }
+    const made = (res.regions || []).filter(r2 => r2.cells && r2.cells.length);
+    if (!made.length) { MH.toast('没认出区域：结果为空，原有区域未改动', 'warn'); return; }
+    // 再点一次识别 = **重新出一份候选**，不是追加。老区域必须先清掉：一个格子只属于一个区域，
+    // 追加的话新区域会被 claimCellsExclusively 摘空 —— 就是"点两次出 6 个、其中 3 个 0 格"。
+    // 只有在上一次的结果被动过（改过名/加过格子/挂过关联）时才问一句。
+    const existing = st.regions.length;
+    if (existing && !detectionUntouched(st) &&
+        !confirm('已有 ' + existing + ' 个区域（可能手动改过）：识别会重建区域，原来的区域与它们的人物关联会被替换。\n继续？（可 ⌘Z 撤销）')) return;
     MH.store.commit('识别区域', s2 => {
-      res.regions.forEach((r2, i) => Core.createRegion(s2, r2.name || ('区域 ' + (i + 1)), r2.cells));
-      // 用识别到的颜色覆盖默认配色，一眼能对上底图
-      s2.regions.slice(-res.regions.length).forEach((reg, i) => { reg.color = res.regions[i].color; });
+      for (const reg of s2.regions.slice()) Core.deleteRegion(s2, reg.id);
+      made.forEach((r2, i) => Core.createRegion(s2, r2.name || ('区域 ' + (i + 1)), r2.cells));
+      s2.regions.forEach((reg, i) => { reg.color = made[i].color; });    // 用识别到的颜色，一眼能对上底图
     });
-    MH.toast('识别出 ' + res.regions.length + ' 个候选区域' +
+    // 记下这次的结果指纹：下次再点识别时用来判断"原封没动"（动过就先问一句）
+    MH.ui.lastDetect = MH.store.state.regions.map(regionKey);
+    MH.toast('识别出 ' + made.length + ' 个候选区域' +
       (seeds.length >= 2 ? '（按图上的区域名：' + labels.map(l => l.name).join(' / ') + '）' : '') +
+      (existing ? '（替换了上一次的 ' + existing + ' 个）' : '') +
       ' · ' + res.stats.sampled + ' 格 · ' + (Date.now() - t0) + 'ms · 不满意可 ⌘Z 撤销', 'ok');
   }
 

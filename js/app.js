@@ -19,6 +19,7 @@
       hoverItemId: null,
       aligning: false,      // 对齐底图模式：拖动=移动网格
       bgBusy: false,        // 正在解析图片 / 渲染 PDF
+      lastDetect: null,     // 上一次"自动识别区域"的结果：再点识别时用来判断有没有被动过
     },
 
     /** 当前底图的 dataURL（来自 store，不进主存档） */
