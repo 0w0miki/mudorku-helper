@@ -68,10 +68,7 @@
     if (!MH.store.state.bg) return '';
     return '<button class="ghost sm" data-act="item-sample"' + (MH.ui.itemPicking ? ' disabled' : '') +
         ' title="点棋盘上任意一个物品格子当样例，自动把长得一样的格子都圈出来（结果直接进下面这个清单）">' +
-        (MH.ui.itemPicking ? '🔍 请点一个物品格子…' : '🔍 从样例找同类') + '</button>' +
-      '<button class="ghost sm" data-act="item-legend"' + (MH.ui.legendPicking ? ' disabled' : '') +
-        ' title="从右侧图例卡片上点那个图标当模板，再回地图上找同类（图例干净、无遮挡）">' +
-        (MH.ui.legendPicking ? '🔍 请点图例上的图标…' : '🔍 从图例找同类') + '</button>';
+        (MH.ui.itemPicking ? '🔍 请点一个物品格子…' : '🔍 从样例找同类') + '</button>';
   }
 
   function draftHTML(st, d, opts) {
@@ -795,74 +792,9 @@
       unknown ? 'warn' : 'ok');
   }
 
-  /** 图例卡片上一次点击 → 抠出那块图标当模板（局部颜色掩码自动定框），再回地图找同类 */
-  async function pickLegendIcon(imgEl, clientX, clientY) {
-    const I2 = window.MurdokuItems;
-    if (!I2 || !I2.findSimilarFromTemplate) { MH.toast('物品模块没加载（js/items.js）', 'error'); return; }
-    let geo;
-    try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
-    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
-    const rect = imgEl.getBoundingClientRect();
-    const natW = imgEl.naturalWidth || rect.width, natH = imgEl.naturalHeight || rect.height;
-    const px = Math.round((clientX - rect.left) / Math.max(1, rect.width) * natW);
-    const py = Math.round((clientY - rect.top) / Math.max(1, rect.height) * natH);
-    // 把卡片画到 canvas 上取像素
-    const cv = document.createElement('canvas');
-    cv.width = natW; cv.height = natH;
-    const ctx = cv.getContext('2d');
-    try { ctx.drawImage(imgEl, 0, 0); } catch (err) { MH.toast('读不到卡片像素：' + err.message, 'error'); return; }
-    let data;
-    try { data = ctx.getImageData(0, 0, natW, natH); } catch (err) { MH.toast('读不到卡片像素（跨域？）', 'error'); return; }
-    // 局部窗口：取卡片短边的 ~30%，再让"与底色不同的那团"自动收紧
-    // 窗口放大到卡片短边的 45%：反正接下来只取"点中的那一团"，窗口给宽一点容错更好
-    const win = Math.max(16, Math.min(320, Math.round(Math.min(natW, natH) * 0.45)));
-    const rx0 = Math.max(0, px - Math.round(win / 2)), ry0 = Math.max(0, py - Math.round(win / 2));
-    const rw = Math.min(win, natW - rx0), rh = Math.min(win, natH - ry0);
-    const gray = I2.toGray({ data: data.data, width: natW, height: natH });
-    const m = I2.cellMask({ data: data.data, width: natW, height: natH }, gray, natW, natH, rx0, ry0, rw, rh,
-      { at: [px, py] });      // 点哪团取哪团（一排图标里点一个就只取一个）
-    let bx = rx0, by = ry0, bw = rw, bh = rh;
-    if (m) {
-      bx = Math.max(0, rx0 + m.box.x0 - 1); by = Math.max(0, ry0 + m.box.y0 - 1);
-      bw = Math.min(natW - bx, m.box.x1 - m.box.x0 + 3); bh = Math.min(natH - by, m.box.y1 - m.box.y0 + 3);
-    }
-    if (bw < 6 || bh < 6) { MH.toast('这一小块太小，点在图标正中再试', 'warn'); return; }
-    const tctx = document.createElement('canvas');
-    tctx.width = bw; tctx.height = bh;
-    tctx.getContext('2d').drawImage(imgEl, bx, by, bw, bh, 0, 0, bw, bh);
-    const timg = tctx.getContext('2d').getImageData(0, 0, bw, bh);
-    // 模板遮罩（相对裁切框）：卡片是干净底色，这一步很准 → 匹配时背景不参与
-    let tmask = null;
-    if (m) {
-      tmask = new Uint8Array(bw * bh);
-      for (let y = 0; y < bh; y++) {
-        for (let x = 0; x < bw; x++) {
-          const sx = rx0 + m.box.x0 + x - bx, sy = ry0 + m.box.y0 + y - by;
-          if (sx < 0 || sy < 0 || sx >= m.w || sy >= m.h) continue;
-          if (m.mask[sy * m.w + sx]) tmask[y * bw + x] = 1;
-        }
-      }
-      let cnt = 0;
-      for (const v of tmask) cnt += v;
-      if (cnt < 24) tmask = null;
-    }
-    const t0 = Date.now();
-    let res;
-    try { res = I2.findSimilarFromTemplate(geo.raster, geo.geom, { data: timg.data, width: bw, height: bh }, { mask: tmask }); }
-    catch (err) { MH.toast('找同类出错：' + (err && err.message ? err.message : err), 'error'); return; }
-    if (!res.ok || !res.cells.length) { MH.toast('没找到同类：' + (res.reason || '未知原因'), 'warn'); return; }
-    const put = applySampleToDraft(res.cells);
-    MH.ui.lastItemMatch = { from: 'legend', cells: res.cells, stats: res.stats, template: { x: bx, y: by, w: bw, h: bh } };
-    MH.render();
-    MH.toast('图例模板（' + bw + '×' + bh + '，尺度 ' + res.stats.scale + '）找到 ' + res.cells.length +
-      ' 格（' + (Date.now() - t0) + 'ms）· ' +
-      (put.reused ? '已追加到当前物品：本次 +' + put.added + ' 格，共 ' + put.total + ' 格' : '草稿里已圈好') +
-      '，改完点「保存」', 'ok');
-  }
-
   /**
-   * 把"找同类"的结果放进草稿：**已经有物品草稿就追加进去**（编辑/新建都算），
-   * 没有才新建一个草稿 ✓
+   * 把"找同类"的结果放进草稿：**已经有物品草稿就追加进去**（编辑中 / 新建中都算），
+   * 没有才新建草稿 ✓
    * 之前这里无条件 `startDraft('item')` —— 编辑某件物品时点「从样例找同类」会
    * 丢掉当前编辑、另起一个新物品 ✗（用户实测反馈）
    * @returns {{added:number,total:number,reused:boolean}}
@@ -1788,21 +1720,6 @@
     'new-item'() { startDraft('item'); },
     'legend-auto'() { guard(runLegendAuto)(); },
     'legend-locate'() { guard(locateLegendItems)(); },
-    'item-legend'() {
-      if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
-      if (!requireAligned(MH.store.state)) return;
-      const pins = (window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || [];
-      if (!pins.length) {
-        MH.toast('还没有图例卡片：先在右侧「PDF 摘录」里导入图例那一页，框选图标做成卡片', 'warn');
-        return;
-      }
-      MH.ui.legendPicking = !MH.ui.legendPicking;
-      document.body.classList.toggle('picking', MH.ui.legendPicking);
-      MH.toast(MH.ui.legendPicking
-        ? '点右侧图例卡片上的那个图标（就以它为模板找同类；再点一次按钮取消）'
-        : '已取消取样', MH.ui.legendPicking ? 'ok' : 'warn');
-      MH.render();
-    },
     'item-sample'() {
       if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
       if (!requireAligned(MH.store.state)) return;
@@ -2018,22 +1935,6 @@
   }
 
   // ---------------------------------------------------------------- 事件绑定
-
-  /**
-   * 取样模式下点右侧图例卡片：捕获阶段先拦下来（卡片本身有"按住拖动/平移"的处理，
-   * 不拦的话会变成拖卡片）。
-   */
-  document.addEventListener('click', e => {
-    if (!MH.ui.legendPicking) return;
-    const img = e.target && e.target.closest ? e.target.closest('.snipper-pin-body img') : null;
-    if (!img) return;
-    e.preventDefault();
-    e.stopPropagation();
-    MH.ui.legendPicking = false;
-    document.body.classList.remove('picking');
-    MH.render();
-    if (MH.panels && MH.panels.legendIcon) MH.panels.legendIcon(img, e.clientX, e.clientY);
-  }, true);
 
   function onDocumentClick(e) {
     const el = e.target.closest ? e.target.closest('[data-act]') : null;
@@ -2328,8 +2229,6 @@
     },
     /** 棋盘上点了一个样例格（board.js 调进来） */
     itemSample(k) { guard(pickItemSample)(k); },
-    /** 图例卡片上点了一个图标（下面那个文档级监听调进来） */
-    legendIcon(imgEl, x, y) { guard(pickLegendIcon)(imgEl, x, y); },
     /** 从图例自动列出物品（也供 e2e 直接调） */
     legendAuto: () => guard(runLegendAuto)(),
     /** 用图例图标逐件到地图上找地点 */
