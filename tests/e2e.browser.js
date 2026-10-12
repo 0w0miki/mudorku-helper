@@ -1138,11 +1138,12 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const names = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name));
   ok(names.length === 3 && names[0] === '我改的', '取消确认后区域保持原样：' + names.join('/'));
 
-  // 30) 截图（没有文字层）：自动找出区域名标签徽章 → 当种子用
+  // 30) 一张截图 + 一个按钮：自动找标签徽章 → OCR 读名字 → 出区域候选
   await p.click('#tabPrep');
   await p.evaluate(() => {
     window.MH.store.replace(window.MurdokuCore.createState(24, 24), 'e2e 截图');
     window.MH.ui.lastBadges = null;
+    window.MH.ui.ocrNames = null;
     if (window.__realDetect) window.MurdokuRegions.detectRegions = window.__realDetect;   // 撤掉第 29 节的桩
   });
   await p.setInputFiles('#bgFileInput', {
@@ -1157,28 +1158,28 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     window.MurdokuCore.setGridOffset(s, 2, 2);
     window.MH.store.setSettings({}); window.MH.render();
   });
+  const tShot = Date.now();
   await p.click('[data-act="detect-regions"]');
-  await p.waitForFunction(() => window.MH.ui.lastBadges, null, { timeout: 60000 });
-  const nb = await p.evaluate(() => window.MH.ui.lastBadges.length);
-  ok(nb === 17, '截图里找到 17 个区域名标签（实际 ' + nb + '）');
-  const shotLabels = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name + ':' + r.cells.length));
-  ok(shotLabels.length >= 10, '按标签种子分出了候选区域：' + shotLabels.length + ' 个 · ' + shotLabels.slice(0, 4).join(' '));
-  const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
-  ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
-
-  // 31) 截图 + OCR：把 17 个区域名读出来（内置 tesseract，file:// 下主线程跑）
-  const tOcr = Date.now();
-  await p.click('[data-act="ocr-regions"]');
   await p.waitForFunction(() => window.MH.ui.ocrNames, null, { timeout: 300000 });
+  const shotSecs = ((Date.now() - tShot) / 1000).toFixed(1);
+  const nb = await p.evaluate(() => (window.MH.ui.lastBadges || []).length);
+  ok(nb === 17, '一个按钮里先找出 17 个区域名标签（实际 ' + nb + '）');
   const ocrNames = await p.evaluate(() => window.MH.ui.ocrNames);
   const WANT_NAMES = ['CABIN A', 'CAVERN', 'WOODS', 'FRIGATE A', 'BEACH', 'SLOOP A', 'SLOOP B', 'SLOOP C',
     'CABIN B', 'GALLEON', 'DOCK', 'TAVERN', 'CABIN C', 'CLIFF', 'WATER', 'CLEARING', 'FRIGATE B'];
   const hitNames = WANT_NAMES.filter(w => ocrNames.includes(w)).length;
   ok(ocrNames.length === 17 && hitNames === 17,
-    'OCR 读出 17/17 个区域名（' + ((Date.now() - tOcr) / 1000).toFixed(1) + 's）：' + ocrNames.join(' / '));
-  const ocrRegions = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name).sort());
-  ok(ocrRegions.length === 17 && ocrRegions.every(n => WANT_NAMES.includes(n.replace(/^区域 \d+$/, '')) || /^区域 \d+$/.test(n)),
-    '区域带上了 OCR 读出的名字：' + ocrRegions.slice(0, 5).join(' / '));
+    '同一个按钮里 OCR 读出 17/17 个区域名（' + shotSecs + 's）：' + ocrNames.join(' / '));
+  const shotRegions = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name));
+  ok(shotRegions.length === 17 && WANT_NAMES.every(w => shotRegions.includes(w)),
+    '区域直接带上读出来的名字：' + shotRegions.slice(0, 5).join(' / '));
+  const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
+  ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
+  // 第二次点同一个按钮：名字已进缓存，不该再跑一遍 OCR
+  const t2 = Date.now();
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForFunction(() => window.MH.store.state.regions.length === 17, null, { timeout: 60000 });
+  ok(Date.now() - t2 < 5000, '再点一次走缓存、不重新 OCR：' + (Date.now() - t2) + 'ms');
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

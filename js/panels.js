@@ -218,12 +218,11 @@
       '<h2>区域 <span class="muted">四连通 · 外轮廓加粗</span></h2>' +
       '<button class="ghost block" data-act="new-region" ' + (d ? 'disabled' : '') + '>＋ 新建区域</button>' +
       (!d && MH.store.state.bg
-        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色；区域名优先读 PDF 文字层，截图则自动找『白底黑字标签』（结果都是候选，可撤销）">🔍 自动识别区域</button>' +
-          '<p class="hint">截图没有文字层：会自动找图上的区域名标签（白底药丸 + 黑描边 + 黑字）。名字先用「区域 1…」，点列表里的「改名」即可。</p>' +
-          '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>' +
-          '<button class="ghost block" data-act="ocr-regions" ' + (MH.ui.ocrBusy ? 'disabled' : '') +
-            ' title="截图路线：先找白底黑字的区域名标签，再用内置 tesseract 把字读出来（首次加载约 7.8MB，之后常驻内存；读错可在列表里改名）">' +
-            (MH.ui.ocrBusy ? '🔤 正在识别区域名…' : '🔤 读区域名（OCR）') + '</button>'
+        ? '<button class="ghost block" data-act="detect-regions" ' + (MH.ui.ocrBusy ? 'disabled' : '') +
+            ' title="在已对位的底图上逐格取色。区域名按输入自动取：PDF 读文字层；截图则自动找白底黑字标签并用内置 OCR 读名字（首次加载约 7.8MB）。结果都是候选，可撤销">' +
+            (MH.ui.ocrBusy ? '🔍 正在识别（读区域名…）' : '🔍 自动识别区域') + '</button>' +
+          '<p class="hint">PDF 读文字层；截图自动找区域名标签（白底药丸 + 黑描边 + 黑字）并用内置 OCR 读名字。名字读错点列表里的「改名」即可。</p>' +
+          '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>'
         : '') +
       (MH.ui.diagText
         ? '<p class="hint">把下面这段复制发我（我按你的真实数字定判据，不再猜）：</p>' +
@@ -780,11 +779,12 @@
   }
 
   /**
-   * 找区域名（三路，按可信度排）：
-   *   ① PDF 文字层（最准，能拿到真名）
-   *   ② 截图里的"区域名标签徽章"（白底药丸 + 黑描边 + 黑字；只有位置，名字先用「区域 N」）
-   *   ③ 本地缓存（上一次的结果，按当前区域复筛）
-   * 三者都拿不到就返回空 —— 上层必须明确告诉用户，不能静默降级成"无种子"。
+   * 找区域名 —— **一个按钮内部按输入类型自动选路**（用户不需要知道是 PDF 还是截图）：
+   *   ① 本地缓存（上一次读到的名字，按当前区域复筛）
+   *   ② PDF 文字层（有 PDF 文件句柄时最准）
+   *   ③ 截图：找"区域名标签徽章"（白底药丸 + 黑描边 + 黑字）拿位置，
+   *      再用内置 OCR 把字读出来（`js/ocr.js`，按需加载；读不出来就退回「区域 N」）
+   * 都拿不到就返回空 —— 上层必须明确提示，不能静默降级成"无种子"。
    */
   async function resolveLabels(st, geo) {
     const area = regionArea(geo);
@@ -803,12 +803,32 @@
       MH.ui.lastBadges = badges;
       MH.ui.lastBadgePitch = pitch;
       if (badges.length >= 2) {
-        return {
-          labels: badges.map((b, i) => ({
-            name: '区域 ' + (i + 1), x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true,
-          })),
-          from: 'badge',
-        };
+        const toLabels = names => badges.map((b, i) => ({
+          name: (names && names[i]) || ('区域 ' + (i + 1)),
+          x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true,
+        }));
+        // 截图：顺手把名字也读出来（OCR 第一次要加载 7.8MB；失败就退回「区域 N」，不影响流程）
+        if (window.MurdokuOCR && L2.mergeOcrNames) {
+          MH.ui.ocrBusy = true;
+          MH.render();
+          try {
+            const read = await window.MurdokuOCR.readBadges(geo.raster, badges, {
+              onStatus: m => MH.toast(m, 'ok'),
+              onProgress: (i, n) => { if (i % 4 === 0 || i === n) MH.toast('读区域名 ' + i + '/' + n, 'ok'); },
+            });
+            const names = L2.mergeOcrNames(read.map(r => ({ name: r.text, badge: r.badge })));
+            MH.ui.ocrNames = names;
+            const ls = toLabels(names);
+            writeLabelCache(st, ls);
+            return { labels: ls, from: 'ocr' };
+          } catch (err) {
+            MH.toast('OCR 没成功（' + (err && err.message ? err.message : err) + '），先用「区域 N」占位，可在列表里改名', 'warn');
+          } finally {
+            MH.ui.ocrBusy = false;
+            MH.render();
+          }
+        }
+        return { labels: toLabels(null), from: 'badge' };
       }
     }
     return { labels: [], from: '' };
@@ -907,9 +927,10 @@
     //    （读不到名字会退化成"无种子"，区域会碎成几十块——所以下面必须明确提示，不能静默降级）
     const resolved = await resolveLabels(st, geo);
     const labels = resolved.labels;
-    if (resolved.from === 'badge') {
-      MH.toast('这是截图（没有文字层）：在图里找到 ' + labels.length +
-        ' 个区域名标签，名字先用「区域 1…」。想自动读名字点「🔤 读区域名（OCR）」', 'ok');
+    if (resolved.from === 'ocr') {
+      MH.toast('截图路线：找到 ' + labels.length + ' 个区域名标签，OCR 读出的名字：' + labels.map(l => l.name).join(' / '), 'ok');
+    } else if (resolved.from === 'badge') {
+      MH.toast('这是截图：找到 ' + labels.length + ' 个区域名标签，名字先用「区域 1…」，可在左侧改名', 'ok');
     }
     if (!labels.length && st.bg.kind === 'pdf') {
       MH.toast('读区域名需要再选一次这份 PDF（只需一次，之后会记住）', 'ok');
@@ -920,49 +941,6 @@
       MH.toast('没找到区域名：截图请确认区域名是"白底黑字的标签"，或用「＋ 新建区域」手工圈', 'warn');
     }
     await detectWithLabels(geo, labels, resolved.from);
-  }
-
-  /**
-   * 截图没有文字层 → OCR 读区域名。
-   * 两步：① 找出标签徽章（位置，纯图形）② 逐个把徽章里的字读出来（tesseract，按需加载 7.8MB）。
-   * 读错也不怕：识别结果只是候选，列表里点「改名」即可。
-   */
-  async function readNamesByOcr() {
-    const st = MH.store.state;
-    const L2 = window.MurdokuLabels;
-    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
-    if (!window.MurdokuOCR) { MH.toast('OCR 模块没加载（js/ocr.js）', 'error'); return; }
-    if (!requireAligned(st)) return;
-    let geo;
-    try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
-    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
-    if (gridOnBg(geo) < 0.6) { MH.toast('网格大部分落在底图外面，先把网格对准地图', 'warn'); return; }
-    const pitch = Math.min(geo.geom.pitchX, geo.geom.pitchY);
-    let badges = MH.ui.lastBadges;
-    if (!badges || !badges.length) badges = L2.findLabelBadges(geo.raster, pitch);
-    if (badges.length < 2) {
-      MH.toast('没找到区域名标签（白底黑字的药丸），OCR 没法下手', 'warn');
-      return;
-    }
-    MH.ui.ocrBusy = true;
-    MH.render();
-    try {
-      const read = await window.MurdokuOCR.readBadges(geo.raster, badges, {
-        onStatus: m => MH.toast(m, 'ok'),
-        onProgress: (i, n) => { if (i % 4 === 0 || i === n) MH.toast('识别区域名 ' + i + '/' + n, 'ok'); },
-      });
-      const names = L2.mergeOcrNames(read.map(r => ({ name: r.text, badge: r.badge })));
-      const labels = read.map((r, i) => ({
-        name: names[i] || ('区域 ' + (i + 1)),
-        x: r.badge.x + r.badge.w / 2, y: r.badge.y + r.badge.h / 2, h: r.badge.h, badge: true,
-      }));
-      MH.ui.ocrNames = labels.map(l => l.name);
-      MH.toast('OCR 读出：' + MH.ui.ocrNames.join(' / '), 'ok');
-      await detectWithLabels(geo, labels, 'ocr');
-    } finally {
-      MH.ui.ocrBusy = false;
-      MH.render();
-    }
   }
 
   /** 视口坐标 → 底图比例（0..1，相对底图左上角与显示尺寸） */
@@ -1305,7 +1283,6 @@
     'bg-crop'() { cropBackground(); },
     'bg-region'() { pickRegion(); },
     'detect-regions'() { guard(detectRegionsFromBg)(); },
-    'ocr-regions'() { guard(readNamesByOcr)(); },
     'diag-regions'() { guard(runRegionDiagnosis)(); },
     'diag-close'() { MH.ui.diagText = null; MH.render(); },
     'diag-copy'() {
