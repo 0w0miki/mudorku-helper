@@ -164,13 +164,16 @@
    */
   function borderProbe(raster, geom, r, c, dir, lumaA, lumaB, options) {
     const opt = Object.assign(
-      { span: 6, samples: 9, depthAbs: 22, depthRel: 0.09, minWidth: 3 }, options || {});
+      { span: 0, samples: 9, depthAbs: 22, depthRel: 0.09, minWidth: 3, recover: 0.6, centerTol: 0.06 },
+      options || {});
     const { data, width: W, height: H } = raster;
     const { x0, y0, pitchX, pitchY } = geom;
     const px0 = Math.round(x0 + c * pitchX), py0 = Math.round(y0 + r * pitchY);
     const px1 = Math.round(x0 + (c + 1) * pitchX), py1 = Math.round(y0 + (r + 1) * pitchY);
-    // 窗口 ±6px（放宽到 ±0.15 格试过：car-repair 只是把错分从一处挪到另一处，未采纳）
-    const span = Math.max(2, Math.round(opt.span));
+    // 窗口：默认 ±0.10 格。固定 ±6px 在格距大时只看得到"墙的一小段"，
+    // 在格距小时（30~40px 的密地图）又探进邻格 —— 所以按格距走，夹在 4~14px。
+    const pitchMin = Math.min(pitchX, pitchY);
+    const span = Math.max(2, Math.round(opt.span > 0 ? opt.span : Math.max(4, Math.min(14, pitchMin * 0.10))));
     const n = span * 2 + 1;
     const lumaAt = (x, y) => {
       const o = (y * W + x) * 4;
@@ -178,10 +181,12 @@
     };
     const cellsLuma = (lumaA + lumaB) / 2;
     const need = Math.max(opt.depthAbs, cellsLuma * opt.depthRel);
+    // 暗谷中心到窗口中心的允许偏差（格界本身可能差 1~2px）
+    const centerTol = Math.max(2, Math.round(pitchMin * opt.centerTol));
     const samples = Math.max(3, Math.round(opt.samples));
     // 沿**整条边**均匀取截面（不只中间那段）：被家具挡住的地方会空出来，
     // 用"覆盖率"表示这条边上有多长是墙，而不是要求整条边都连续是墙
-    let covered = 0, maxWidth = 0, maxDepth = 0, lastDarkFrac = 0;
+    let covered = 0, maxWidth = 0, maxDepth = 0, lastDarkFrac = 0, blocked = 0;
     for (let si = 0; si < samples; si++) {
       const t = 0.06 + 0.88 * (si / (samples - 1));
       const prof = [];
@@ -200,9 +205,9 @@
           prof.push(lumaAt(x, y));
         }
       }
-      let best = 0, cur = 0;
+      let best = 0, cur = 0, bestEnd = 0;
       for (let i = 0; i < n; i++) {
-        if (prof[i] < cellsLuma - need) { cur++; if (cur > best) best = cur; }
+        if (prof[i] < cellsLuma - need) { cur++; if (cur > best) { best = cur; bestEnd = i + 1; } }
         else cur = 0;
       }
       let minL = 255, darkPx = 0;
@@ -212,13 +217,25 @@
       lastDarkFrac = darkFrac;
       if (best > maxWidth) maxWidth = best;
       if (depth > maxDepth) maxDepth = depth;
-      // 是墙：够宽、够深，而且**只占窗口一部分**（大块暗区 darkFrac≈1 → 不是墙）
-      if (best >= opt.minWidth && depth >= need) covered++;   // 备注：darkFrac（窗口暗像素占比）仍会输出，供诊断判断"是墙还是大块暗区"
+      // 是墙要同时满足四条（缺一条就不是"画在格界上的一条线"）：
+      //   ① 够宽 ② 够深 ③ **两端都能回落**到格子亮度（家具/阴影是一大片暗区，端点也是暗的）
+      //   ④ 暗谷中心落在格界附近（否则是"格内一侧的暗块"）
+      // ③④ 是 2026-10-12 加的：用户真图上"同区域内却像墙"的边，色差只有 2.5 —— 就是家具贴在格界上，
+      // 而当时的判据只要求"暗"，darkFrac/回落这些信息算了但没参与判定。
+      const endsLow = Math.min(Math.max(prof[0], prof[1]), Math.max(prof[n - 2], prof[n - 1]));
+      const recovered = endsLow >= cellsLuma - need * opt.recover;
+      const center = bestEnd - 1 - (best - 1) / 2;
+      const centered = Math.abs(center - (n - 1) / 2) <= centerTol;
+      if (best >= opt.minWidth && depth >= need) {
+        if (recovered && centered) covered++;
+        else blocked++;        // 暗但"不成线"：供诊断区分"墙"与"家具/暗区"
+      }
     }
     const coverage = covered / samples;
     return {
       coverage: Math.round(coverage * 1000) / 1000,
       width: maxWidth, depth: maxDepth, darkFrac: Math.round(lastDarkFrac * 100) / 100,
+      blocked: blocked / samples,
       bold: coverage >= 0.6,
     };
   }
@@ -377,6 +394,7 @@
         live.forEach((cp, ci) => cp.ids.forEach(i => owner0[i] = ci));
         cands.push({ tag: 'merge', assign: owner0 });
         cands.push({ tag: 'voronoi', assign: candidateVoronoi(idx, cols, rows, seedList) });
+        cands.push({ tag: 'flood', assign: candidateFlood(idx, cols, rows, seedList, edges) });
         for (const axis of ['row', 'col']) {
           const a = candidateBands(idx, cols, rows, seedList, axis, 4000);
           if (a) cands.push({ tag: 'bands-' + axis, assign: a });
@@ -628,6 +646,69 @@
   }
 
   /**
+   * 候选 C：从种子"泛洪"（多源最短路 = 标记控制分水岭）。
+   *
+   * 每条边给一个代价 `cost = 1 + γ·wall + η·(1 − 归一色距)`，从所有种子同时向外生长，
+   * 每个格子归给"**累计走过来代价最小**"的那个种子。
+   *
+   * 与 Voronoi（等代价）的区别就在这个代价：墙"很贵但过得去"——
+   *   · 被家具挡出的缺口不会把区域封死（绕路便宜就绕路）；
+   *   · 也不会为了少走两步去穿一道真正的隔墙（穿墙要付 γ 倍）。
+   * 试过"硬门槛"（wall ≥ 0.6 直接禁止跨）：灾难，真隔墙被物品挡住时连自己的区域都到不了。
+   * γ 在 2~12 之间结果几乎不变（代价的分辨率被证据的分辨率卡住），所以只需要一个值。
+   */
+  function candidateFlood(idx, cols, rows, seeds, edges, options) {
+    const opt = Object.assign({ gamma: 6, eta: 0.25, dscale: 40 }, options || {});
+    let n = 0;
+    for (let i = 0; i < idx.length; i++) if (idx[i] >= n) n = idx[i] + 1;
+    const adj = new Array(n);
+    for (let i = 0; i < n; i++) adj[i] = [];
+    for (const e of edges) {
+      const cost = 1 + opt.gamma * e.wall + opt.eta * Math.max(0, 1 - e.d / opt.dscale);
+      adj[e.i].push([e.j, cost]);
+      adj[e.j].push([e.i, cost]);
+    }
+    const dist = new Float64Array(n).fill(Infinity);
+    const assign = new Int16Array(n).fill(-1);
+    const done = new Uint8Array(n);
+    const live = seeds.filter(sd => sd.i >= 0 && sd.i < n);
+    live.forEach((sd, si) => { if (dist[sd.i] === Infinity) { dist[sd.i] = 0; assign[sd.i] = si; } });
+    // 格数 ≤ 1600（界面限制 40×40），线性找最小够了，而且顺序确定 → 结果可复现
+    for (let it = 0; it < n; it++) {
+      let best = -1, bd = Infinity;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < bd - 1e-12) { bd = dist[i]; best = i; }
+      if (best < 0) break;
+      done[best] = 1;
+      for (const nb of adj[best]) {
+        const j = nb[0];
+        if (done[j]) continue;
+        const nd = dist[best] + nb[1];
+        if (nd < dist[j] - 1e-12) { dist[j] = nd; assign[j] = assign[best]; }
+      }
+    }
+    // 图不连通（被整圈墙封住的格）时兜底：按格距直线距离归给最近的种子
+    let any = false;
+    for (let i = 0; i < n; i++) if (assign[i] < 0) { any = true; break; }
+    if (any && live.length) {
+      const rr = new Int16Array(n).fill(-1), cc = new Int16Array(n).fill(-1);
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const i = idx[r * cols + c];
+        if (i >= 0 && i < n) { rr[i] = r; cc[i] = c; }
+      }
+      for (let i = 0; i < n; i++) {
+        if (assign[i] >= 0 || rr[i] < 0) continue;
+        let best = 0, bd = Infinity;
+        live.forEach((sd, si) => {
+          const d = (rr[i] - sd.r) * (rr[i] - sd.r) + (cc[i] - sd.c) * (cc[i] - sd.c);
+          if (d < bd) { bd = d; best = si; }
+        });
+        assign[i] = best;
+      }
+    }
+    return assign;
+  }
+
+  /**
    * 局部搜索：在候选划分的基础上逐格尝试"改归相邻区域"，只要打分变高就接受。
    * 候选（最近种子/横带/竖带）表达不了"凹口"这类非直线分界，这一步把它补上。
    * 两条保护：种子格不动；不许把某个区域清空。
@@ -689,7 +770,7 @@
    * 而不是拍脑袋定阈值。不做任何判定，只给数据。
    */
   function diagnose(raster, geom, options) {
-    const opt = Object.assign({ inset: 0.28, pad: 0.07, span: 6, minWidth: 3 }, options || {});
+    const opt = Object.assign({ inset: 0.28, pad: 0.07, minWidth: 3 }, options || {});
     const { cols, rows } = geom;
     const { cells } = sampleCells(raster, geom, opt);
     const idx = new Int32Array(cols * rows).fill(-1);
@@ -705,7 +786,7 @@
       edges.push({
         i, j, r, c, dir,
         wall: Math.round((bd.coverage || 0) * Math.min(1, Math.max(0, ((bd.width || 0) - 2) / 4)) * 1000) / 1000,
-        coverage: bd.coverage, width: bd.width, depth: bd.depth,
+        coverage: bd.coverage, width: bd.width, depth: bd.depth, blocked: bd.blocked,
         d: Math.round(cellDistance(list[i], list[j]) * 10) / 10,
         cells: [list[i].key, list[j].key],
       });
@@ -764,6 +845,21 @@
              ' | ≥0.6: ' + String(a.w6).padStart(2) + ' | 占比 ' + String(pct).padStart(3) + '%' +
              ' | 墙强度均 ' + (a.sum / a.n).toFixed(2) + (pct >= 85 ? '   ← 很可能是区域边界' : ''));
     });
+    // 暗但"不成线"的边：家具/阴影贴着格界就是这种（通常只盖住一条边的一部分，
+    // 所以覆盖率 0.3~0.6 都算）。数量多说明证据里混进了家具 ——
+    // 这批截面已经从墙强度里剔除了（回落判据），列出来是为了看得见剔掉了什么。
+    const blocked = dg.edges.filter(e => (e.blocked || 0) >= 0.33)
+      .sort((a, b) => (b.blocked || 0) - (a.blocked || 0)).slice(0, 10);
+    if (blocked.length) {
+      L.push('');
+      L.push('暗但不成线（家具/阴影贴着格界 → 已不计入墙强度），共 ' +
+        dg.edges.filter(e => (e.blocked || 0) >= 0.33).length + ' 条：');
+      for (const e of blocked) {
+        L.push(' ' + e.cells[0] + '-' + e.cells[1] + '  ' + nm(e.cells[0]) + '|' + nm(e.cells[1]) +
+               '  blocked ' + (e.blocked || 0).toFixed(2) + '  cover ' + e.coverage.toFixed(2) +
+               '  depth ' + e.depth + '  色差 ' + e.d);
+      }
+    }
     if (!assignment || !assignment.size) {
       L.push('');
       L.push('（本次没有已识别的区域：先点「自动识别区域」再诊断，才会列出区域之间的边界与可疑边）');
@@ -812,5 +908,5 @@
     return L.join('\n');
   }
 
-  return { detectRegions, diagnose, formatDiagnosis, candidateVoronoi, candidateBands, scorePartition, refinePartition, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
+  return { detectRegions, diagnose, formatDiagnosis, candidateVoronoi, candidateBands, candidateFlood, scorePartition, refinePartition, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
 });

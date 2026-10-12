@@ -232,6 +232,112 @@ const FAMILY_TRUTH = [
   [3, 3, 3, 3, 3, 3, 3],
 ];
 
+// ---------------------------------------------------------------- 2026-10-12：真图上的两个失效模式
+
+/** 两格并排：用来直接量"格界上的那条线"到底是不是墙 */
+function twoCells(fill) {
+  const pitch = 80, x0 = 40, y0 = 40;
+  const r = makeRaster(x0 * 2 + 2 * pitch, y0 * 2 + pitch);
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  fillRect(r, x0, y0, pitch, pitch, [210, 205, 190]);
+  fillRect(r, x0 + pitch, y0, pitch, pitch, [205, 200, 185]);
+  fill(r, x0 + pitch);                       // 在格界 x = x0+pitch 上作画
+  return { raster: r, geom: { x0, y0, pitchX: pitch, pitchY: pitch, cols: 2, rows: 1 } };
+}
+
+test('格界上的"线"才算墙：6px 粗隔墙算，跨在格界上的 40px 家具不算', () => {
+  const wall = twoCells((r, bx) => fillRect(r, bx - 3, 40, 6, 80, [40, 42, 46]));
+  const wallProbe = R.borderProbe(wall.raster, wall.geom, 0, 0, 'right', 205, 202);
+  assert.ok(wallProbe.coverage >= 0.6, '粗隔墙应被认成墙：' + JSON.stringify(wallProbe));
+  assert.equal(wallProbe.bold, true);
+
+  const desk = twoCells((r, bx) => fillRect(r, bx - 20, 40, 40, 80, [120, 112, 96]));
+  const deskProbe = R.borderProbe(desk.raster, desk.geom, 0, 0, 'right', 205, 202);
+  assert.ok(deskProbe.coverage <= 0.2,
+    '家具是一大片暗区（窗口两端也暗）→ 不该算墙：' + JSON.stringify(deskProbe));
+  assert.ok(deskProbe.blocked >= 0.6, '应记成"暗但不成线"，供诊断用：' + JSON.stringify(deskProbe));
+  assert.equal(deskProbe.bold, false);
+});
+
+test('泛洪候选：墙要付代价 → 隔墙外的格子归自己一侧（Voronoi 会判给对面）', () => {
+  // 一行 5 格；A 在 c=0，B 在 c=4，c=3|c=4 之间是一道粗隔墙
+  const idx = Int32Array.from([0, 1, 2, 3, 4]);
+  const d = (a, b) => ({ i: a, j: b, wall: 0, d: 0 });
+  const edges = [d(0, 1), d(1, 2), d(2, 3), Object.assign(d(3, 4), { wall: 1 })];
+  const seeds = [{ i: 0, r: 0, c: 0, name: 'A' }, { i: 4, r: 0, c: 4, name: 'B' }];
+  const flood = R.candidateFlood(idx, 5, 1, seeds, edges);
+  assert.deepEqual([...flood], [0, 0, 0, 0, 1], 'c=3 应归 A（穿墙要付 6 倍代价）');
+  const voronoi = R.candidateVoronoi(idx, 5, 1, seeds);
+  assert.deepEqual([...voronoi], [0, 0, 0, 1, 1],
+    '对照：Voronoi 只看直线距离，c=3 判给 B（c=2 是平局，按种子顺序给了 A）');
+  // 每个种子都在自己的分量里 + 全部格子都有归属
+  for (const sd of seeds) assert.equal(flood[sd.i], sd.i === 0 ? 0 : 1);
+  assert.ok([...flood].every(v => v >= 0));
+});
+
+test('泛洪候选：图不连通（被整圈墙封住）时也能给出归属，不留下 -1', () => {
+  const idx = Int32Array.from([0, 1, 2]);
+  const seeds = [{ i: 0, r: 0, c: 0, name: 'A' }, { i: 2, r: 0, c: 2, name: 'B' }];
+  const flood = R.candidateFlood(idx, 3, 1, seeds, []);        // 一条边都没有
+  assert.deepEqual([...flood], [0, 0, 1], '按直线距离兜底：' + [...flood].join());
+});
+
+/** 硬夹具：家具跨在格界上（假墙）+ 真隔墙被物品挡出 0.4 格缺口（漏） */
+function makeHardMap({ gap = true, furniture = true } = {}) {
+  const pitch = 80, x0 = 60, y0 = 50;
+  const r = makeRaster(x0 * 2 + 7 * pitch, y0 * 2 + 7 * pitch);
+  const TONE = { 1: [214, 208, 192], 2: [206, 196, 178], 3: [198, 188, 170] };
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  for (let rr = 0; rr < 7; rr++) for (let cc = 0; cc < 7; cc++) {
+    fillRect(r, x0 + cc * pitch, y0 + rr * pitch, pitch, pitch, TONE[FAMILY_TRUTH[rr][cc]]);
+  }
+  for (let c = 1; c < 7; c++) fillRect(r, x0 + c * pitch - 1, y0, 3, 7 * pitch, [150, 140, 120]);
+  for (let rr = 1; rr < 7; rr++) fillRect(r, x0, y0 + rr * pitch - 1, 7 * pitch, 3, [150, 140, 120]);
+  for (let rr = 0; rr < 7; rr++) for (let cc = 0; cc < 7; cc++) {
+    const t = FAMILY_TRUTH[rr][cc];
+    if (cc + 1 < 7 && FAMILY_TRUTH[rr][cc + 1] !== t) fillRect(r, x0 + (cc + 1) * pitch - 3, y0 + rr * pitch, 6, pitch, [38, 40, 44]);
+    if (rr + 1 < 7 && FAMILY_TRUTH[rr + 1][cc] !== t) fillRect(r, x0 + cc * pitch, y0 + (rr + 1) * pitch - 3, pitch, 6, [38, 40, 44]);
+  }
+  if (furniture) for (let rr = 0; rr < 7; rr++) for (let cc = 1; cc < 7; cc++) {
+    if ((rr * 3 + cc * 5) % 3) continue;
+    fillRect(r, x0 + cc * pitch - 22, y0 + rr * pitch + 18, 44, 40, [120, 112, 96]);   // 跨在格界上
+  }
+  if (gap) fillRect(r, x0 + 3 * pitch, y0 + 5 * pitch - 3, Math.round(0.4 * pitch), 6, TONE[2]);  // 隔墙缺口
+  return { raster: r, geom: { x0, y0, pitchX: pitch, pitchY: pitch, cols: 7, rows: 7 } };
+}
+
+test('边界诊断：家具贴格界会列成"暗但不成线"，并把覆盖率从 1.0 压下来', () => {
+  const { raster, geom } = makeHardMap({ gap: false, furniture: true });
+  const dg = R.diagnose(raster, geom);
+  const blocked = dg.edges.filter(e => (e.blocked || 0) >= 0.33);
+  assert.ok(blocked.length >= 1, '应认出家具造成的暗区：' + blocked.length + ' 条');
+  // 旧判据下这些边 coverage = 1.0（家具全盖住）→ 现在家具那几段被剔掉，只剩真正的木缝
+  assert.ok(blocked.every(e => e.coverage <= 0.7),
+    '家具覆盖的段落应不再算墙：' + blocked.map(e => e.coverage).join(','));
+  assert.ok(/暗但不成线/.test(R.formatDiagnosis(dg, null)), '诊断文本里应有这一节');
+});
+
+test('真值评测（硬夹具：家具跨格界 + 隔墙留缺口）：识别应还原真值', () => {
+  const seeds = [{ name: "TEACHER’S AREA", r: 1, c: 3 }, { name: 'FRONT AREA', r: 3, c: 2 },
+                 { name: 'BACK AREA', r: 5, c: 3 }];
+  const MAP = { "TEACHER’S AREA": 1, 'FRONT AREA': 2, 'BACK AREA': 3 };
+  for (const opts of [{ gap: true, furniture: true }, { gap: false, furniture: true }, { gap: true, furniture: false }]) {
+    const { raster, geom } = makeHardMap(opts);
+    const res = R.detectRegions(raster, geom, { seeds });
+    assert.ok(res.seeded, '应走种子模式');
+    const got = Array.from({ length: 7 }, () => new Array(7).fill(0));
+    for (const reg of res.regions) for (const k of reg.cells) {
+      const [rr, cc] = k.split(',').map(Number); got[rr][cc] = MAP[reg.name] || 0;
+    }
+    let hit = 0;
+    for (let rr = 0; rr < 7; rr++) for (let cc = 0; cc < 7; cc++) if (got[rr][cc] === FAMILY_TRUTH[rr][cc]) hit++;
+    const acc = hit / 49;
+    assert.ok(acc >= 0.95, '准确率应 ≥95%（家具' + (opts.furniture ? '有' : '无') + '/缺口' +
+      (opts.gap ? '有' : '无') + '），实际 ' + (acc * 100).toFixed(1) + '% · 选中 ' + res.stats.picked +
+      ' · 候选 ' + res.stats.candidates + '\n实际：\n' + got.map(row => row.join(' ')).join('\n'));
+  }
+});
+
 test('真值评测（familymurdoku 7×7，含凹口）：候选+打分+局部搜索应还原真值', () => {
   const pitch = 81, x0 = 60, y0 = 50, N = 7;
   const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
