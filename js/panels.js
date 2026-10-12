@@ -740,7 +740,23 @@
   }
 
   const LABEL_KEY = 'murdoku-helper.v1.labels';
-  const labelCacheKey = st => ((st.bg && st.bg.name) || '') + '@' + ((st.bg && st.bg.w) || 0);
+  /**
+   * 缓存键 = 底图名 + 尺寸 + **一小段像素指纹**。
+   * 只用"名字@宽"的话，**同名同宽的另一张图**会命中旧缓存（正是这类过期键把好数据挡住）；
+   * 指纹让它必然落到不同的键上。底图被裁切/换页后 bgData 变了 → 键也变 → 自动失效 ✓
+   */
+  function labelCacheKey(st) {
+    const b = st.bg || {};
+    const data = MH.store && MH.store.bgData ? MH.store.bgData : '';
+    let fp = 0;
+    if (data) {
+      const step = Math.max(1, Math.floor(data.length / 256));   // 采样 256 个字符，够区分不同图
+      for (let i = 0; i < data.length; i += step) {
+        fp = ((fp ^ data.charCodeAt(i)) * 16777619) >>> 0;
+      }
+    }
+    return (b.name || '') + '@' + (b.w || 0) + 'x' + (b.h || 0) + '#' + fp.toString(36);
+  }
 
   function readLabelCache(st) {
     try {
@@ -891,7 +907,7 @@
       L.push('网格压在底图上的比例：' + (ratio * 100).toFixed(0) + '%' + (ratio < 0.6 ? ' ✗（要 ≥60%，说明网格基本不在图上）' : ' ✓'));
       L.push('格距（原图像素）：' + geo.geom.pitchX.toFixed(1) + ' × ' + geo.geom.pitchY.toFixed(1) +
         (Math.min(geo.geom.pitchX, geo.geom.pitchY) < 6 ? ' ✗（太小了，行列数是不是填多了？）' : ''));
-      const cached = filterLabels(readLabelCache(st), regionArea(geo));
+      const cached = readLabelCache(st) || [];          // 与 resolveLabels 一致：不按框二次过滤
       const badges = L2 && L2.findLabelBadges ? L2.findLabelBadges(geo.raster, Math.min(geo.geom.pitchX, geo.geom.pitchY)) : [];
       MH.ui.lastBadges = badges.length ? badges : MH.ui.lastBadges;
       L.push('区域名从哪来：');

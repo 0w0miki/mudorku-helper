@@ -1146,13 +1146,6 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     window.MH.ui.ocrNames = null;
     if (window.__realDetect) window.MurdokuRegions.detectRegions = window.__realDetect;   // 撤掉第 29 节的桩
   });
-  // 先塞一条"过期的记忆"（只剩 1 个区域名）——用户实测就是被它挡住了：
-  // 老逻辑会拿这 1 条当唯一来源 → 种子 1 个 → 退化成无种子，整张图碎成十几块。
-  await p.evaluate(() => {
-    localStorage.setItem('murdoku-helper.v1.labels', JSON.stringify({
-      key: 'contest-labels.jpg@1194', labels: [{ name: 'WOODS', x: 231, y: 342, h: 24 }],
-    }));
-  });
   await p.setInputFiles('#bgFileInput', {
     name: 'contest-labels.jpg', mimeType: 'image/jpeg',
     buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'contest-labels.jpg')),
@@ -1204,6 +1197,23 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '区域直接带上读出来的名字：' + shotRegions.slice(0, 5).join(' / '));
   const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
   ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
+  // 先制造"过期的记忆"：把刚写好的 17 条改回 1 条（键保持不变，模拟用户遇到的坏缓存），
+  // 再点一次识别 —— 老逻辑会拿这 1 条当唯一来源 → 种子 1 个 → 退化成无种子、整张图碎成十几块。
+  const stale = await p.evaluate(() => {
+    const o = JSON.parse(localStorage.getItem('murdoku-helper.v1.labels'));
+    o.labels = [o.labels[0]];
+    localStorage.setItem('murdoku-helper.v1.labels', JSON.stringify(o));
+    return o.labels.length;
+  });
+  ok(stale === 1, '先造一条过期记忆（1 条）');
+  await p.evaluate(() => {
+    window.MH.ui.lastDetect = null;                          // 让它不弹"会重建区域"的确认
+    window.MH.ui.ocrNames = null;
+  });
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForFunction(() => window.MH.ui.ocrNames, null, { timeout: 300000 });
+  const names2 = await p.evaluate(() => window.MH.ui.ocrNames);
+  ok(WANT_NAMES.every(w => names2.includes(w)), '1 条过期记忆不会再挡住 17 个标签：' + names2.slice(0, 4).join(' / '));
   const cacheAfter = await p.evaluate(() => {
     const o = JSON.parse(localStorage.getItem('murdoku-helper.v1.labels') || '{}');
     return (o.labels || []).length;
