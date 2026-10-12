@@ -217,6 +217,9 @@
       '<section class="card">' +
       '<h2>区域 <span class="muted">四连通 · 外轮廓加粗</span></h2>' +
       '<button class="ghost block" data-act="new-region" ' + (d ? 'disabled' : '') + '>＋ 新建区域</button>' +
+      (!d && MH.store.state.bg
+        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色，把四连通的同色块识别成候选区域（可撤销）">🔍 自动识别区域</button>'
+        : '') +
       (d && d.kind === 'region' ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('region', st) + '</ul>' +
       '</section>' +
@@ -621,6 +624,51 @@
       (Math.abs(skew - 1) > 0.12 ? '（格子明显不是方的：行列数是不是填反了？）' : ''), 'ok');
   }
 
+  /**
+   * 由当前对位参数算出"每格在底图上的像素矩形"。
+   * 场景里：网格左上角相对底图左上角偏移 = grid.x/grid.y（显示 px），
+   * 底图显示宽度 = boardLayout().bgW；所以 原图像素 = 显示 px × (原图宽 / 显示宽)。
+   */
+  async function regionGeometry() {
+    const st = MH.store.state;
+    const raster = await bgRaster();
+    const lay = Core.boardLayout(st);
+    if (!(lay.bgW > 0) || !(lay.bgH > 0)) return null;
+    const sx = raster.width / lay.bgW, sy = raster.height / lay.bgH;
+    const gx = lay.gridLeft - lay.bgLeft, gy = lay.gridTop - lay.bgTop;
+    return {
+      raster,
+      geom: {
+        x0: gx * sx, y0: gy * sy,
+        pitchX: st.settings.cellSize * sx, pitchY: st.settings.cellSize * sy,
+        cols: st.cols, rows: st.rows,
+      },
+    };
+  }
+
+  /** 自动识别区域：产出候选后**一次提交**（可撤销），用户再手工增删改 */
+  async function detectRegionsFromBg() {
+    const R = window.MurdokuRegions;
+    if (!R) { MH.toast('区域识别模块没加载（js/regions.js）', 'error'); return; }
+    const st = MH.store.state;
+    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (!st.bg.bound) { MH.toast('先用「▭ 框地图外框」把底图和网格对好，再来识别区域', 'warn'); return; }
+    let geo;
+    try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    const t0 = Date.now();
+    const res = R.detectRegions(geo.raster, geo.geom);
+    if (!res.ok) { MH.toast('没认出区域：' + (res.reason || '未知原因'), 'warn'); return; }
+    const names = res.regions.map((r2, i) => '区域 ' + (i + 1));
+    MH.store.commit('识别区域', s2 => {
+      res.regions.forEach((r2, i) => Core.createRegion(s2, names[i], r2.cells));
+      // 用识别到的颜色覆盖默认配色，一眼能对上底图
+      s2.regions.slice(-res.regions.length).forEach((reg, i) => { reg.color = res.regions[i].color; });
+    });
+    MH.toast('识别出 ' + res.regions.length + ' 个候选区域（' + res.stats.sampled + ' 格，' +
+      (Date.now() - t0) + 'ms）· 不满意可 ⌘Z 撤销，或直接改名字/加格子', 'ok');
+  }
+
   /** 视口坐标 → 底图比例（0..1，相对底图左上角与显示尺寸） */
 
 
@@ -948,6 +996,7 @@
     },
     'bg-crop'() { cropBackground(); },
     'bg-region'() { pickRegion(); },
+    'detect-regions'() { detectRegionsFromBg(); },
     'bg-scale-step'(el, e) {
       const st = MH.store.state;
       if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
