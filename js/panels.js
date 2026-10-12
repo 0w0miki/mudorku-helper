@@ -250,6 +250,9 @@
         ? '<button class="ghost block" data-act="item-sample" ' + (MH.ui.itemPicking ? 'disabled' : '') +
             ' title="这类地图上同一件物品是同一张画反复贴的：点一个样例格子，自动把长得一样的格子都圈出来（结果进草稿，可手改）">' +
             (MH.ui.itemPicking ? '🔍 请在棋盘上点一个物品格子…' : '🔍 从样例找同类') + '</button>' +
+          '<button class="ghost block" data-act="legend-auto" ' +
+            ' title="从右侧图例卡片自动切出每个物品图标、认名字、按图例里的说明分\"可占据/不可占据\"，一次性建好物品清单（格子留空，地点再点样例补）">' +
+            '🚀 从图例自动列出物品</button>' +
           '<button class="ghost block" data-act="item-legend" ' + (MH.ui.legendPicking ? 'disabled' : '') +
             ' title="更稳的一条：从右侧图例卡片上点那个图标当模板，再回地图上找同类（图例里没遮挡、底色统一）。卡片可以缩放，让图标和地图上的大小接近即可">' +
             (MH.ui.legendPicking ? '🔍 请点图例卡片上的那个图标…' : '🔍 从图例卡片找同类') + '</button>'
@@ -436,6 +439,71 @@
     MH.render();
     MH.toast('找到 ' + res.cells.length + ' 格同类（' + (Date.now() - t0) + 'ms · 阈值 ' + res.stats.threshold +
       '）草稿里已圈好：可在棋盘上加减，改完点「保存」', 'ok');
+  }
+
+  /** 取第一张图例卡片的像素（画到 canvas 上再读） */
+  async function legendCardRaster() {
+    const pins = (window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || [];
+    if (!pins.length) return null;
+    const pin = pins[0];
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('卡片图片读不出来')); img.src = pin.url; });
+    const w = pin.w || img.naturalWidth, h = pin.h || img.naturalHeight;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h);
+    return { data: d.data, width: w, height: h };
+  }
+
+  /**
+   * 从图例卡片自动列出物品：切图标 → OCR 名字与分组说明 → 一次性建好物品。
+   * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
+   */
+  async function runLegendAuto() {
+    const Lg = window.MurdokuLegend;
+    if (!Lg) { MH.toast('图例模块没加载（js/legend.js）', 'error'); return; }
+    if (!MH.store.state.bg) { MH.toast('还没有底图（不过图例自动列物品不强求底图）', 'warn'); }
+    const pins = (window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || [];
+    if (!pins.length) { MH.toast('还没有图例卡片：先在右侧「PDF 摘录」里导入图例那一页，框选图标做成卡片', 'warn'); return; }
+    let raster;
+    try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
+    if (!raster) { MH.toast('读不到图例卡片', 'error'); return; }
+    MH.toast('正在切分图例卡片…', 'ok');
+    let sp;
+    try { sp = Lg.split(raster); } catch (err) { MH.toast('切分失败：' + err.message, 'error'); return; }
+    if (!sp.icons.length) { MH.toast('这张卡片上没切出图标（试试只截图例那一块，别带太多空白）', 'warn'); return; }
+    // OCR：名字与分组说明都是从卡片上读出来的文字
+    let ocr = [];
+    if (sp.textBoxes.length && window.MurdokuOCR) {
+      try {
+        ocr = await window.MurdokuOCR.readBadges(raster, sp.textBoxes.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
+          { zoom: 4, onStatus: msg => MH.toast(msg, 'ok'), onProgress: (i, n) => { if (i === n) MH.toast('文字识别完成（' + n + ' 块）', 'ok'); } });
+      } catch (err) { MH.toast('文字识别失败（名字会留空）：' + err.message, 'warn'); }
+    }
+    let items = [];
+    try { items = Lg.annotate(sp, ocr); } catch (err) { MH.toast('归类失败：' + err.message, 'error'); return; }
+    const unknown = sp.groups.filter(g => g.occupiable === null).length;
+    let made = 0;
+    MH.store.commit('从图例自动列出物品', st => {
+      items.forEach((it, i) => {
+        const g = sp.groups[it.group];
+        const occ = g && g.occupiable === false ? false : true;      // 读不懂就先按"可占据"
+        Core.createItem(st, it.name || ('物品 ' + (i + 1)), [], occ);
+        made++;
+      });
+    });
+    MH.ui.lastLegend = {
+      icons: sp.icons.length, groups: sp.groups.length, items: made,
+      names: items.map(i => i.name), occupiable: items.map((it, i) => (sp.groups[it.group] || {}).occupiable),
+      unknowns: unknown,
+    };
+    MH.render();
+    MH.toast('从图例列出 ' + made + ' 件物品' +
+      (unknown ? '（有 ' + unknown + ' 组的说明没读懂，先都按"可占据"，请在物品列表里改）' : '') +
+      '：' + items.map(i => i.name || '?').join('、') + ' · 格子留空，点每件的「从样例找同类」补地点',
+      unknown ? 'warn' : 'ok');
   }
 
   /** 图例卡片上一次点击 → 抠出那块图标当模板（局部颜色掩码自动定框），再回地图找同类 */
@@ -1409,6 +1477,7 @@
     },
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
+    'legend-auto'() { guard(runLegendAuto)(); },
     'item-legend'() {
       if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
       if (!requireAligned(MH.store.state)) return;
@@ -1946,6 +2015,8 @@
     itemSample(k) { guard(pickItemSample)(k); },
     /** 图例卡片上点了一个图标（下面那个文档级监听调进来） */
     legendIcon(imgEl, x, y) { guard(pickLegendIcon)(imgEl, x, y); },
+    /** 从图例自动列出物品（也供 e2e 直接调） */
+    legendAuto: () => guard(runLegendAuto)(),
   };
 
   MH.panels = P;
