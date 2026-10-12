@@ -62,8 +62,9 @@
       M.FS.writeFile('./eng.traineddata', model);
       const api = new M.TessBaseAPI();
       if (api.Init(null, 'eng', 1) === -1) throw new Error('识别引擎初始化失败（语言模型不完整？）');
-      // 区域名全是全大写短词，限制字符集 + 单行模式能显著减少乱猜
-      api.SetVariable('tessedit_char_whitelist', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ');
+      // 字符集**每次调用**按需设置（见 readBadges 的 opt.chars）：
+      // 区域名徽章是全大写短词，限制成 A–Z 能显著减少乱猜 ✓；
+      // 但图例物品名是**小写**（fire / tree / chair…），用大写字符集会把它们全丢掉 ✗（踩过）
       api.SetVariable('tessedit_pageseg_mode', '7');
       api.SetVariable('user_defined_dpi', '300');
       engine = { M, api };
@@ -73,9 +74,13 @@
   }
 
   /** 每个徽章裁出来放大 → PNG → 交给 tesseract 读一行字 */
+  const UPPER_ONLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ';                      // 区域名徽章：全大写
+  const WORDS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'- ";  // 物品名/说明行
+
   async function readBadges(raster, badges, opts) {
     const opt = opts || {};
     const { M, api } = await ready(opt.onStatus);
+    api.SetVariable('tessedit_char_whitelist', opt.chars != null ? opt.chars : UPPER_ONLY);
     const src = document.createElement('canvas');
     src.width = raster.width; src.height = raster.height;
     const sctx = src.getContext('2d');
@@ -109,6 +114,8 @@
   }
 
   root.MurdokuOCR = {
+    UPPER_ONLY,
+    WORDS,
     ready,
     readBadges,
     /** 引擎已经加载好了吗（UI 用它决定按钮文字） */

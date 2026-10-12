@@ -655,7 +655,19 @@
       // **用"名字排"当骨架**：名字之间有明显空隙，切得准；图标本身是几块拼的（椅子=靠背+坐垫+腿），
       // 直接切图标会被内部空隙切成好几块 ✗（踩过）。所以：名字列 → 该列上方那一段墨水的外接框 = 图标 ✓
       if (row.name) {
-        const nc = colBands(dm.mask, W, x0, x1, row.name.y0, row.name.y1, 1, Math.max(4, row.name.h * 0.8));
+        // 间隙阈值 0.5 个字高：相邻两个名字之间要切开（截图实测 0.8 会把
+        // "flowers shark"、"barrel shelf shrub table boulder" 并成一个 ✗），
+        // 而多词名字内部（Oil Slick / Garbage bin）的空隙更小，不会被拆散 ✓
+        // 列阈值也用"相对"的：名字带里同样有面板底色残余，用"只要 >0 就算有字"
+        // 会把相邻两个名字并起来 ✗（实测 "flowers shark"、"table boulder" 被并）
+        let nameMaxCol = 0;
+        for (let x = x0; x <= x1; x++) {
+          let n = 0;
+          for (let y = row.name.y0; y <= row.name.y1; y++) if (dm.mask[y * W + x]) n++;
+          if (n > nameMaxCol) nameMaxCol = n;
+        }
+        const nc = colBands(dm.mask, W, x0, x1, row.name.y0, row.name.y1,
+          Math.max(2, Math.round(nameMaxCol * 0.15)), Math.max(3, row.name.h * 0.5));
         for (const ns of nc) {
           const w = ns[1] - ns[0] + 1;
           if (w < 4) continue;

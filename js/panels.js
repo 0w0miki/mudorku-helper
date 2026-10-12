@@ -524,7 +524,8 @@
     const empty = new Array(boxes.length).fill('');
     if (!boxes.length || !window.MurdokuOCR) return empty;
     try {
-      const got = await window.MurdokuOCR.readBadges(raster, boxes, { zoom: 4, onStatus: m => MH.toast(m, 'ok') });
+      const got = await window.MurdokuOCR.readBadges(raster, boxes,
+        { zoom: 4, chars: window.MurdokuOCR.WORDS, onStatus: m => MH.toast(m, 'ok') });
       return got.map(r2 => String(r2.text || '').replace(/\s+/g, ' ').trim());
     } catch (err) {
       MH.toast('文字识别失败（名字/分组会留空，可手动改）：' + err.message, 'warn');
@@ -777,7 +778,15 @@
       const use = parsed.items;
       if (use.length < 2) { giveUp('这张卡片上没切出成排的图标（试试框紧一点，只框图例那一块）'); return; }
       MH.toast('识别物品名…', 'ok');
-      const names = await ocrBoxes(raster, use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 }));
+      const rawNames = await ocrBoxes(raster, use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 }));
+      // 名字出来后再过一道"像不像物品名"：说明段落/OCR 碎片（"A" / "fae" / "2"）挡掉 ✓
+      const looksLikeName = t => {
+        const s2 = String(t || '').trim();
+        if (!s2) return false;
+        if (s2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(s2)) return false;
+        return s2.replace(/[^A-Za-z]/g, '').length >= 2;
+      };
+      const names = rawNames.map(t => (looksLikeName(t) ? t : ''));
       out = {
         items: occupiableByHeads(use.map((b, i) => ({
           name: names[i] || '',
