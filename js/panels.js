@@ -447,13 +447,13 @@
       return;
     }
     if (!res.ok || !res.cells.length) { MH.toast('没找到同类：' + (res.reason || '未知原因'), 'warn'); return; }
-    startDraft('item');
-    MH.ui.draft.cells = new Set(res.cells);
+    const put = applySampleToDraft(res.cells);
     MH.ui.draft.sample = { r, c };
     MH.ui.lastItemMatch = { sample: { r, c }, cells: res.cells, stats: res.stats, template: res.template };
     MH.render();
-    MH.toast('找到 ' + res.cells.length + ' 格同类（' + (Date.now() - t0) + 'ms · 阈值 ' + res.stats.threshold +
-      '）草稿里已圈好：可在棋盘上加减，改完点「保存」', 'ok');
+    MH.toast('找到 ' + res.cells.length + ' 格同类（' + (Date.now() - t0) + 'ms · 阈值 ' + res.stats.threshold + '）· ' +
+      (put.reused ? '已追加到当前物品：本次 +' + put.added + ' 格，共 ' + put.total + ' 格' : '草稿里已圈好') +
+      '：可在棋盘上加减，改完点「保存」', 'ok');
   }
 
   /** 取第一张图例卡片的像素（画到 canvas 上再读） */
@@ -851,12 +851,32 @@
     try { res = I2.findSimilarFromTemplate(geo.raster, geo.geom, { data: timg.data, width: bw, height: bh }, { mask: tmask }); }
     catch (err) { MH.toast('找同类出错：' + (err && err.message ? err.message : err), 'error'); return; }
     if (!res.ok || !res.cells.length) { MH.toast('没找到同类：' + (res.reason || '未知原因'), 'warn'); return; }
-    startDraft('item');
-    MH.ui.draft.cells = new Set(res.cells);
+    const put = applySampleToDraft(res.cells);
     MH.ui.lastItemMatch = { from: 'legend', cells: res.cells, stats: res.stats, template: { x: bx, y: by, w: bw, h: bh } };
     MH.render();
     MH.toast('图例模板（' + bw + '×' + bh + '，尺度 ' + res.stats.scale + '）找到 ' + res.cells.length +
-      ' 格（' + (Date.now() - t0) + 'ms）· 草稿里已圈好，改完点「保存」', 'ok');
+      ' 格（' + (Date.now() - t0) + 'ms）· ' +
+      (put.reused ? '已追加到当前物品：本次 +' + put.added + ' 格，共 ' + put.total + ' 格' : '草稿里已圈好') +
+      '，改完点「保存」', 'ok');
+  }
+
+  /**
+   * 把"找同类"的结果放进草稿：**已经有物品草稿就追加进去**（编辑/新建都算），
+   * 没有才新建一个草稿 ✓
+   * 之前这里无条件 `startDraft('item')` —— 编辑某件物品时点「从样例找同类」会
+   * 丢掉当前编辑、另起一个新物品 ✗（用户实测反馈）
+   * @returns {{added:number,total:number,reused:boolean}}
+   */
+  function applySampleToDraft(cells) {
+    const d = MH.ui.draft;
+    if (d && d.kind === 'item') {
+      const before = d.cells.size;
+      cells.forEach(k => d.cells.add(k));
+      return { added: d.cells.size - before, total: d.cells.size, reused: true };
+    }
+    startDraft('item');
+    MH.ui.draft.cells = new Set(cells);
+    return { added: cells.length, total: cells.length, reused: false };
   }
 
   function startDraft(kind, editingId) {

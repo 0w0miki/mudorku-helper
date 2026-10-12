@@ -1248,6 +1248,29 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(savedItems.length === 1 && /^椅子:\d+:true$/.test(savedItems[0]) && Number(savedItems[0].split(':')[1]) >= 3,
     '保存成物品（名字 + 格子数 + 可占据）：' + savedItems.join(' / '));
 
+  // 33) 编辑已有物品时点「从样例找同类」→ 结果要**追加到当前物品**，不能新建一件 ✗
+  const beforeItems = await p.evaluate(() => window.MH.store.state.items.length);
+  await p.evaluate(() => window.MH.store.commit('清空格子', s => { s.items[0].cells = []; }));
+  await p.click('[data-act="edit-item"]');
+  await p.waitForSelector('.list li.editing .draft #draftName');
+  await p.evaluate(() => { window.MH.ui.lastItemMatch = null; });     // 清掉上一节的残留，否则等待会立刻通过
+  await p.click('.list li.editing .draft [data-act="item-sample"]');
+  await p.locator('.cell[data-k="18,20"]').click();
+  await p.waitForFunction(() => !!window.MH.ui.lastItemMatch, null, { timeout: 60000 });
+  await p.waitForFunction(() => window.MH.ui.draft && window.MH.ui.draft.cells.size > 0, null, { timeout: 60000 });
+  const afterItems = await p.evaluate(() => window.MH.store.state.items.length);
+  const draftN2 = await p.evaluate(() => window.MH.ui.draft && window.MH.ui.draft.cells.size);
+  const editingId = await p.evaluate(() => window.MH.ui.draft && window.MH.ui.draft.editingId);
+  ok(afterItems === beforeItems, '编辑中取样不该新建物品：' + beforeItems + ' → ' + afterItems);
+  ok(!!editingId, '取样后草稿仍指向当前物品（editingId 保留）');
+  ok(draftN2 >= 3, '结果追加进了当前草稿：' + draftN2 + ' 格');
+  await p.click('.list li.editing .draft [data-act="draft-save"]');
+  const saved = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    return { n: st.items.length, cells: st.items[0].cells.length };
+  });
+  ok(saved.n === beforeItems && saved.cells >= 3, '保存后仍是一件物品、格子已补上：' + JSON.stringify(saved));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
