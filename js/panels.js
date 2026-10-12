@@ -71,8 +71,8 @@
   function draftSampleButtons() {
     if (!MH.store.state.bg) return '';
     return '<button class="ghost sm" data-act="item-sample"' + (MH.ui.itemPicking ? ' disabled' : '') +
-        ' title="点这里，然后在棋盘上点一个格子当样例 → 自动找出所有长得一样的格子，&#10;追加到这件物品（不会新建物品）。&#10;可以多找几次叠加；棋盘上还能手动加减格子。">' +
-        (MH.ui.itemPicking ? '🔍 请在棋盘上点一个格子…' : '🔍 点样例补格子') + '</button>';
+        ' title="点棋盘上一个格子当样例，自动把同类格子加到这件物品">' +
+        (MH.ui.itemPicking ? '🔍 请点一个格子…' : '🔍 按样例添加') + '</button>';
   }
 
   function draftHTML(st, d, opts) {
@@ -1734,7 +1734,7 @@
       MH.ui.itemPicking = !MH.ui.itemPicking;
       document.body.classList.toggle('picking', MH.ui.itemPicking);
       MH.toast(MH.ui.itemPicking
-        ? '请在棋盘上点一个格子当样例：会自动找出所有同类格子并追加到当前物品（再点一次按钮取消）'
+        ? '请在棋盘上点一个格子当样例（同类格子会加到当前物品）'
         : '已取消取样', MH.ui.itemPicking ? 'ok' : 'warn');
       MH.render();
     },
