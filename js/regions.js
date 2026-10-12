@@ -286,7 +286,10 @@
       const seedList = [];
       for (const sd of opt.seeds) {
         const i = idx[sd.r * cols + sd.c];
-        if (i >= 0 && !seedList.some(x => x.i === i)) seedList.push({ i, name: sd.name || ('区域 ' + (seedList.length + 1)) });
+        // 必须把 r/c 一起带上：候选生成（最近种子 / 按带切）要用它们算距离与顺序
+        if (i >= 0 && !seedList.some(x => x.i === i)) {
+          seedList.push({ i, r: sd.r, c: sd.c, name: sd.name || ('区域 ' + (seedList.length + 1)) });
+        }
       }
       if (seedList.length >= 1) {
         let live = list.map((_, i) => ({ ids: [i], names: new Set(), size: 1 }));
@@ -365,6 +368,50 @@
           if (!changed) break;
         }
 
+        // ---- 候选划分：最近种子 / 横带 / 竖带 / 原来的逐个合并结果，用同一把尺子打分择优 ----
+        // 为什么要"生成候选再打分"：这张图上墙强度饱和（几乎所有边都是 1.0），
+        // 逐个合并时"墙 × 300"变成常数、排序由微小色差决定 → 拼出竖条；
+        // 而"边界落在哪"这件事本身是可靠的（真分界线墙证据 1.00）→ 用它打分才用对了地方。
+        const cands = [];
+        const owner0 = new Int16Array(list.length).fill(-1);
+        live.forEach((cp, ci) => cp.ids.forEach(i => owner0[i] = ci));
+        cands.push({ tag: 'merge', assign: owner0 });
+        cands.push({ tag: 'voronoi', assign: candidateVoronoi(idx, cols, rows, seedList) });
+        for (const axis of ['row', 'col']) {
+          const a = candidateBands(idx, cols, rows, seedList, axis, 4000);
+          if (a) cands.push({ tag: 'bands-' + axis, assign: a });
+        }
+        let pickCand = null, pickScore = -Infinity;
+        for (const cd of cands) {
+          if (!cd.assign) continue;
+          const sc = scorePartition(cd.assign, edges);
+          if (sc > pickScore) { pickScore = sc; pickCand = cd; }
+        }
+        if (pickCand && pickCand.assign) {
+          refinePartition(pickCand.assign, idx, cols, rows, seedList, edges, 8);
+          pickCand.tag += '+refine';
+        }
+        const usedCandidates = cands.map(cd => cd.tag + '=' +
+          (cd.assign ? scorePartition(cd.assign, edges).toFixed(3) : 'x')).join(' ');
+        // 用胜出的划分重建分量
+        const byTag = new Map();
+        for (let i = 0; i < list.length; i++) {
+          const t = pickCand.assign[i];
+          if (!byTag.has(t)) byTag.set(t, { ids: [], names: new Set(), size: 0 });
+          const cp = byTag.get(t);
+          cp.ids.push(i); cp.size++;
+        }
+        // 名字：含哪个种子的格子就归哪个名字（种子所在分量）
+        const nameOfComp = new Map();
+        seedList.forEach(sd => {
+          const t = pickCand.assign[sd.i];
+          if (!nameOfComp.has(t)) nameOfComp.set(t, sd.name);
+        });
+        live = [...byTag.entries()].map(([t, cp]) => {
+          if (nameOfComp.has(t)) cp.names.add(nameOfComp.get(t));
+          return cp;
+        }).filter(cp => cp.ids.length > 0);
+
         const hex2 = rgb => '#' + rgb.map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
         const seeded = live.map(cp => {
           const rgb = [0, 1, 2].map(ki => {
@@ -386,7 +433,7 @@
           stats: {
             sampled: list.length, total: cols * rows, edges: edges.length,
             boldEdges: edges.filter(e => e.bold).length, walls: false, seeded: true,
-            seeds: seedList.length, reached: seeded.length,
+            seeds: seedList.length, reached: seeded.length, candidates: usedCandidates, picked: pickCand.tag,
             threshold: null, sizes: seeded.map(r2 => r2.size),
           },
         };
@@ -521,6 +568,122 @@
     };
   }
 
+  // ---------------------------------------------------------------- 候选划分与打分
+
+  const cellIndexOf = (r, c, cols) => r * cols + c;
+
+  /** 候选 A：最近种子（Voronoi）——能自然表达"凹口"这类非直线分界 */
+  function candidateVoronoi(idx, cols, rows, seeds) {
+    const assign = new Int16Array(idx.length).fill(-1);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = idx[cellIndexOf(r, c, cols)];
+        if (i < 0) continue;
+        let best = -1, bestD = Infinity;
+        seeds.forEach((sd, si) => {
+          const d = (r - sd.r) * (r - sd.r) + (c - sd.c) * (c - sd.c);
+          if (d < bestD) { bestD = d; best = si; }
+        });
+        assign[i] = best;
+      }
+    }
+    return assign;
+  }
+
+  /** 候选 B：按行/按列切成的"带"（枚举分界线，要求每个种子落在自己的带里） */
+  function candidateBands(idx, cols, rows, seeds, axis, cap) {
+    const k = seeds.length;
+    if (k < 2) return null;
+    const n = axis === 'row' ? rows : cols;
+    if (k > n) return null;
+    const pos = seeds.map(sd => (axis === 'row' ? sd.r : sd.c));
+    const order = pos.map((v, i) => i).sort((a, b) => pos[a] - pos[b]);
+    // 枚举 k-1 条分界线（在 1..n-1 里选），且保证顺序与种子的顺序一致
+    const combos = [];
+    const cur = [];
+    const rec = (start, need) => {
+      if (combos.length > (cap || 4000)) return;
+      if (!need) { combos.push([...cur]); return; }
+      for (let v = start; v <= n - need; v++) { cur.push(v); rec(v + 1, need - 1); cur.pop(); }
+    };
+    rec(1, k - 1);
+    let best = null, bestOk = false;
+    for (const cuts of combos) {
+      // cuts[j] = 第 j 条分界线（带 j = [cuts[j-1], cuts[j])）
+      const bandOf = p => { let b = 0; for (const v of cuts) if (p >= v) b++; return b; };
+      const want = pos.map(p => bandOf(p));
+      const ok = order.every((si, bi) => want[si] === bi);
+      const assign = new Int16Array(idx.length).fill(-1);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const i = idx[cellIndexOf(r, c, cols)];
+          if (i < 0) continue;
+          assign[i] = bandOf(axis === 'row' ? r : c);
+        }
+      }
+      if (ok && !bestOk) { best = assign; bestOk = true; }
+      else if (!best) best = assign;
+    }
+    return best;
+  }
+
+  /**
+   * 局部搜索：在候选划分的基础上逐格尝试"改归相邻区域"，只要打分变高就接受。
+   * 候选（最近种子/横带/竖带）表达不了"凹口"这类非直线分界，这一步把它补上。
+   * 两条保护：种子格不动；不许把某个区域清空。
+   */
+  function refinePartition(assign, idx, cols, rows, seeds, edges, passes) {
+    const seedCells = new Set(seeds.map(sd => sd.i));
+    const sizes = new Map();
+    for (const a of assign) if (a >= 0) sizes.set(a, (sizes.get(a) || 0) + 1);
+    for (let it = 0; it < (passes || 8); it++) {
+      let changed = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const i = idx[r * cols + c];
+          if (i < 0 || seedCells.has(i)) continue;
+          const cur = assign[i];
+          if ((sizes.get(cur) || 0) <= 1) continue;
+          const base = scorePartition(assign, edges);
+          const tried = new Set();
+          let moved = false;
+          for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const rr = r + dr, cc = c + dc;
+            if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
+            const j = idx[rr * cols + cc];
+            if (j < 0) continue;
+            const t = assign[j];
+            if (t === cur || t < 0 || tried.has(t)) continue;
+            tried.add(t);
+            assign[i] = t;
+            const sc = scorePartition(assign, edges);
+            if (sc > base + 1e-9) {
+              sizes.set(cur, sizes.get(cur) - 1);
+              sizes.set(t, sizes.get(t) + 1);
+              changed++; moved = true; break;
+            }
+            assign[i] = cur;
+          }
+          if (moved) continue;
+        }
+      }
+      if (!changed) break;
+    }
+    return assign;
+  }
+
+  /** 给一个划分打分：内部边界上的平均墙证据 + 平均色差（越大越像真划分） */
+  function scorePartition(assign, edges) {
+    let wallSum = 0, colSum = 0, n = 0;
+    for (const e of edges) {
+      if (assign[e.i] < 0 || assign[e.j] < 0) continue;
+      if (assign[e.i] === assign[e.j]) continue;
+      wallSum += e.wall; colSum += e.d; n++;
+    }
+    if (!n) return -1;
+    return wallSum / n + 0.02 * (colSum / n);
+  }
+
   /**
    * 边界诊断：把每条相邻边的实测数据摊开，用来**按这张地图自己的分布**判断题据，
    * 而不是拍脑袋定阈值。不做任何判定，只给数据。
@@ -649,5 +812,5 @@
     return L.join('\n');
   }
 
-  return { detectRegions, diagnose, formatDiagnosis, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
+  return { detectRegions, diagnose, formatDiagnosis, candidateVoronoi, candidateBands, scorePartition, refinePartition, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
 });

@@ -220,3 +220,60 @@ test('边界诊断：直方图与可疑边能被列出来', () => {
   assert.ok(/0\.0-0\.1/.test(text), '应有直方图');
   assert.ok(/按线看/.test(text) && /H3/.test(text), '应有"按线看"分节：' + text.slice(-500));
 });
+
+// 用户提供的 familymurdoku 真值（1=TEACHER'S 2=FRONT 3=BACK）
+const FAMILY_TRUTH = [
+  [1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1],
+  [2, 2, 1, 1, 1, 2, 2],
+  [2, 2, 2, 2, 2, 2, 2],
+  [2, 2, 2, 2, 2, 2, 2],
+  [3, 3, 3, 3, 3, 3, 3],
+  [3, 3, 3, 3, 3, 3, 3],
+];
+
+test('真值评测（familymurdoku 7×7，含凹口）：候选+打分+局部搜索应还原真值', () => {
+  const pitch = 81, x0 = 60, y0 = 50, N = 7;
+  const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
+  const TONE = { 1: [214, 208, 192], 2: [206, 196, 178], 3: [198, 188, 170] };   // 三个区域颜色接近
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  // 按真值铺色
+  for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++) {
+    fillRect(r, x0 + cc * pitch, y0 + rr * pitch, pitch, pitch, TONE[FAMILY_TRUTH[rr][cc]]);
+  }
+  // 每格边界都有木缝（3px，中等深）
+  for (let c = 1; c < N; c++) fillRect(r, x0 + c * pitch - 1, y0, 3, N * pitch, [150, 140, 120]);
+  for (let rr = 1; rr < N; rr++) fillRect(r, x0, y0 + rr * pitch - 1, N * pitch, 3, [150, 140, 120]);
+  // 区域之间画粗隔墙（6px，更深）
+  for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++) {
+    const t = FAMILY_TRUTH[rr][cc];
+    if (cc + 1 < N && FAMILY_TRUTH[rr][cc + 1] !== t) fillRect(r, x0 + (cc + 1) * pitch - 3, y0 + rr * pitch, 6, pitch, [38, 40, 44]);
+    if (rr + 1 < N && FAMILY_TRUTH[rr + 1][cc] !== t) fillRect(r, x0 + cc * pitch, y0 + (rr + 1) * pitch - 3, pitch, 6, [38, 40, 44]);
+  }
+  // 家具（课桌）：格内深色块，制造"假墙"
+  for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++) {
+    if ((rr * 3 + cc * 5) % 3 === 0) fillRect(r, x0 + cc * pitch + 20, y0 + rr * pitch + 20, 40, 34, [120, 112, 96]);
+  }
+  const geom = { x0, y0, pitchX: pitch, pitchY: pitch, cols: N, rows: N };
+  // 种子放在三个区域里、且贴近真实标签的位置（TEACHER'S 偏右、FRONT 偏左）
+  const seeds = [{ name: "TEACHER’S AREA", r: 1, c: 3 }, { name: 'FRONT AREA', r: 3, c: 2 }, { name: 'BACK AREA', r: 5, c: 3 }];
+  const res = R.detectRegions(r, geom, { seeds });
+  assert.ok(res.seeded);
+  // 按名字还原成真值的编号，统计格子准确率
+  const map = { "TEACHER’S AREA": 1, 'FRONT AREA': 2, 'BACK AREA': 3 };
+  const got = Array.from({ length: N }, () => new Array(N).fill(0));
+  for (const reg of res.regions) {
+    for (const k of reg.cells) {
+      const [rr, cc] = k.split(',').map(Number);
+      got[rr][cc] = map[reg.name] || 0;
+    }
+  }
+  let hit = 0, total = 0;
+  for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++) { total++; if (got[rr][cc] === FAMILY_TRUTH[rr][cc]) hit++; }
+  const acc = hit / total;
+  console.log('   [真值评测] 准确率 ' + (acc * 100).toFixed(1) + '% · 选中 ' + res.stats.picked +
+    ' · 候选分数 ' + res.stats.candidates);
+  assert.ok(acc >= 0.95, '准确率应 ≥95%，实际 ' + (acc * 100).toFixed(1) + '% · 选中 ' +
+    res.stats.picked + ' · 候选分数 ' + res.stats.candidates + '\n实际：\n' +
+    got.map(row => row.join(' ')).join('\n'));
+});
