@@ -220,3 +220,34 @@ test('PDF 文字层：说明行画在图例**下方**时也能认出（不再只
   assert.equal(out.items.length, 3, '说明行在下时也该认出 3 件：' + JSON.stringify(out.items.map(i => i.name)));
   out.items.forEach(it => assert.equal(it.occupiable, true, '都应归到"可占据"：' + it.name + ' → ' + it.occupiable));
 });
+
+test('PDF 文字层：说明行贴着那排名字时，不该把名字判成"正文"', () => {
+  // contest 的真实坑：can be occupied 的说明行就在第二排名字下方 30px，x 与中间几个名字重叠
+  // → 成段判据（"上下还有别的文字"）把 barrel / shelf / crate / rope 全丢了 ✗
+  const r = makeRaster(700, 300, [235, 232, 245]);
+  [60, 200, 340, 480].forEach(ox => icon(r, ox, 40, 1));
+  const text = [
+    { str: 'crate', x: 55, y: 130, w: 45, h: 20 },
+    { str: 'barrel', x: 195, y: 130, w: 56, h: 20 },
+    { str: 'shelf', x: 335, y: 130, w: 46, h: 20 },
+    { str: 'shrub', x: 475, y: 130, w: 55, h: 20 },
+    { str: 'can be occupied', x: 190, y: 162, w: 150, h: 20 },   // 说明行：贴着名字下方，x 有重叠
+  ];
+  const out = L.legendFromText(text, r);
+  const names = out.items.map(i => i.name).sort();
+  assert.deepEqual(names, ['barrel', 'crate', 'shelf', 'shrub'],
+    '说明行不该把名字判成正文：' + JSON.stringify(names) + ' · 丢弃=' + JSON.stringify(out.skipped));
+});
+
+test('PDF 文字层：单个字母 / 坐标标签不算物品名', () => {
+  const r = makeRaster(700, 240, [235, 232, 245]);
+  [60, 200, 340].forEach(ox => icon(r, ox, 30, 1));
+  const text = [
+    { str: 'chair', x: 55, y: 110, w: 45, h: 16 },
+    { str: 'A', x: 195, y: 110, w: 12, h: 16 },        // 规则图里的字母标注
+    { str: 'C9', x: 335, y: 110, w: 20, h: 16 },       // 坐标标签
+    { str: 'Can be occupied', x: 100, y: 20, w: 150, h: 16 },
+  ];
+  const out = L.legendFromText(text, r);
+  assert.deepEqual(out.items.map(i => i.name), ['chair'], '只该剩 chair：' + JSON.stringify(out.items.map(i => i.name)));
+});

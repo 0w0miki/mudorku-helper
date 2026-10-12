@@ -691,6 +691,7 @@
         const cls = classifyLabel(part.str);
         if (cls !== 'unknown' && part.str.split(/\s+/).length <= 6) {
           heads.push({ str: part.str, x: part.x0, w: part.w, y: part.y, h: part.h, cls, occupiable: cls === 'yes' });
+          ln.__isHeading = true;      // 这一行里有说明 → 成段判据要放过它（它本来就贴着图例）
         } else {
           nameParts.push(part);
         }
@@ -723,6 +724,8 @@
       // 全大写 = 地图上的**区域名**（RECEPTION / WAITING AREA / TEACHER'S AREA…），不是物品名 ✗
       // （这三份真实 PDF 里图例物品名都是 Title case 或小写；区域名一律全大写）
       const letters = t2.replace(/[^A-Za-z]/g, '');
+      // 单个字母（规则图里的 A / B 标注）不是物品名 ✓（"TV" 两个字符合法，所以门槛取 2）
+      if (letters.length < 2) return true;
       // 坐标标签（C9 / C24 / R1）那种"短、带数字"的串不是物品名 ✓（contest 页面底部就有 C1~C24）
       if (/^[A-Za-z]{0,2}\d+$/.test(t2)) return true;
       // 全大写 = 区域名（RECEPTION / WAITING AREA / TEACHER'S AREA…）不是物品名 ✗
@@ -731,6 +734,7 @@
     };
     const isStacked = (piece) => lines.some(ln => {
       if (piece.line && ln === piece.line) return false;                  // 自己那一行（按对象比）
+      if (ln.__isHeading) return false;                                  // 说明行不是正文 ✗
       if (Math.abs(ln.y - piece.y) < 0.5) return false;                   // 自己那一行（按坐标比）
       const ov = Math.min(ln.x + ln.w, piece.x1) - Math.max(ln.x, piece.x0);
       if (ov < 0.4 * (piece.x1 - piece.x0)) return false;

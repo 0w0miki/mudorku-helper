@@ -673,6 +673,29 @@ OCR 只用来**出候选名字**，读错在列表里改名即可。
 残差只有对比度一半（~25），**低于噪声分位** → 切出来是 3×3 噪点碎块；膨胀=0 又碎成 25 块。
 参数互相打架（半径小→被噪声淹没；半径大→阴晕把图标和名字连起来；膨胀→相邻元素粘连），没有稳定解。
 
+**barrel / shelf 为什么被丢（2026-10-13 第五轮，已解决）**
+
+用户问"是文字的原因还是图标的原因" —— 诊断结论：**文字（候选筛选）的原因，不是图标**。
+把解析过程拆开看：
+```
+① 文字层里 barrel/shelf/crate/rope **都有**，坐标正确（crate@580 rope@664 barrel@742 shelf@819，y=1330）
+② 拆词后它们各自是独立词块 ✓
+③ 丢弃原因全是「上下还有别的文字（像正文）」✗ ← 成段判据误伤
+④ 为什么偏偏是中间这四个：contest 的 can be occupied 说明行在 y=1364（离这排名字只 34px，在**下方**），
+   x 范围 704~850 与 barrel(742~798) 重叠 98%、与 shelf(819~865) 重叠 66% → 被当成正文；
+   而 shrub/table/boulder 在它右边（x≥889）不重叠 → 逃过一劫
+```
+修法：**成段判据要放过"说明行"**（说明行本来就贴着图例，不是正文）✓
+顺带：单个字母（规则图里的 A/B 标注）不算物品名 ✓（门槛取 2 个字母，"TV" 合法）
+
+三份真实 PDF（最终，全对）：
+```
+car-repair     7/7   Oil Slick[可] Car[可] Chair[可] TV[不可] Shelf[不可] Table[不可] Plant[不可]
+familymurdoku  5/5   Window[可] Chair[可] Garbage bin[不可] Desks[不可] Shelf[不可]
+contest 第2页  17/17 fire tree flowers shark sack pig tombstone crate rope barrel shelf shrub
+                     table boulder[不可] + bed chair hammock[可]   ← 一件不多一件不少，分组全对 ✓
+```
+
 **P0 修复 + 说明行在下方 + 坐标标签（2026-10-13 第四轮）**
 
 1. **卡片框从"兜底"改成"优先"**（`runLegendAuto`）：以前先把整页解析一遍，整页够 2 件就
