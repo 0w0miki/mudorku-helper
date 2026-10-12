@@ -135,14 +135,37 @@ test('PDF 文字层：名字 + 坐标 → 物品清单（可占据按说明行�
   assert.ok(!byName['Page 1 of 2'], '页脚那种"附近没有图标"的文字要被丢掉');
 });
 
-test('PDF 文字层：一行里并排的两个名字按空隙拆开', () => {
-  const r = makeRaster(400, 120, [235, 232, 245]);
-  icon(r, 30, 30, 1); icon(r, 220, 30, 1);
+test('PDF 文字层：一行里并排的几个名字按空隙拆开', () => {
+  // 注意：现在要求"至少 3 个排成一行/一列"才认为找到了图例
+  // （少于 3 个基本都是误报 —— contest 第 2 页把规则图里的 ROW/COLUMN 当成物品就吃过这个亏 ✗）
+  const r = makeRaster(620, 120, [235, 232, 245]);
+  icon(r, 30, 30, 1); icon(r, 230, 30, 1); icon(r, 430, 30, 1);
   const text = [
     { str: 'Chair', x: 25, y: 95, w: 45, h: 13 },
-    { str: 'Table', x: 215, y: 95, w: 45, h: 13 },
+    { str: 'Table', x: 225, y: 95, w: 45, h: 13 },
+    { str: 'Plant', x: 425, y: 95, w: 45, h: 13 },
   ];
   const out = L.legendFromText(text, r);
-  assert.equal(out.items.length, 2, JSON.stringify(out.items.map(i => i.name)));
-  assert.deepEqual(out.items.map(i => i.name).sort(), ['Chair', 'Table']);
+  assert.equal(out.items.length, 3, JSON.stringify(out.items.map(i => i.name)));
+  assert.deepEqual(out.items.map(i => i.name).sort(), ['Chair', 'Plant', 'Table']);
+});
+
+test('PDF 文字层：正文句子不会被当成物品（不超过 3 个词、不成段）', () => {
+  // 用户实测 familymurdoku：把 "I would've made the" 这类线索句子列成了物品 ✗
+  const r = makeRaster(700, 300, [235, 232, 245]);
+  icon(r, 40, 60, 1); icon(r, 240, 60, 1); icon(r, 440, 60, 1);
+  const text = [
+    { str: 'Can be occupied', x: 30, y: 40, w: 150, h: 14 },
+    { str: 'Window', x: 35, y: 130, w: 60, h: 13 },
+    { str: 'Chair', x: 235, y: 130, w: 45, h: 13 },
+    { str: 'Shelf', x: 435, y: 130, w: 45, h: 13 },
+    // 正文段落：三行紧挨着，每行好几个词
+    { str: 'Someone drew a mean', x: 40, y: 210, w: 200, h: 13 },
+    { str: 'caricature of the teacher', x: 40, y: 228, w: 240, h: 13 },
+    { str: 'I would have made the', x: 40, y: 246, w: 220, h: 13 },
+  ];
+  const out = L.legendFromText(text, r);
+  const names = out.items.map(i => i.name).sort();
+  assert.deepEqual(names, ['Chair', 'Shelf', 'Window'], '只该认图例里那三件：' + JSON.stringify(names));
+  assert.ok(!out.items.some(i => /would|caricature|Someone/.test(i.name)), '正文不该进来：' + JSON.stringify(names));
 });

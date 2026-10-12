@@ -502,6 +502,7 @@
     const heads = [], nameParts = [];
     for (const ln of lines) {
       for (const part of splitByGaps(ln, 1.8)) {
+        part.line = ln;                   // 记住它来自哪一行（成段判定要跳过自己那一行）
         const cls = classifyLabel(part.str);
         if (cls !== 'unknown' && part.str.split(/\s+/).length <= 6) {
           heads.push({ str: part.str, x: part.x0, w: part.w, y: part.y, h: part.h, cls, occupiable: cls === 'yes' });
@@ -521,10 +522,32 @@
       const hh = Math.max.apply(null, heads.map(h => h.h)) || 12;
       // x 方向不设限：图例每一列常比它上面的说明行宽，限 x 会把最右边那件漏掉 ✗
       // 真正起过滤作用的是"y 在说明行下方一条带里" + "这件名字附近要能找到一个图标"
-      names = nameParts.filter(nm => nm.y > top + hh * 0.5 && nm.y < top + hh * 14);
+      names = nameParts.filter(nm => nm.y > top + hh * 0.5 && nm.y < top + hh * 30);
     }
+    // 三条硬判据（不然整页的线索句子都会被当成物品 ✗ —— familymurdoku/contest 上踩过）：
+    //   ① 不像句子：不超过 3 个词、不含句读
+    //   ② 不成段：上下一行半内没有另一行文字与它横向重叠（图例里的名字是孤立的）
+    //   ③ 图标必须"正上方且尺寸合理"（在下面第三步里查）
+    const looksLikeProse = (txt) => {
+      const t2 = String(txt || '').trim();
+      if (!t2) return true;
+      const words = t2.split(/\s+/).filter(Boolean);
+      if (words.length > 3) return true;
+      if (/[.,;:!?…]/.test(t2)) return true;
+      return false;
+    };
+    const isStacked = (piece) => lines.some(ln => {
+      if (piece.line && ln === piece.line) return false;                  // 自己那一行（按对象比）
+      if (Math.abs(ln.y - piece.y) < 0.5) return false;                   // 自己那一行（按坐标比）
+      const ov = Math.min(ln.x + ln.w, piece.x1) - Math.max(ln.x, piece.x0);
+      if (ov < 0.4 * (piece.x1 - piece.x0)) return false;
+      const dy = Math.abs(ln.y - piece.y);
+      return dy > 0 && dy < piece.h * 2.2;
+    });
     const items = [], skipped = [];
     for (const nm of names) {
+      if (looksLikeProse(nm.str)) { skipped.push({ name: nm.str, why: '像句子，不是物品名' }); continue; }
+      if (isStacked(nm)) { skipped.push({ name: nm.str, why: '上下还有别的文字（像正文）' }); continue; }
       // 这一件属于哪一组：优先 x 范围重叠的说明；否则取最近的上方说明
       let head = null, bestD = Infinity;
       for (const h of heads) {
@@ -543,12 +566,47 @@
       // 横排图例：图标在名字左边
       if (!icon) icon = findIconInBand(raster, nm.x0 - nameH * 8, nm.y - nameH * 1.5, nm.x0 - nameH * 0.4, nm.y + nameH * 0.6, opt);
       if (!icon) { skipped.push({ name: nm.str, why: '名字附近找不到图标' }); continue; }
+      // 图标判据：图标要"落在名字这一列上"（中心在名字范围左右各 1 个字高内）+ 尺寸合理。
+      // 不用"重叠 ≥50%"：图例里名字常是居中或左对齐，硬要求重叠会把真物品挡掉 ✗（踩过）
+      const iconCx = icon.x + icon.w / 2;
+      const verticalLayout = icon.y + icon.h <= nm.y + nameH;      // 图标在名字上方
+      if (verticalLayout && (iconCx < nm.x0 - nameH || iconCx > nm.x1 + nameH)) {
+        skipped.push({ name: nm.str, why: '上方的图案不在这一列' });
+        continue;
+      }
+      const ratio = icon.h / nameH;
+      if (ratio < 1.1 || ratio > 6) { skipped.push({ name: nm.str, why: '上方图案尺寸不像图标（' + ratio.toFixed(1) + '×字高）' }); continue; }
       items.push({
         name: nm.str, occupiable: head ? head.occupiable : null,
-        heading: head ? head.str : '', icon,
+        heading: head ? head.str : '', icon, __name: { x0: nm.x0, x1: nm.x1, y: nm.y, h: nameH },
       });
     }
+    // 最后一道关：**图例里的物品名是排成一行（或一列）的**。
+    // 用"最大的一组对齐块"来检查：如果认出来的东西散落各处（比如把规则图里的
+    // ROW / COLUMN 当成物品），说明这张图的图例根本不在这里 → 宁可说"没找到" ✗
+    const groups = [];
+    for (const it of items) {
+      const nm = namePartsOf(it);
+      // 容差按**名字高度**算（不是图标高度）：图标比名字高两三倍，用图标高度当容差会把
+      // 散落各处的文字也凑成"一排" ✗（contest 上把规则图里的 ROW/COLUMN 凑成了一排）
+      let g = groups.find(g2 => Math.abs(g2.y - nm.y) <= 1.5 * nm.h);
+      if (!g) { g = { y: nm.y, list: [] }; groups.push(g); }
+      g.list.push(it);
+    }
+    const biggest = groups.reduce((a, g2) => Math.max(a, g2.list.length), 0);
+    // 图例至少要有 3 个排成一排/一列的物品名，才认为"找到了图例" ✓
+    // （少于 3 个时基本都是误报：contest 第 2 页的文字层里根本没有物品名）
+    if (items.length >= 2 && biggest < Math.max(3, items.length * 0.6)) {
+      return {
+        items: [], headings, skipped: skipped.concat(items.map(it => ({ name: it.name, why: '物品名没有排成行/列，这张图可能没有图例' }))),
+        method: 'pdf-text', reason: '没找到成排的图例物品名（这一页的文字层里可能没有物品名）',
+      };
+    }
     return { items, headings, skipped, method: 'pdf-text' };
+  }
+
+  /** 从 item 里拿回它的名字位置（给"排成行"判定用） */
+  function namePartsOf(it) { return it.__name || { x0: it.icon ? it.icon.x : 0, y: it.icon ? it.icon.y : 0 };
   }
 
   return { split, annotate, legendFromText, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
