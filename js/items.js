@@ -445,6 +445,29 @@
       }
     }
     if (!best.size) return { ok: false, reason: '没找到相近的位置', cells: [], scores: [] };
+    // 兜底第二遍：粗定位可能被画面里的装饰带偏（合成夹具里就出现过）。
+    // 这时对**每个格子**、在粗定位峰值最高的前 2 个尺度上再精算一遍（只在这条兜底路上多花时间）。
+    if (best.size <= 2) {
+      const two = stat.slice(0, 2).map(x => x.sc);
+      for (const sc of two) {
+        const t = tmplCache.get(sc) || resampleTmpl(base, sc);
+        tmplCache.set(sc, t);
+        if (!t) continue;
+        for (let r = 0; r < geom.rows; r++) {
+          for (let c = 0; c < geom.cols; c++) {
+            const cx2 = Math.round(geom.x0 + c * geom.pitchX + geom.pitchX / 2 - t.w / 2);
+            const cy2 = Math.round(geom.y0 + r * geom.pitchY + geom.pitchY / 2 - t.h / 2);
+            if (cx2 < 0 || cy2 < 0 || cx2 + t.w > W || cy2 + t.h > H) continue;
+            if (inExclude(cx2 + t.w / 2, cy2 + t.h / 2)) continue;
+            const sc2 = t.mask ? maskedNccAt(gray, W, cx2, cy2, t) : nccAt(gray, W, cx2, cy2, t);
+            if (sc2 <= -1) continue;
+            const key = r + ',' + c;
+            const prev = best.get(key);
+            if (!prev || sc2 > prev.s) best.set(key, { s: sc2, r, c, sc });
+          }
+        }
+      }
+    }
     // ③ 阈值取自这张图自己的 NCC 分布（Otsu）+ 下限。
     //    实测真实地图：同类 0.98~1.00，其它格子 ≤0.45，中间是空的 → 非常好分
     const vals = [...best.values()].map(v => v.s);
@@ -551,12 +574,21 @@
         if (m) m[y * w + x] = t.mask[sy * t.w + sx];
       }
     }
-    // 只对"遮罩内的像素"重新归一化（背景不参与）
+    // 只对"遮罩内的像素"重新去均值 + 归一化。
+    // **必须先减遮罩内的均值**：缩放后遮罩变了，原来"零均值"不再成立，
+    // 不减的话相关系数会算出 1.192 这种 >1 的值 ✗（真实地图上踩过）
     const useMask = m && m.some(v => v);
+    let cnt = 0, sum = 0;
+    for (let i = 0; i < g.length; i++) if (!useMask || m[i]) { sum += g[i]; cnt++; }
+    const mean = cnt ? sum / cnt : 0;
     let ss = 0;
-    for (let i = 0; i < g.length; i++) if (!useMask || m[i]) ss += g[i] * g[i];
+    for (let i = 0; i < g.length; i++) {
+      if (useMask && !m[i]) { g[i] = 0; continue; }
+      g[i] -= mean;
+      ss += g[i] * g[i];
+    }
     const norm = Math.sqrt(ss) || 1;
-    for (let i = 0; i < g.length; i++) g[i] /= norm;
+    for (let i = 0; i < g.length; i++) if (!useMask || m[i]) g[i] /= norm;
     return { p: g, w, h, mask: useMask ? m : null };
   }
 
@@ -595,12 +627,20 @@
     const opt = Object.assign({
       scales: [0.75, 0.85, 1, 1.2, 1.4],   // 卡片可以缩放，让图例图标与地图上的大小接近即可；范围太大时小模板会到处瞎命中
       mask: null,                          // 可选：模板遮罩（图例卡片上抠出来的图标像素）
-      minScore: 0.6, margin: 0.25, relMin: 0.8, coarse: 4, perScale: 80, topK: 160, radius: 6, step: 1,
+      exclude: null,                       // 可选：[{x,y,w,h}] 这些矩形里不找（图例本身在图上的位置）
+      minScore: 0.6, margin: 0.25, relMin: 0.8, coarse: 4, perScale: 60, topK: 240, radius: 5, step: 2,
     }, options || {});
     const { width: W, height: H } = raster;
     if (!(W > 16) || !(H > 16) || !img || !img.width) return { ok: false, reason: '底图或模板太小', cells: [], scores: [] };
     const gray = toGray(raster);
     const base = tmplFromImage(img, opt.mask);
+    const inExclude = (cx2, cy2) => {
+      if (!opt.exclude || !opt.exclude.length) return false;
+      for (const r of opt.exclude) {
+        if (cx2 >= r.x && cx2 <= r.x + r.w && cy2 >= r.y && cy2 <= r.y + r.h) return true;
+      }
+      return false;
+    };
     // ① 粗定位：每个尺度在金字塔上滑一遍。**先选尺度**：模板越小越容易瞎命中，
     //    所以用"峰值 − 中位数"（这个尺度上的信噪比）挑最合适的那个尺度，
     //    只在这个尺度（以及相邻尺度）上继续精算。
@@ -612,9 +652,13 @@
       const ct = resampleTmpl(base, sc / K);
       if (ct.w < 3 || ct.h < 3 || ct.w >= cs.w || ct.h >= cs.h) continue;
       let map = ct.mask ? maskedMap(cs.g, cs.w, cs.h, ct, 1) : nccMap(cs.g, cs.w, cs.h, ct, 1);
+      // 注意：得分图的"每行有多少个位置"是 `map.cols`（= 图宽 − 模板宽 + 1），
+      // **不是图宽** ✗ 用图宽换算会把候选映射到错误的位置（精算就全找不着了，踩过）
       const collect = mm => {
         const out = [];
-        for (let i = 0; i < mm.map.length; i++) if (mm.map[i] > 0) out.push({ i, v: mm.map[i], sc });
+        for (let i = 0; i < mm.map.length; i++) {
+          if (mm.map[i] > 0) out.push({ x: i % mm.cols, y: Math.floor(i / mm.cols), v: mm.map[i], sc });
+        }
         return out;
       };
       let local = collect(map);
@@ -631,11 +675,13 @@
       perScale.push({ sc, list: local.slice(0, opt.perScale) });
     }
     if (!stat.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
-    stat.sort((a, b) => b.contrast - a.contrast);
-    const bestSc = stat[0].sc;
+    // 尺度：**不做"只选一个"**（粗图上选尺度会偏，把汽车认到错位置 ✗；只留前 3 个尺度
+    // 也会漏掉真正的尺度 ✗），而是每个尺度都留候选一起精算、逐格取最高分。
+    // 代价是"小模板可能嵌进大图案里"产生少量误报 → 由"峰值门槛 + 人工可改"兜底 ✓
+    stat.sort((a, b) => (b.pk - a.pk) || (b.contrast - a.contrast));
     const cands = [];
-    // 相邻尺度一起算：只用一个尺度时，同一件物品"略大略小"就会被漏掉
-    for (const ps of perScale) if (Math.abs(ps.sc - bestSc) < 0.11) cands.push(...ps.list);
+    for (const ps of perScale) cands.push(...ps.list);
+    if (!cands.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
     if (!cands.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
     if (!cands.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
     cands.sort((a, b) => b.v - a.v);
@@ -651,11 +697,12 @@
         tmplCache.set(sc, t);
       }
       if (!t) continue;
-      const px = (pk.i % cs.w) * K, py = Math.floor(pk.i / cs.w) * K;
+      const px = pk.x * K, py = pk.y * K;
       for (let dy = -opt.radius; dy <= opt.radius; dy += opt.step) {
         for (let dx = -opt.radius; dx <= opt.radius; dx += opt.step) {
           const x0 = px + dx, y0 = py + dy;
           if (x0 < 0 || y0 < 0 || x0 + t.w > W || y0 + t.h > H) continue;
+          if (inExclude(x0 + t.w / 2, y0 + t.h / 2)) continue;      // 图例自己那一块不算
           const s = t.mask ? maskedNccAt(gray, W, x0, y0, t) : nccAt(gray, W, x0, y0, t);
           if (s <= -1) continue;
           const c = Math.floor((x0 + t.w / 2 - geom.x0) / geom.pitchX);

@@ -253,6 +253,8 @@
           '<button class="ghost block" data-act="legend-auto" ' +
             ' title="从右侧图例卡片自动切出每个物品图标、认名字、按图例里的说明分\"可占据/不可占据\"，一次性建好物品清单（格子留空，地点再点样例补）">' +
             '🚀 从图例自动列出物品</button>' +
+          '<button class="ghost block" data-act="legend-locate" ' +
+            ' title="用图例里抠出来的图标当模板，逐件到地图上找格子（图例图标干净、无遮挡，比在地图上点样例可靠）">📍 自动找地点（用图例图标）</button>' +
           '<button class="ghost block" data-act="item-legend" ' + (MH.ui.legendPicking ? 'disabled' : '') +
             ' title="更稳的一条：从右侧图例卡片上点那个图标当模板，再回地图上找同类（图例里没遮挡、底色统一）。卡片可以缩放，让图标和地图上的大小接近即可">' +
             (MH.ui.legendPicking ? '🔍 请点图例卡片上的那个图标…' : '🔍 从图例卡片找同类') + '</button>'
@@ -493,7 +495,11 @@
           h: Math.abs(it.transform[3]) * scale || 10,
         });
       }
-      return window.MurdokuLegend.legendFromText(items, { data: img.data, width: img.width, height: img.height });
+      const pageRaster = { data: img.data, width: img.width, height: img.height };
+      const parsed = window.MurdokuLegend.legendFromText(items, pageRaster);
+      parsed.raster = pageRaster;           // 供"裁出每个物品的图标当模板"用
+      parsed.page = { w: img.width, h: img.height, pageNo: Sn.page || 1 };
+      return parsed;
     } finally {
       if (doc.destroy) doc.destroy();
     }
@@ -503,6 +509,96 @@
    * 从图例卡片自动列出物品：切图标 → OCR 名字与分组说明 → 一次性建好物品。
    * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
    */
+  /** 从栅格上裁一小块（做模板用） */
+  function cropPatch(raster, box) {
+    const w = Math.max(1, Math.round(box.w)), h = Math.max(1, Math.round(box.h));
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(raster.height - 1, Math.round(box.y) + y);
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(raster.width - 1, Math.round(box.x) + x);
+        const so = (sy * raster.width + sx) * 4, dst = (y * w + x) * 4;
+        out[dst] = raster.data[so]; out[dst + 1] = raster.data[so + 1];
+        out[dst + 2] = raster.data[so + 2]; out[dst + 3] = raster.data[so + 3];
+      }
+    }
+    return { data: out, width: w, height: h };
+  }
+
+  /**
+   * 用图例里抠出来的图标当模板，**逐个到地图上找地点**。
+   * 模板来自图例 → 干净、无遮挡、底色统一（带遮罩的 NCC 只比图标像素）✓
+   * 尺度未知 → 给一串尺度（图例图标和地图上的大小可能差一倍以上）。
+   * 结果直接写进每件物品的格子；同一个格子只归一件物品（先到先得）。
+   */
+  async function locateLegendItems() {
+    const I2 = window.MurdokuItems;
+    const list = (MH.ui.legendItems || []).filter(it => it.patch && it.mask);
+    if (!I2 || !list.length) { MH.toast('还没有图例图标模板：先点「从图例自动列出物品」', 'warn'); return; }
+    const st = MH.store.state;
+    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (!requireAligned(st)) return;
+    let geo;
+    try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
+    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    // 图例和地图在同一页（同一份 PDF 的同一页）时，把图例那一块排除掉，别把图例本身当物品
+    const exclude = [];
+    const lp = MH.ui.legendPage;
+    if (lp && st.bg && st.bg.w && Math.abs(lp.w - st.bg.w) / st.bg.w < 0.35) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const it of list) {
+        x0 = Math.min(x0, it.icon.x); y0 = Math.min(y0, it.icon.y);
+        x1 = Math.max(x1, it.icon.x + it.icon.w); y1 = Math.max(y1, it.icon.y + it.icon.h);
+      }
+      if (isFinite(x0)) exclude.push({ x: x0 - 40, y: y0 - 60, w: x1 - x0 + 80, h: y1 - y0 + 120 });
+    }
+    const scales = [0.6, 0.75, 0.9, 1, 1.15, 1.35, 1.6, 1.9, 2.3, 2.8, 3.4];
+    const t0 = Date.now();
+    MH.toast('正在逐件到地图上找（' + list.length + ' 件）…', 'ok');
+    const claimed = new Set();
+    st.items.forEach(it => it.cells.forEach(k => claimed.add(k)));
+    const report = [];
+    for (const it of list) {
+      let res;
+      try {
+        res = I2.findSimilarFromTemplate(geo.raster, geo.geom, it.patch,
+          // 跨尺度 + 画风差异，相关系数不会很高（实测真同类峰值 ~0.6~0.8），
+          // 所以这里放宽到"相对峰值 0.8 以内"，并靠"先到先得 + 人工可改"兜底
+          { mask: it.mask, scales, exclude, relMin: 0.8, margin: 0.12, minScore: 0.35 });
+      } catch (err) { report.push({ name: it.name, hits: 0, msg: '出错：' + err.message }); continue; }
+      // 把握不足就别乱填：宁可留空让用户手标，也不要给一堆错格子 ✗
+      // （实测：大而高对比的物品峰值 ~0.64 且位置正确；找不准的物品峰值只有 ~0.5，
+      //   勉强填出来的格子基本都是错的）
+      const peak = res.ok && res.stats ? res.stats.maxScore : 0;
+      if (res.ok && (peak < 0.55 || res.cells.length > 10)) {
+        report.push({ name: it.name, hits: 0, scale: res.stats.scale, peak,
+          msg: peak < 0.55 ? '把握不足（峰值 ' + peak + '），建议手动点样例' : '匹配出 ' + res.cells.length + ' 格，太多了' });
+        continue;
+      }
+      const cells = (res.ok ? res.cells : []).filter(k => !claimed.has(k));
+      cells.forEach(k => claimed.add(k));
+      const target = st.items.find(x => x.name === it.name);
+      if (target && cells.length) {
+        MH.store.commit('自动标地点：' + it.name, s2 => {
+          const t2 = Core.item(s2, target.id);
+          if (!t2) return;
+          t2.cells = Core.dedupeCells(s2, cells);
+          Core.claimCellsExclusively(s2, s2.items, t2.id, t2.cells);
+        });
+      }
+      report.push({ name: it.name, hits: cells.length, scale: res.ok ? res.stats.scale : null,
+        msg: res.ok ? '' : (res.reason || '没找到') });
+    }
+    MH.ui.lastLocate = { items: list.length, report, ms: Date.now() - t0 };
+    const found = report.filter(r => r.hits > 0);
+    MH.render();
+    MH.toast('自动找地点：' + found.length + '/' + report.length + ' 件找到（共 ' +
+      found.reduce((a, r) => a + r.hits, 0) + ' 格，' + (Date.now() - t0) + 'ms）' +
+      (found.length < report.length ? ' · 没找到的：' + report.filter(r => !r.hits).map(r => r.name).join('、') : '') +
+      ' · 结果可在每件物品里手动加减',
+      found.length ? 'ok' : 'warn');
+  }
+
   async function runLegendAuto() {
     const Lg = window.MurdokuLegend;
     if (!Lg) { MH.toast('图例模块没加载（js/legend.js）', 'error'); return; }
@@ -563,7 +659,13 @@
         made++;
       });
     });
-    MH.ui.legendItems = out.items.map(it => ({ name: it.name, occupiable: it.occupiable, icon: it.icon || null }));
+    const page = out.raster || null;
+    MH.ui.legendPage = out.page || null;
+    MH.ui.legendItems = out.items.map(it => ({
+      name: it.name, occupiable: it.occupiable, icon: it.icon || null,
+      patch: (page && it.icon) ? cropPatch(page, it.icon) : null,
+      mask: it.icon && it.icon.mask ? it.icon.mask : null,
+    }));
     MH.ui.lastLegend = {
       via, icons: out.items.length, groups: (out.headings || []).length,
       items: made, names: out.items.map(i => i.name),
@@ -1551,6 +1653,7 @@
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
     'legend-auto'() { guard(runLegendAuto)(); },
+    'legend-locate'() { guard(locateLegendItems)(); },
     'item-legend'() {
       if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
       if (!requireAligned(MH.store.state)) return;
@@ -2090,6 +2193,8 @@
     legendIcon(imgEl, x, y) { guard(pickLegendIcon)(imgEl, x, y); },
     /** 从图例自动列出物品（也供 e2e 直接调） */
     legendAuto: () => guard(runLegendAuto)(),
+    /** 用图例图标逐件到地图上找地点 */
+    legendLocate: () => guard(locateLegendItems)(),
   };
 
   MH.panels = P;

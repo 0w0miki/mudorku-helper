@@ -470,7 +470,20 @@
       }
     }
     if (n < (opt.minPixels || 40) || ix1 < 0) return null;
-    return { x: ix0, y: iy0, w: ix1 - ix0 + 1, h: iy1 - iy0 + 1, n };
+    // 顺便把"图标像素遮罩"带出去：后面拿它当模板在地图上找同类时，
+    // 用带遮罩的 NCC 只比图标像素（图例底色干净 → 遮罩准 → 背景不干扰）
+    const bw = ix1 - ix0 + 1, bh = iy1 - iy0 + 1;
+    const mask = new Uint8Array(bw * bh);
+    i = 0;
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++, i++) {
+        if (diff[i] <= need) continue;
+        const mx = x - ix0, my = y - iy0;
+        if (mx < 0 || my < 0 || mx >= bw || my >= bh) continue;
+        mask[my * bw + mx] = 1;
+      }
+    }
+    return { x: ix0, y: iy0, w: bw, h: bh, n, mask };
   }
 
   /**
