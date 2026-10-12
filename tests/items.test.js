@@ -69,6 +69,65 @@ function makeMap(opts) {
 }
 const setOf = a => a.slice().sort().join(' ');
 
+/** 把"椅子"画到一张独立的 RGBA 小图里（当作图例卡片上抠下来的图标）；k 是缩放 */
+function renderChairIcon(k) {
+  const w = Math.round(22 * k), h = Math.round(26 * k);
+  const img = { data: new Uint8ClampedArray(w * h * 4), width: w, height: h };
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  const box = (x0, y0, bw, bh, c) => {
+    for (let y = Math.round(y0 * k); y < Math.round((y0 + bh) * k); y++) {
+      for (let x = Math.round(x0 * k); x < Math.round((x0 + bw) * k); x++) {
+        if (y < 0 || y >= h || x < 0 || x >= w) continue;
+        const o = (y * w + x) * 4;
+        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
+      }
+    }
+  };
+  box(2, 8, 18, 11, [70, 64, 58]);
+  box(2, 3, 18, 4, [110, 100, 90]);
+  box(3, 19, 3, 5, [60, 55, 50]);
+  box(16, 19, 3, 5, [60, 55, 50]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = (y * w + x) * 4;
+    if (!img.data[o] && !img.data[o + 1] && !img.data[o + 2]) { img.data[o] = 226; img.data[o + 1] = 220; img.data[o + 2] = 205; }
+  }
+  return img;
+}
+
+test('图例模板（实验性）：能找到一部分同类，且不会匹配出一大片', () => {
+  // 现状说明：图例模板路线**还没调准** —— 同尺度下通常只能找到一部分同类，
+  // 尺度和地图差太多、或物品本身长得平凡（墓碑那种）时基本找不到。
+  // 这条测试锁定的是"下限行为"：至少能命中同类，而且不会像墓碑那次一样一次报几百格。
+  const { raster, geom } = makeMap();
+  const res = I.findSimilarFromTemplate(raster, geom, renderChairIcon(1));
+  const cells = res.ok ? res.cells : [];
+  const want = setOf(CHAIRS.map(([r, c]) => r + ',' + c)).split(' ');
+  const hit = want.filter(k => cells.includes(k)).length;
+  assert.ok(hit >= 1, '至少应命中一把椅子：' + hit + ' · ' + JSON.stringify(cells) + ' · ' + JSON.stringify(res.stats || res.reason));
+  assert.ok(cells.length <= 10, '不该匹配出一大片：' + cells.length + ' 格');
+  // 已知未解决：整块纯色的模板仍会命中十几个格子（方差防不住"模板本身没信息"这种情况），
+  // 留给下一轮：模板自身要先过一道"信息量"检查（方差 / 边缘密度），再拿去匹配。
+});
+
+test('图例模板：拿石头去找椅子，不该匹配出一堆椅子', () => {
+  const { raster, geom } = makeMap();
+  // 造一个"石头"图标（纯圆），去地图上找 → 只能找到几块石头，不该把椅子也带上
+  const k = 1, w = 22, h = 22;
+  const img = { data: new Uint8ClampedArray(w * h * 4), width: w, height: h };
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = (y * w + x) * 4;
+    const d2 = (x - 11) ** 2 + (y - 11) ** 2;
+    const c = d2 <= 64 ? [120, 118, 112] : [226, 220, 205];
+    img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
+  }
+  const res = I.findSimilarFromTemplate(raster, geom, img);
+  if (res.ok) {
+    assert.ok(!res.cells.some(kk => setOf(CHAIRS.map(([r, c]) => r + ',' + c)).split(' ').includes(kk)),
+      '石头模板不该匹配到椅子：' + setOf(res.cells));
+  }
+});
+
 test('点一个样例 → 只找出同一件物品的格子（不牵连别的图案）', () => {
   const { raster, geom } = makeMap();
   const res = I.findSimilar(raster, geom, CHAIRS[0][0], CHAIRS[0][1]);

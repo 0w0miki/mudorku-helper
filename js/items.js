@@ -268,7 +268,20 @@
     }
     const n = w * h, mean = s / n;
     const den = Math.sqrt(Math.max(1e-6, ss - n * mean * mean));
-    return den > 1e-3 ? dot / den : -1;
+    // 候选位置"几乎是均匀色块"时方差趋 0，相关系数会被放大成 7.8 这种离谱值 ✗
+    // 所以要求这一块至少有约 3 个灰度级的标准差，否则直接判"不像"
+    if (den < 3 * Math.sqrt(n)) return -1;
+    return dot / den;
+  }
+
+  /** 带遮罩的得分图（模板有 mask 时用） */
+  function maskedMap(gray, W, H, t, minStd) {
+    const cols = Math.max(1, W - t.w + 1), rows = Math.max(1, H - t.h + 1);
+    const map = new Float32Array(cols * rows).fill(-1);
+    for (let ry = 0; ry < rows; ry++) {
+      for (let rx = 0; rx < cols; rx++) map[ry * cols + rx] = maskedNccAt(gray, W, rx, ry, t, minStd);
+    }
+    return { map, cols, rows, step: 1 };
   }
 
   /** 把模板在图上滑一遍（步长 step），返回得分图 */
@@ -374,7 +387,7 @@
           for (let dx = -opt.radius; dx <= opt.radius; dx += opt.step) {
             const x0 = px + dx + Math.round((tw - twS) / 2), y0 = py + dy + Math.round((th - thS) / 2);
             if (x0 < 0 || y0 < 0 || x0 + twS > W || y0 + thS > H) continue;
-            const s = nccAt(gray, W, x0, y0, t);
+            const s = t.mask ? maskedNccAt(gray, W, x0, y0, t) : nccAt(gray, W, x0, y0, t);
             if (s <= -1) continue;
             const c = Math.floor((x0 + twS / 2 - geom.x0) / geom.pitchX);
             const r = Math.floor((y0 + thS / 2 - geom.y0) / geom.pitchY);
@@ -447,5 +460,194 @@
     };
   }
 
-  return { findSimilar, toGray, patchAt, nccAt, nccMap, downscale, cellMask, shapeDesc, descIoU, SCALES };
+
+  /**
+   * 把一张"外部模板"（图例卡片上抠下来的一块图标）变成归一化的灰度模板。
+   * 与地图样例的区别只在于"模板从哪来"：一个来自地图格子，一个来自图例卡片。
+   */
+  function tmplFromImage(img, mask) {
+    const w = Math.max(3, img.width | 0), h = Math.max(3, img.height | 0);
+    const g = new Float64Array(w * h);
+    let sum = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(img.width - 1, x), sy = Math.min(img.height - 1, y);
+        const o = (sy * img.width + sx) * 4;
+        const v = 0.299 * img.data[o] + 0.587 * img.data[o + 1] + 0.114 * img.data[o + 2];
+        g[y * w + x] = v; sum += v;
+      }
+    }
+    const useMask = mask && mask.length === w * h;
+    let cnt = 0, msum = 0;
+    for (let i = 0; i < g.length; i++) if (!useMask || mask[i]) { msum += g[i]; cnt++; }
+    const mean = cnt ? msum / cnt : sum / (w * h);
+    let ss = 0;
+    for (let i = 0; i < g.length; i++) {
+      if (useMask && !mask[i]) { g[i] = 0; continue; }
+      g[i] -= mean; ss += g[i] * g[i];
+    }
+    const norm = Math.sqrt(ss) || 1;
+    for (let i = 0; i < g.length; i++) if (!useMask || mask[i]) g[i] /= norm;
+    return { p: g, w, h, mask: useMask ? mask : null };
+  }
+
+  /** 把归一化模板按 k 倍重采样（最近邻）后重新归一化；有遮罩就一起缩放 */
+  function resampleTmpl(t, k) {
+    const w = Math.max(3, Math.round(t.w * k)), h = Math.max(3, Math.round(t.h * k));
+    const g = new Float64Array(w * h);
+    let m = null;
+    if (t.mask) m = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(t.h - 1, Math.floor(y / k));
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(t.w - 1, Math.floor(x / k));
+        g[y * w + x] = t.p[sy * t.w + sx];
+        if (m) m[y * w + x] = t.mask[sy * t.w + sx];
+      }
+    }
+    // 只对"遮罩内的像素"重新归一化（背景不参与）
+    const useMask = m && m.some(v => v);
+    let ss = 0;
+    for (let i = 0; i < g.length; i++) if (!useMask || m[i]) ss += g[i] * g[i];
+    const norm = Math.sqrt(ss) || 1;
+    for (let i = 0; i < g.length; i++) g[i] /= norm;
+    return { p: g, w, h, mask: useMask ? m : null };
+  }
+
+  /**
+   * 带遮罩的 NCC：只在模板遮罩内的像素上算相关 —— **背景不参与**。
+   * 图例卡片是干净的白底/单色底，抠出来的遮罩很准，所以这条路特别受益：
+   * 同一件物品画在草地、沙地、石板上都能匹配上（用整块模板连背景比就会漏）。
+   */
+  function maskedNccAt(gray, W, x0, y0, t, minStd) {
+    const tw = t.w;
+    let sum = 0, ss = 0, dot = 0, n = 0;
+    for (let i = 0; i < t.p.length; i++) {
+      if (t.mask[i] !== 1) continue;
+      const dy = (i - (i % tw)) / tw, dx = i % tw;
+      const v = gray[(y0 + dy) * W + x0 + dx];
+      sum += v; ss += v * v; dot += v * t.p[i];
+      n++;
+    }
+    if (n < 12) return -1;
+    const mean = sum / n;
+    const den = Math.sqrt(Math.max(1e-6, ss - n * mean * mean));
+    // 候选这块太平（方差≈0）时相关系数会被放大成离谱值 → 至少要有 minStd 个灰度级的标准差
+    if (den < (minStd == null ? 3 : minStd) * Math.sqrt(n)) return -1;
+    return dot / den;
+  }
+
+  /**
+   * 用**外部模板**（图例卡片上的图标）在地图上找同类。
+   * 与 findSimilar 的区别：模板不是从地图上取的，**尺度未知**（图例常比地图上的小/大），
+   * 所以先在缩小 4 倍的金字塔上对一串尺度各滑一遍拿候选，再回全分辨率精算。
+   * @param {object} raster 地图栅格 {data,width,height}
+   * @param {object} geom   网格几何
+   * @param {{data:Uint8ClampedArray,width:number,height:number}} img 模板图（RGBA）
+   */
+  function findSimilarFromTemplate(raster, geom, img, options) {
+    const opt = Object.assign({
+      scales: [0.75, 0.85, 1, 1.2, 1.4],   // 卡片可以缩放，让图例图标与地图上的大小接近即可；范围太大时小模板会到处瞎命中
+      mask: null,                          // 可选：模板遮罩（图例卡片上抠出来的图标像素）
+      minScore: 0.6, margin: 0.25, relMin: 0.8, coarse: 4, perScale: 80, topK: 160, radius: 6, step: 1,
+    }, options || {});
+    const { width: W, height: H } = raster;
+    if (!(W > 16) || !(H > 16) || !img || !img.width) return { ok: false, reason: '底图或模板太小', cells: [], scores: [] };
+    const gray = toGray(raster);
+    const base = tmplFromImage(img, opt.mask);
+    // ① 粗定位：每个尺度在金字塔上滑一遍。**先选尺度**：模板越小越容易瞎命中，
+    //    所以用"峰值 − 中位数"（这个尺度上的信噪比）挑最合适的那个尺度，
+    //    只在这个尺度（以及相邻尺度）上继续精算。
+    const K = Math.max(2, Math.round(opt.coarse));
+    const cs = downscale(gray, W, H, K);
+    const stat = [];
+    const perScale = [];
+    for (const sc of opt.scales) {
+      const ct = resampleTmpl(base, sc / K);
+      if (ct.w < 3 || ct.h < 3 || ct.w >= cs.w || ct.h >= cs.h) continue;
+      let map = ct.mask ? maskedMap(cs.g, cs.w, cs.h, ct, 1) : nccMap(cs.g, cs.w, cs.h, ct, 1);
+      const collect = mm => {
+        const out = [];
+        for (let i = 0; i < mm.map.length; i++) if (mm.map[i] > 0) out.push({ i, v: mm.map[i], sc });
+        return out;
+      };
+      let local = collect(map);
+      // 遮罩版一条都没命中时退回"整块模板"再试一次（保底，别把路堵死）
+      if (local.length < 4 && ct.mask) {
+        map = nccMap(cs.g, cs.w, cs.h, { p: ct.p, w: ct.w, h: ct.h }, 1);
+        local = collect(map);
+      }
+      if (local.length < 4) continue;
+      const vals = local.map(p => p.v).sort((a, b) => a - b);
+      const med = vals[vals.length >> 1], pk = vals[vals.length - 1];
+      stat.push({ sc, contrast: pk - med, pk, med });
+      local.sort((a, b) => b.v - a.v);
+      perScale.push({ sc, list: local.slice(0, opt.perScale) });
+    }
+    if (!stat.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
+    stat.sort((a, b) => b.contrast - a.contrast);
+    const bestSc = stat[0].sc;
+    const cands = [];
+    // 相邻尺度一起算：只用一个尺度时，同一件物品"略大略小"就会被漏掉
+    for (const ps of perScale) if (Math.abs(ps.sc - bestSc) < 0.11) cands.push(...ps.list);
+    if (!cands.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
+    if (!cands.length) return { ok: false, reason: '图例模板在地图上看不到相似的地方', cells: [], scores: [] };
+    cands.sort((a, b) => b.v - a.v);
+    const picks = cands.slice(0, opt.topK);
+    // ② 回全分辨率精算（按各自的尺度）
+    const best = new Map();
+    const tmplCache = new Map();
+    for (const pk of picks) {
+      const sc = pk.sc;
+      let t = tmplCache.get(sc);
+      if (t === undefined) {
+        t = resampleTmpl(base, sc);
+        tmplCache.set(sc, t);
+      }
+      if (!t) continue;
+      const px = (pk.i % cs.w) * K, py = Math.floor(pk.i / cs.w) * K;
+      for (let dy = -opt.radius; dy <= opt.radius; dy += opt.step) {
+        for (let dx = -opt.radius; dx <= opt.radius; dx += opt.step) {
+          const x0 = px + dx, y0 = py + dy;
+          if (x0 < 0 || y0 < 0 || x0 + t.w > W || y0 + t.h > H) continue;
+          const s = t.mask ? maskedNccAt(gray, W, x0, y0, t) : nccAt(gray, W, x0, y0, t);
+          if (s <= -1) continue;
+          const c = Math.floor((x0 + t.w / 2 - geom.x0) / geom.pitchX);
+          const r = Math.floor((y0 + t.h / 2 - geom.y0) / geom.pitchY);
+          if (r < 0 || c < 0 || r >= geom.rows || c >= geom.cols) continue;
+          const key = r + ',' + c;
+          const prev = best.get(key);
+          if (!prev || s > prev.s) best.set(key, { s, r, c, sc });
+        }
+      }
+    }
+    if (!best.size) return { ok: false, reason: '没找到相近的位置', cells: [], scores: [] };
+    // ③ 阈值：与地图样例一致的四档
+    const vals = [...best.values()].map(v => v.s);
+    const sorted = [...vals].sort((a, b) => a - b);
+    const med = sorted[sorted.length >> 1];
+    const hi = sorted[sorted.length - 1];
+    const thr = Math.max(opt.minScore, otsu01(vals, sorted[0], hi), med + opt.margin, hi * opt.relMin);
+    const hits = [...best.values()].filter(v => v.s >= thr).sort((a, b) => b.s - a.s);
+    if (hits.length <= 1) {
+      return {
+        ok: false, reason: '只找到一处（这一格可能不是物品，或图例里选的不是它）', cells: [], scores: [],
+        stats: { sampled: best.size, matches: hits.length, threshold: Math.round(thr * 1000) / 1000, maxScore: Math.round(hi * 1000) / 1000 },
+      };
+    }
+    return {
+      ok: true,
+      cells: hits.map(h => h.r + ',' + h.c),
+      scores: hits.map(h => Math.round(h.s * 1000) / 1000),
+      scales: hits.map(h => h.sc),
+      scaleStats: stat,
+      template: { w: img.width, h: img.height },
+      stats: {
+        sampled: best.size, matches: hits.length, scale: hits[0].sc,
+        threshold: Math.round(thr * 1000) / 1000, maxScore: Math.round(hi * 1000) / 1000,
+      },
+    };
+  }
+
+  return { findSimilar, findSimilarFromTemplate, tmplFromImage, resampleTmpl, maskedNccAt, toGray, patchAt, nccAt, nccMap, downscale, cellMask, shapeDesc, descIoU, SCALES };
 });
