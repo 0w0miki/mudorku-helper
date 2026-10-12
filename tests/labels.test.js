@@ -111,6 +111,19 @@ test('截图标签：白底药丸 + 黑描边 + 黑字被找出来；白色物�
   assert.ok(found.every(f => f.ink >= 0.2 && f.glyphs >= 4), '黑字占比/字块数应在合理范围：' + JSON.stringify(found));
 });
 
+test('OCR 名字整理：用真实识别输出（contest 截图 17 个徽章）把空格补回来', () => {
+  // 这些字符串是 tesseract 在 fixture 上真实的输出（字母准确率 99%，错的全是空格）
+  const raw = ['CABINA', 'CAVERN', 'WOODS', 'FRIGATEA', 'BEACH', 'SLOOPA', 'SLOOPB', 'SLOOP CC',
+               'CABIN B', 'GALLEON', 'DOCK', 'TAVERN', 'CABIN C', 'CLIFF', 'WATER', 'CLEARING', 'FRIGATE B'];
+  const want = ['CABIN A', 'CAVERN', 'WOODS', 'FRIGATE A', 'BEACH', 'SLOOP A', 'SLOOP B', 'SLOOP C',
+                'CABIN B', 'GALLEON', 'DOCK', 'TAVERN', 'CABIN C', 'CLIFF', 'WATER', 'CLEARING', 'FRIGATE B'];
+  assert.deepEqual(L.mergeOcrNames(raw), want);
+  // 单个词里的重复字母不能被收掉（CLIFF 不是 "尾词重复"）
+  assert.deepEqual(L.mergeOcrNames(['CLIFF', 'SLOOP CC']), ['CLIFF', 'SLOOP C']);
+  // 已知词只在"同一张图里确实出现过带空格的形式"时才用来切（没有词表就原样返回）
+  assert.deepEqual(L.mergeOcrNames(['WOODS', 'BEACH']), ['WOODS', 'BEACH']);
+});
+
 test('family 风格：TEACHER’S AREA 里的撇号不影响判定', () => {
   const items = [
     { str: 'TEACHER’S AREA', x: 1177, y: 682, h: 26 },

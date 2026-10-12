@@ -505,6 +505,39 @@ family     : TEACHER'S AREA / FRONT AREA / BACK AREA        ← 正好 3 个区�
 在 800px 宽的缩图上会漏 2/17（描边被压细）→ 分辨率越高越稳（应用把底图限在 ≤1600px）。
 检出结果的标注图：`docs/badge-detect.jpg`（17 个标签全部框住，无假阳性）。
 
+### 4.8.9 截图读区域名：内置 OCR（2026-10-12，已实现）
+
+用户明确要"OCR 识别地图上的区域名"（纯截图输入，不能假定有 PDF 文字层）。方案分两步：
+
+**① 找标签徽章**（`labels.findLabelBadges`，§4.8.8）—— 纯图形，17/17、78ms，给出**位置**。
+**② 读徽章里的字**（`js/ocr.js`）—— tesseract，把 `vendor/` 里的核心与模型**按需**加载。
+
+为什么是"内联 + 主线程"：应用从 `file://` 打开，浏览器**会挡掉 Worker 创建与 fetch/.wasm 拉取**，
+所以走"经典脚本 + wasm 内联 base64 + 模型内联 base64"、在**主线程**直接调 `TessBaseAPI`
+（`api.Init(null,'eng',1)` → `FS.writeFile('./eng.traineddata')` → `SetImageFile` → `Recognize`）。
+两个文件共 **7.8MB**，只有点了「🔤 读区域名（OCR）」才加载，之后常驻内存；
+实测整条链路 **0.6~0.8s**（17 个徽章）✓
+
+**实测精度**（`tests/fixtures/contest-labels.jpg`，4× 放大、单行模式、只允许 A–Z）：
+
+```
+字符准确率 99.0%；整词错的只有 4 个，而且全是"词间空格"：
+  CABIN A → CABINA    FRIGATE A → FRIGATEA    SLOOP A → SLOOPA    SLOOP B → SLOOPB
+  （另有 SLOOP C → SLOOP CC，多了一个尾字母）
+```
+
+**补空格不靠词典，靠同一张图里的一致性**（`labels.mergeOcrNames`，纯函数、可单测）：
+1. 有些徽章的空格 OCR 保住了（`CABIN B`/`FRIGATE B`/`SLOOP CC`）→ 这些前缀就是"已知词"；
+   别的徽章读到 `CABINA`、`SLOOPA` 时，按"已知词 + 1~2 个尾字母"切开
+2. 尾词重复收掉：`SLOOP CC` → `SLOOP C`（`CLIFF` 这种单个词不受影响）
+3. 兜底才用几何（字块列间距里"最大间隔 ≥ 0.2×字高 且 ≥ 次大间隔 1.6 倍"时切一刀）
+
+结果：**17/17 全对** ✓ `pnpm test` 222 → **223**（用真实 OCR 输出做回归）；
+浏览器 e2e 168 → **170** 项（import 截图 → 17 个标签 → 17 个候选 → OCR 17/17 个名字）。
+
+已知限制：模型只有英文（`eng`），中文题面需要另配 `chi_sim`（会再大 ~10MB，且要多加载一次）；
+OCR 只用来**出候选名字**，读错在列表里改名即可。
+
 ## 5. P0 详细设计
 
 ### 5.1 算法（纯 JS，无依赖，Node 可单测）

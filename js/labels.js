@@ -220,7 +220,19 @@
         // 四条边外侧都要有黑描边（白色家具/枕头没有这个）
         const ring = ['top', 'bottom', 'left', 'right'].map(s => sideDark(cp.x0, cp.y0, cp.x1, cp.y1, s));
         if (Math.max.apply(null, ring) > opt.ringDark) continue;
-        found.push({ x: cp.x0, y: cp.y0, w: bw, h: bh, ink: Math.round(inkFrac * 1000) / 1000, glyphs: inked.length });
+        // 字的"列"：x 上重叠的字块并成一列（字母 i 的点、引号这类会在同一列）。
+        // 注意只按**重叠**合并：按"高度的一个比例"当容差会把整串字母并成一列
+        //（曾经用 med*0.35 而 med 是字高 → 每列都并到一起 → 空格再也补不出来）。
+        const cols = [];
+        inked.map(g => [g.x0, g.x1]).sort((a, b) => a[0] - b[0]).forEach(r2 => {
+          const last = cols[cols.length - 1];
+          if (last && r2[0] <= last[1] + 1) last[1] = Math.max(last[1], r2[1]);
+          else cols.push([r2[0], r2[1]]);
+        });
+        found.push({
+          x: cp.x0, y: cp.y0, w: bw, h: bh, ink: Math.round(inkFrac * 1000) / 1000,
+          glyphs: inked.length, cols,
+        });
       }
       return found;
     };
@@ -243,5 +255,50 @@
     return all;
   }
 
-  return { pickRegionLabels, labelToCell, labelsToSeeds, areaBox, inBox, findLabelBadges };
+  /**
+   * 把 OCR 的原始输出整理成区域名。主要就干一件事：**补空格**。
+   *
+   * 实测（contest 截图 17 个徽章）：字母准确率 99%，唯一成片的错误是**词间空格**
+   * —— `CABIN A` 读成 `CABINA`、`SLOOP B` 读成 `SLOOPB`。补空格用的是两条跨徽章线索：
+   *
+   * ① 有些徽章的空格 OCR 保住了（`CABIN B` / `FRIGATE B` / `SLOOP CC`）→ 这些前缀就是"已知词"；
+   *    别的徽章读到 `CABINA`、`SLOOPA` 时，把"已知词 + 1~2 个尾字母"切开。
+   *    （这一条不需要词典，也不需要知道题面是什么语言，纯粹靠同一张图里的一致性）
+   * ② 尾词重复收掉：`SLOOP CC` → `SLOOP C`（`CLIFF` 这种单个词不受影响）
+   * ③ 兜底才用几何：字块列间距里"最大间隔显著大于其余"时切一刀
+   *
+   * @param {Array<string|{name:string,badge?:object}>} items OCR 原始输出（可带徽章几何）
+   * @returns {string[]} 整理后的名字
+   */
+  function mergeOcrNames(items) {
+    const norm = s => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const raw = (items || []).map(it => norm(typeof it === 'string' ? it : it.name));
+    const words = new Set();
+    raw.forEach(s2 => s2.split(' ').forEach(w => { if (w.length >= 3) words.add(w); }));
+    return raw.map((s0, i) => {
+      const badge = (items && items[i] && items[i].badge) || null;
+      let s = s0.replace(/ ([A-Z])\1$/, ' $1');                 // ② 尾词重复
+      if (!s.includes(' ')) {
+        for (let k = s.length - 1; k >= 3; k--) {                // ① 已知词 + 尾字母
+          const head = s.slice(0, k), tail = s.slice(k);
+          if (tail.length <= 2 && words.has(head)) { s = head + ' ' + tail; break; }
+        }
+      }
+      if (!s.includes(' ') && badge && badge.cols && badge.cols.length > 2) {   // ③ 几何兜底
+        const cols = badge.cols, letters = s.replace(/ /g, '');
+        if (cols.length === letters.length) {
+          const gaps = [];
+          for (let k = 1; k < cols.length; k++) gaps.push(Math.max(0, cols[k][0] - cols[k - 1][1]));
+          const rank = gaps.map((g, k) => [g, k]).sort((a, b) => b[0] - a[0]);
+          if (rank[0][0] >= Math.max(4, 0.2 * (badge.h || 0)) && rank[0][0] >= rank[1][0] * 1.6) {
+            const at = rank[0][1];
+            s = letters.slice(0, at + 1) + ' ' + letters.slice(at + 1);
+          }
+        }
+      }
+      return s;
+    });
+  }
+
+  return { pickRegionLabels, labelToCell, labelsToSeeds, areaBox, inBox, findLabelBadges, mergeOcrNames };
 });

@@ -1166,6 +1166,20 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
   ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
 
+  // 31) 截图 + OCR：把 17 个区域名读出来（内置 tesseract，file:// 下主线程跑）
+  const tOcr = Date.now();
+  await p.click('[data-act="ocr-regions"]');
+  await p.waitForFunction(() => window.MH.ui.ocrNames, null, { timeout: 300000 });
+  const ocrNames = await p.evaluate(() => window.MH.ui.ocrNames);
+  const WANT_NAMES = ['CABIN A', 'CAVERN', 'WOODS', 'FRIGATE A', 'BEACH', 'SLOOP A', 'SLOOP B', 'SLOOP C',
+    'CABIN B', 'GALLEON', 'DOCK', 'TAVERN', 'CABIN C', 'CLIFF', 'WATER', 'CLEARING', 'FRIGATE B'];
+  const hitNames = WANT_NAMES.filter(w => ocrNames.includes(w)).length;
+  ok(ocrNames.length === 17 && hitNames === 17,
+    'OCR 读出 17/17 个区域名（' + ((Date.now() - tOcr) / 1000).toFixed(1) + 's）：' + ocrNames.join(' / '));
+  const ocrRegions = await p.evaluate(() => window.MH.store.state.regions.map(r => r.name).sort());
+  ok(ocrRegions.length === 17 && ocrRegions.every(n => WANT_NAMES.includes(n.replace(/^区域 \d+$/, '')) || /^区域 \d+$/.test(n)),
+    '区域带上了 OCR 读出的名字：' + ocrRegions.slice(0, 5).join(' / '));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
