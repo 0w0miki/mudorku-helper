@@ -222,6 +222,10 @@
             ' title="在已对位的底图上逐格取色。区域名按输入自动取：PDF 读文字层；截图则自动找白底黑字标签并用内置 OCR 读名字（首次加载约 7.8MB）。结果都是候选，可撤销">' +
             (MH.ui.ocrBusy ? '🔍 正在识别（读区域名…）' : '🔍 自动识别区域') + '</button>' +
           '<p class="hint">PDF 读文字层；截图自动找区域名标签（白底药丸 + 黑描边 + 黑字）并用内置 OCR 读名字。名字读错点列表里的「改名」即可。</p>' +
+          (MH.store.state.bg && !MH.store.state.bg.bound
+            ? '<p class="hint warn">还差一步：底图还没对位（点「自动识别区域」只会提示）。先点「▭ 框地图外框」圈住地图，或勾「对齐底图」手动对准后退出。</p>'
+            : '') +
+          '<button class="ghost block" data-act="check-regions" title="点不出结果时先点这个：报告对位、网格位置、区域名来源、种子数，并让识别内核试跑一次（不改动任何数据）">🩺 识别自检</button>' +
           '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>'
         : '') +
       (MH.ui.diagText
@@ -703,7 +707,8 @@
   /** 识别的共同前提：网格已经对到底图上（框过、裁过、或在「对齐底图」里手动对过） */
   function requireAligned(st) {
     if (!st.bg.bound) {
-      MH.toast('先对好底图：勾「对齐底图」手动把网格对准地图，或用「▭ 框地图外框」自动定标', 'warn');
+      MH.toast('底图还没对位（区域卡里点「🩺 识别自检」能看到细节）：' +
+        '① 点「▭ 框地图外框」拖一个矩形圈住地图，或 ② 勾「对齐底图」手动对准后退出', 'warn');
       return false;
     }
     return true;
@@ -832,6 +837,70 @@
       }
     }
     return { labels: [], from: '' };
+  }
+
+  /**
+   * 识别自检：**点不出结果时先点这个**。不做任何改动，只回答"卡在哪一步"：
+   * 对位了吗、网格压在底图上多少、区域名能从哪来、种子有几个、识别内核怎么说。
+   */
+  async function regionSelfCheck() {
+    const st = MH.store.state;
+    const L2 = window.MurdokuLabels;
+    const L = ['=== 识别自检 ==='];
+    if (!st.bg) {
+      L.push('底图：没有。先「＋ 导入图片或 PDF」。');
+      MH.ui.diagText = L.join('\n'); MH.render(); return;
+    }
+    const b = st.bg;
+    L.push('底图：' + b.name + ' · ' + b.kind + ' · ' + b.w + '×' + b.h +
+      (b.kind === 'pdf' ? '（第 ' + b.page + '/' + b.pages + ' 页）' : ''));
+    L.push('已对位（bound）：' + (b.bound ? '是 ✓' : '**否 ✗**'));
+    if (!b.bound) {
+      L.push('  → 这一步没做，点「自动识别区域」只会提示、不会动手。两条路任选：');
+      L.push('    ① 点「▭ 框地图外框」，拖一个矩形正好圈住地图（最快，自动算格距）');
+      L.push('    ② 勾「对齐底图」手动把网格拖准 → **退出对齐模式即自动记录对位**');
+    }
+    L.push('网格：' + st.cols + '×' + st.rows + ' · 每格 ' + st.settings.cellSize + 'px · 底图缩放 ' +
+      Math.round(b.scale * 1000) / 10 + '% · 偏移 (' + (st.grid ? st.grid.x : 0) + ',' + (st.grid ? st.grid.y : 0) + ')');
+    let geo = null;
+    try { geo = await regionGeometry(); } catch (err) { L.push('几何换算失败：' + err.message); }
+    if (geo) {
+      const ratio = gridOnBg(geo);
+      L.push('网格压在底图上的比例：' + (ratio * 100).toFixed(0) + '%' + (ratio < 0.6 ? ' ✗（要 ≥60%，说明网格基本不在图上）' : ' ✓'));
+      L.push('格距（原图像素）：' + geo.geom.pitchX.toFixed(1) + ' × ' + geo.geom.pitchY.toFixed(1) +
+        (Math.min(geo.geom.pitchX, geo.geom.pitchY) < 6 ? ' ✗（太小了，行列数是不是填多了？）' : ''));
+      const cached = filterLabels(readLabelCache(st), regionArea(geo));
+      const badges = L2 && L2.findLabelBadges ? L2.findLabelBadges(geo.raster, Math.min(geo.geom.pitchX, geo.geom.pitchY)) : [];
+      MH.ui.lastBadges = badges.length ? badges : MH.ui.lastBadges;
+      L.push('区域名从哪来：');
+      L.push('  · 本地缓存：' + (cached.length ? cached.length + ' 个' : '无'));
+      L.push('  · PDF 文字层句柄：' + (MH.bgPdfFile ? '有（会优先用它）' : '无（没选过 PDF 文件）'));
+      L.push('  · 截图标签徽章：' + (badges.length ? badges.length + ' 个 ✓（会自动 OCR 读名字）' : '没找到 ✗（区域名不是"白底黑字药丸"样式？）'));
+      const seeds = L2 ? L2.labelsToSeeds(cached, geo.geom) : [];
+      L.push('种子（用于分区的定位点）：' + (seeds.length || badges.length) + ' 个' +
+        ((seeds.length || badges.length) >= 2 ? '' : ' ✗（少于 2 个就只能靠颜色自适应，结果会很碎）'));
+      const R2 = window.MurdokuRegions;
+      if (R2 && b.bound && ratio >= 0.6) {
+        const t0 = Date.now();
+        const dry = cached.length >= 2
+          ? R2.detectRegions(geo.raster, geo.geom, { seeds: L2.labelsToSeeds(cached, geo.geom) })
+          : R2.detectRegions(geo.raster, geo.geom, badges.length >= 2
+            ? { seeds: L2.labelsToSeeds(badges.map((bd, i) => ({ name: '区域 ' + (i + 1), x: bd.x + bd.w / 2, y: bd.y + bd.h / 2 })), geo.geom) }
+            : {});
+        L.push('识别内核试跑：' + (dry.ok ? 'ok ✓' : '失败 ✗ 原因：' + (dry.reason || '未知')));
+        if (dry.ok) {
+          L.push('  会分出 ' + dry.regions.length + ' 个候选区域，覆盖 ' + dry.stats.sampled + '/' + (st.cols * st.rows) +
+            ' 格 · ' + (Date.now() - t0) + 'ms' + (dry.stats.picked ? ' · 选中 ' + dry.stats.picked : ''));
+        }
+      } else {
+        L.push('识别内核试跑：跳过（先把对位 / 网格位置弄好）');
+      }
+    }
+    L.push('');
+    L.push('现有区域：' + st.regions.length + ' 个' + (st.regions.length ? '（' + st.regions.map(r => r.name).join(' / ') + '）' : ''));
+    MH.ui.diagText = L.join('\n');
+    MH.render();
+    MH.toast('自检完成：把下面的文字发我就能定位', 'ok');
   }
 
   /**
@@ -1284,6 +1353,7 @@
     'bg-region'() { pickRegion(); },
     'detect-regions'() { guard(detectRegionsFromBg)(); },
     'diag-regions'() { guard(runRegionDiagnosis)(); },
+    'check-regions'() { guard(regionSelfCheck)(); },
     'diag-close'() { MH.ui.diagText = null; MH.render(); },
     'diag-copy'() {
       const t = MH.ui.diagText || '';

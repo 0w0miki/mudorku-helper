@@ -1151,6 +1151,20 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'contest-labels.jpg')),
   });
   await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 20000 });
+  // 30a) 还没对位时不能"静默什么都没发生"：常驻提示 + 明确 toast + 自检报告说清卡在哪
+  const warnHint = await p.evaluate(() => (document.querySelector('.hint.warn') || {}).textContent || '');
+  ok(/还没对位/.test(warnHint), '未对位时区域卡有常驻提示：' + warnHint);
+  await p.click('[data-act="detect-regions"]');
+  await p.waitForTimeout(500);
+  const shotRegions0 = await p.evaluate(() => window.MH.store.state.regions.length);
+  ok(shotRegions0 === 0, '未对位时点识别不会瞎写区域（实际 ' + shotRegions0 + ' 个）');
+  await p.click('[data-act="check-regions"]');
+  await p.waitForFunction(() => /识别自检/.test(window.MH.ui.diagText || ''), null, { timeout: 30000 });
+  const selfText = await p.evaluate(() => window.MH.ui.diagText);
+  ok(/否/.test(selfText) && /还没对位|先.*对位|框地图外框/.test(selfText), '自检报告指出"未对位"及两条修法');
+  ok(/标签徽章/.test(selfText) && /区域名从哪来/.test(selfText), '自检报告列出区域名来源');
+  await p.evaluate(() => { window.MH.ui.diagText = null; window.MH.render(); });
+
   await p.evaluate(() => {
     const s = window.MH.store.state;
     s.settings.cellSize = 49; s.bg.scale = 1;                 // 图 1194×1200、格距 49

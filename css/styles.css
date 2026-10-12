@@ -447,6 +447,8 @@ button.hi:active { background: var(--accent); color: #fff; }
 
 .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .hint b { color: var(--text); }
+/* 阻塞性问题（例如"底图还没对位，点了也不会动手"）要用常驻提示，不能只靠一闪而过的 toast */
+.hint.warn { color: var(--neg); border-left: 2px solid currentColor; padding-left: 6px; }
 .good { color: var(--pos); font-weight: 600; }
 .bad { color: var(--neg); font-weight: 600; }
 
