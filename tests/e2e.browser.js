@@ -1146,6 +1146,13 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     window.MH.ui.ocrNames = null;
     if (window.__realDetect) window.MurdokuRegions.detectRegions = window.__realDetect;   // 撤掉第 29 节的桩
   });
+  // 先塞一条"过期的记忆"（只剩 1 个区域名）——用户实测就是被它挡住了：
+  // 老逻辑会拿这 1 条当唯一来源 → 种子 1 个 → 退化成无种子，整张图碎成十几块。
+  await p.evaluate(() => {
+    localStorage.setItem('murdoku-helper.v1.labels', JSON.stringify({
+      key: 'contest-labels.jpg@1194', labels: [{ name: 'WOODS', x: 231, y: 342, h: 24 }],
+    }));
+  });
   await p.setInputFiles('#bgFileInput', {
     name: 'contest-labels.jpg', mimeType: 'image/jpeg',
     buffer: fs.readFileSync(path.join(__dirname, 'fixtures', 'contest-labels.jpg')),
@@ -1197,6 +1204,15 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '区域直接带上读出来的名字：' + shotRegions.slice(0, 5).join(' / '));
   const shotCells = await p.evaluate(() => window.MH.store.state.regions.reduce((n, r) => n + r.cells.length, 0));
   ok(shotCells > 300, '候选区域覆盖了大部分格子：' + shotCells + '/576');
+  const cacheAfter = await p.evaluate(() => {
+    const o = JSON.parse(localStorage.getItem('murdoku-helper.v1.labels') || '{}');
+    return (o.labels || []).length;
+  });
+  ok(cacheAfter === 17, '过期的 1 条记忆被 17 条新结果覆盖（实际 ' + cacheAfter + ' 条）');
+  ok(await p.locator('[data-act="clear-labels"]').count() === 1, '有记忆时区域卡出现「清除记忆」');
+  await p.click('[data-act="clear-labels"]');
+  const cleared = await p.evaluate(() => localStorage.getItem('murdoku-helper.v1.labels'));
+  ok(!cleared, '清除记忆后缓存清空（下次重新读）');
   // 第二次点同一个按钮：名字已进缓存，不该再跑一遍 OCR
   const t2 = Date.now();
   await p.click('[data-act="detect-regions"]');

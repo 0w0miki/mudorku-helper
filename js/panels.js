@@ -226,6 +226,11 @@
             ? '<p class="hint warn">还差一步：底图还没对位（点「自动识别区域」只会提示）。先点「▭ 框地图外框」圈住地图，或勾「对齐底图」手动对准后退出。</p>'
             : '') +
           '<button class="ghost block" data-act="check-regions" title="点不出结果时先点这个：报告对位、网格位置、区域名来源、种子数，并让识别内核试跑一次（不改动任何数据）">🩺 识别自检</button>' +
+          (readLabelCache(MH.store.state)
+            ? '<div class="row"><span class="meta">记住了上次的 ' + readLabelCache(MH.store.state).length +
+              ' 个区域名</span><span class="grow"></span>' +
+              '<button class="ghost sm" data-act="clear-labels" title="忘掉记住的区域名，下次重新读（截图会重新 OCR）">清除记忆</button></div>'
+            : '') +
           '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>'
         : '') +
       (MH.ui.diagText
@@ -785,57 +790,74 @@
 
   /**
    * 找区域名 —— **一个按钮内部按输入类型自动选路**（用户不需要知道是 PDF 还是截图）：
-   *   ① 本地缓存（上一次读到的名字，按当前区域复筛）
-   *   ② PDF 文字层（有 PDF 文件句柄时最准）
-   *   ③ 截图：找"区域名标签徽章"（白底药丸 + 黑描边 + 黑字）拿位置，
-   *      再用内置 OCR 把字读出来（`js/ocr.js`，按需加载；读不出来就退回「区域 N」）
-   * 都拿不到就返回空 —— 上层必须明确提示，不能静默降级成"无种子"。
+   *   ① 本地缓存（上一次读到的名字）
+   *   ② PDF 文字层（有句柄时最准，能拿真名）
+   *   ③ 截图：找"区域名标签徽章"（白底药丸 + 黑描边 + 黑字）拿位置 → 内置 OCR 读名字
+   *
+   * 判断顺序有个硬条件：**候选名字必须能落到 ≥2 个种子上**才采用。
+   * 这条是踩坑之后加的：缓存里如果只剩 1 条（过期/之前用别的图存进去的），
+   * 老逻辑会直接拿它当唯一来源 → 种子只有 1 个 → 退化成"无种子"，整张图碎成十几块，
+   * 而图上明明有 17 个标签可用（用户实测遇到的正是这个）。
    */
   async function resolveLabels(st, geo) {
-    const area = regionArea(geo);
-    let labels = filterLabels(readLabelCache(st), area);
-    if (labels.length) return { labels, from: 'cache' };
+    const L2 = window.MurdokuLabels;
+    const cached = readLabelCache(st) || [];
+    const seedCount = ls => {
+      if (!L2 || !ls || !ls.length) return 0;
+      return L2.labelsToSeeds(ls, geo.geom).length;
+    };
+    if (seedCount(cached) >= 2) return { labels: cached, from: 'cache' };
+
     if (MH.bgPdfFile) {
       try {
-        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, area);
-        if (labels.length) { writeLabelCache(st, labels); return { labels, from: 'pdf' }; }
-      } catch (_) { labels = []; }
+        const area = regionArea(geo);
+        const ls = await readRegionLabels(MH.bgPdfFile, geo.geom, area);
+        if (seedCount(ls) >= 2) { writeLabelCache(st, ls); return { labels: ls, from: 'pdf' }; }
+      } catch (_) { /* 读不到就走截图路线 */ }
     }
-    const L2 = window.MurdokuLabels;
+
+    let badges = [];
     if (L2 && L2.findLabelBadges) {
       const pitch = Math.min(geo.geom.pitchX, geo.geom.pitchY);
-      const badges = L2.findLabelBadges(geo.raster, pitch);
+      badges = L2.findLabelBadges(geo.raster, pitch);
       MH.ui.lastBadges = badges;
       MH.ui.lastBadgePitch = pitch;
-      if (badges.length >= 2) {
-        const toLabels = names => badges.map((b, i) => ({
-          name: (names && names[i]) || ('区域 ' + (i + 1)),
-          x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true,
-        }));
-        // 截图：顺手把名字也读出来（OCR 第一次要加载 7.8MB；失败就退回「区域 N」，不影响流程）
-        if (window.MurdokuOCR && L2.mergeOcrNames) {
-          MH.ui.ocrBusy = true;
-          MH.render();
-          try {
-            const read = await window.MurdokuOCR.readBadges(geo.raster, badges, {
-              onStatus: m => MH.toast(m, 'ok'),
-              onProgress: (i, n) => { if (i % 4 === 0 || i === n) MH.toast('读区域名 ' + i + '/' + n, 'ok'); },
-            });
-            const names = L2.mergeOcrNames(read.map(r => ({ name: r.text, badge: r.badge })));
-            MH.ui.ocrNames = names;
-            const ls = toLabels(names);
-            writeLabelCache(st, ls);
-            return { labels: ls, from: 'ocr' };
-          } catch (err) {
-            MH.toast('OCR 没成功（' + (err && err.message ? err.message : err) + '），先用「区域 N」占位，可在列表里改名', 'warn');
-          } finally {
-            MH.ui.ocrBusy = false;
-            MH.render();
-          }
-        }
-        return { labels: toLabels(null), from: 'badge' };
-      }
     }
+    if (badges.length >= 2) {
+      const toLabels = names => badges.map((b, i) => ({
+        name: (names && names[i]) || ('区域 ' + (i + 1)),
+        x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true,
+      }));
+      // 截图：顺手把名字也读出来（第一次要加载 7.8MB；失败就退回「区域 N」，不影响流程）
+      if (window.MurdokuOCR && L2.mergeOcrNames) {
+        MH.ui.ocrBusy = true;
+        MH.render();
+        try {
+          const read = await window.MurdokuOCR.readBadges(geo.raster, badges, {
+            onStatus: m => MH.toast(m, 'ok'),
+            onProgress: (i, n) => { if (i % 4 === 0 || i === n) MH.toast('读区域名 ' + i + '/' + n, 'ok'); },
+          });
+          const names = L2.mergeOcrNames(read.map(r => ({ name: r.text, badge: r.badge })));
+          MH.ui.ocrNames = names;
+          const ls = toLabels(names);
+          writeLabelCache(st, ls);
+          return { labels: ls, from: 'ocr' };
+        } catch (err) {
+          MH.toast('OCR 没成功（' + (err && err.message ? err.message : err) + '），先用「区域 N」占位，可在列表里改名', 'warn');
+        } finally {
+          MH.ui.ocrBusy = false;
+          MH.render();
+        }
+      }
+      const ls = toLabels(null);
+      if (seedCount(ls) >= 2) return { labels: ls, from: 'badge' };
+    }
+    // 都不够 2 个种子：有缓存就用缓存（1 个也比没有强），最后再退到徽章/空
+    if (cached.length) return { labels: cached, from: 'cache' };
+    if (badges.length) return {
+      labels: badges.map((b, i) => ({ name: '区域 ' + (i + 1), x: b.x + b.w / 2, y: b.y + b.h / 2, h: b.h, badge: true })),
+      from: 'badge',
+    };
     return { labels: [], from: '' };
   }
 
@@ -873,7 +895,9 @@
       const badges = L2 && L2.findLabelBadges ? L2.findLabelBadges(geo.raster, Math.min(geo.geom.pitchX, geo.geom.pitchY)) : [];
       MH.ui.lastBadges = badges.length ? badges : MH.ui.lastBadges;
       L.push('区域名从哪来：');
-      L.push('  · 本地缓存：' + (cached.length ? cached.length + ' 个' : '无'));
+      const cachedSeeds = cached.length && L2 ? L2.labelsToSeeds(cached, geo.geom).length : 0;
+      L.push('  · 本地缓存：' + (cached.length ? cached.length + ' 个（其中种子 ' + cachedSeeds + ' 个' +
+        (cachedSeeds < 2 ? ' → 不够 2 个，会被忽略、改用下面的来源' : '') + '）' : '无'));
       L.push('  · PDF 文字层句柄：' + (MH.bgPdfFile ? '有（会优先用它）' : '无（没选过 PDF 文件）'));
       L.push('  · 截图标签徽章：' + (badges.length ? badges.length + ' 个 ✓（会自动 OCR 读名字）' : '没找到 ✗（区域名不是"白底黑字药丸"样式？）'));
       const seeds = L2 ? L2.labelsToSeeds(cached, geo.geom) : [];
@@ -996,6 +1020,9 @@
     //    （读不到名字会退化成"无种子"，区域会碎成几十块——所以下面必须明确提示，不能静默降级）
     const resolved = await resolveLabels(st, geo);
     const labels = resolved.labels;
+    if (resolved.from === 'cache') {
+      MH.toast('这次用的是上次记住的 ' + labels.length + ' 个区域名（不对可在区域卡点「清除记忆」重来）', 'ok');
+    }
     if (resolved.from === 'ocr') {
       MH.toast('截图路线：找到 ' + labels.length + ' 个区域名标签，OCR 读出的名字：' + labels.map(l => l.name).join(' / '), 'ok');
     } else if (resolved.from === 'badge') {
@@ -1354,6 +1381,12 @@
     'detect-regions'() { guard(detectRegionsFromBg)(); },
     'diag-regions'() { guard(runRegionDiagnosis)(); },
     'check-regions'() { guard(regionSelfCheck)(); },
+    'clear-labels'() {
+      try { localStorage.removeItem(LABEL_KEY); } catch (_) { /* 清不掉也不影响 */ }
+      MH.ui.lastBadges = null;
+      MH.toast('已忘掉记住的区域名，下次点识别会重新读（截图会重新 OCR）', 'ok');
+      MH.render();
+    },
     'diag-close'() { MH.ui.diagText = null; MH.render(); },
     'diag-copy'() {
       const t = MH.ui.diagText || '';
