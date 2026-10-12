@@ -218,7 +218,14 @@
       '<h2>区域 <span class="muted">四连通 · 外轮廓加粗</span></h2>' +
       '<button class="ghost block" data-act="new-region" ' + (d ? 'disabled' : '') + '>＋ 新建区域</button>' +
       (!d && MH.store.state.bg
-        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色，把四连通的同色块识别成候选区域（可撤销）">🔍 自动识别区域</button>'
+        ? '<button class="ghost block" data-act="detect-regions" title="在已对位的底图上逐格取色，把四连通的同色块识别成候选区域（可撤销）">🔍 自动识别区域</button>' +
+          '<button class="ghost block" data-act="diag-regions" title="把每条相邻边的墙强度/覆盖率/宽度/深度摊开，用来按真实数据核对判据">🩺 边界诊断</button>'
+        : '') +
+      (MH.ui.diagText
+        ? '<p class="hint">把下面这段复制发我（我按你的真实数字定判据，不再猜）：</p>' +
+          '<textarea class="diag" readonly wrap="off" rows="14">' + esc(MH.ui.diagText) + '</textarea>' +
+          '<div class="row"><button class="ghost sm" data-act="diag-copy">复制</button>' +
+          '<span class="grow"></span><button class="ghost sm" data-act="diag-close">关闭</button></div>'
         : '') +
       (d && d.kind === 'region' ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('region', st) + '</ul>' +
@@ -693,6 +700,27 @@
     });
   }
 
+  /**
+   * 边界诊断：把每条相邻边的实测数据摊成文本（可复制发我），
+   * 用来**按这张地图自己的分布**定判据，而不是拍脑袋调阈值。
+   */
+  async function runRegionDiagnosis() {
+    const R2 = window.MurdokuRegions;
+    if (!R2 || !R2.diagnose) { MH.toast('诊断模块没加载', 'error'); return; }
+    const st = MH.store.state;
+    if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
+    if (!st.bg.bound) { MH.toast('先用「▭ 框地图外框」把底图和网格对好', 'warn'); return; }
+    const geo = await regionGeometry();
+    if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    const t0 = Date.now();
+    const dg = R2.diagnose(geo.raster, geo.geom);
+    const assign = new Map();
+    for (const reg of st.regions) for (const k of reg.cells) assign.set(k, reg.name || '区域');
+    MH.ui.diagText = R2.formatDiagnosis(dg, assign);
+    MH.render();
+    MH.toast('诊断完成：' + dg.edges.length + ' 条相邻边 · ' + (Date.now() - t0) + 'ms · 点「复制」发我', 'ok');
+  }
+
   /** 自动识别区域：产出候选后**一次提交**（可撤销），用户再手工增删改 */
   async function detectRegionsFromBg() {
     const R = window.MurdokuRegions;
@@ -1053,6 +1081,17 @@
     'bg-crop'() { cropBackground(); },
     'bg-region'() { pickRegion(); },
     'detect-regions'() { guard(detectRegionsFromBg)(); },
+    'diag-regions'() { guard(runRegionDiagnosis)(); },
+    'diag-close'() { MH.ui.diagText = null; MH.render(); },
+    'diag-copy'() {
+      const t = MH.ui.diagText || '';
+      if (!t) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(
+          () => MH.toast('已复制，粘贴发我即可', 'ok'),
+          () => MH.toast('复制失败：请手动选中文本复制', 'warn'));
+      } else MH.toast('请手动选中文本复制', 'warn');
+    },
     'bg-scale-step'(el, e) {
       const st = MH.store.state;
       if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }

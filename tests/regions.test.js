@@ -191,3 +191,31 @@ test('种子模式：没有种子时不受影响（仍走颜色/粗线自适应�
   assert.ok(!res.seeded);
   assert.ok(res.ok, '仍应能识别');
 });
+
+test('边界诊断：直方图与可疑边能被列出来', () => {
+  // 6×6；两块上下分区，横向隔墙只画 4/6（另 2 列像"没墙"）
+  const pitch = 60, x0 = 30, y0 = 30, N = 6;
+  const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  fillRect(r, x0, y0, N * pitch, N * pitch, [196, 205, 186]);
+  for (let rr = 1; rr < N; rr++) fillRect(r, x0, y0 + rr * pitch - 1, N * pitch, 3, [150, 158, 140]);
+  fillRect(r, x0, y0 + 3 * pitch - 3, 4 * pitch, 6, [40, 42, 46]);
+  const geom = { x0, y0, pitchX: pitch, pitchY: pitch, cols: N, rows: N };
+  const dg = R.diagnose(r, geom);
+  assert.equal(dg.edges.length, (N - 1) * N * 2, '相邻边数：' + dg.edges.length);
+  assert.equal(dg.hist.reduce((a, b) => a + b, 0), dg.edges.length, '直方图总数应等于边数');
+  // 有墙的那几列应落在高墙强度档
+  const wallEdges = dg.edges.filter(e => e.dir === 'down' && e.r === 2);
+  assert.equal(wallEdges.length, 6);
+  const hi = wallEdges.filter(e => e.wall >= 0.9).length;
+  const lo = wallEdges.filter(e => e.wall <= 0.3).length;      // 没墙的那两列只有砖缝(0.25)
+  assert.equal(hi, 4, '4 列可见墙：' + hi + ' 各边 wall=' + wallEdges.map(e => e.wall).join(','));
+  assert.equal(lo, 2, '另外 2 列只有砖缝：' + lo);
+  // 渲染文本：区域对照 Map 给出后应列出"区域之间的边界"与可疑边
+  const assign = new Map();
+  for (const c of dg.cells) assign.set(c.key, c.r <= 2 ? 'FRONT' : 'BACK');
+  const text = R.formatDiagnosis(dg, assign);
+  assert.ok(/(FRONT ↔ BACK|BACK ↔ FRONT)/.test(text), '应列出区域对：' + text.slice(0, 300));
+  assert.ok(/最可疑的边/.test(text) && /cover/.test(text), '应列出可疑边明细');
+  assert.ok(/0\.0-0\.1/.test(text), '应有直方图');
+});

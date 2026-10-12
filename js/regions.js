@@ -169,6 +169,7 @@
     const { x0, y0, pitchX, pitchY } = geom;
     const px0 = Math.round(x0 + c * pitchX), py0 = Math.round(y0 + r * pitchY);
     const px1 = Math.round(x0 + (c + 1) * pitchX), py1 = Math.round(y0 + (r + 1) * pitchY);
+    // 窗口 ±6px（放宽到 ±0.15 格试过：car-repair 只是把错分从一处挪到另一处，未采纳）
     const span = Math.max(2, Math.round(opt.span));
     const n = span * 2 + 1;
     const lumaAt = (x, y) => {
@@ -180,7 +181,7 @@
     const samples = Math.max(3, Math.round(opt.samples));
     // 沿**整条边**均匀取截面（不只中间那段）：被家具挡住的地方会空出来，
     // 用"覆盖率"表示这条边上有多长是墙，而不是要求整条边都连续是墙
-    let covered = 0, maxWidth = 0, maxDepth = 0;
+    let covered = 0, maxWidth = 0, maxDepth = 0, lastDarkFrac = 0;
     for (let si = 0; si < samples; si++) {
       const t = 0.06 + 0.88 * (si / (samples - 1));
       const prof = [];
@@ -204,17 +205,20 @@
         if (prof[i] < cellsLuma - need) { cur++; if (cur > best) best = cur; }
         else cur = 0;
       }
-      let minL = 255;
-      for (const v of prof) if (v < minL) minL = v;
+      let minL = 255, darkPx = 0;
+      for (const v of prof) { if (v < minL) minL = v; if (v < cellsLuma - need) darkPx++; }
       const depth = Math.round((cellsLuma - minL) * 10) / 10;
+      const darkFrac = darkPx / n;
+      lastDarkFrac = darkFrac;
       if (best > maxWidth) maxWidth = best;
       if (depth > maxDepth) maxDepth = depth;
-      if (best >= opt.minWidth && depth >= need) covered++;
+      // 是墙：够宽、够深，而且**只占窗口一部分**（大块暗区 darkFrac≈1 → 不是墙）
+      if (best >= opt.minWidth && depth >= need) covered++;   // 备注：darkFrac（窗口暗像素占比）仍会输出，供诊断判断"是墙还是大块暗区"
     }
     const coverage = covered / samples;
     return {
       coverage: Math.round(coverage * 1000) / 1000,
-      width: maxWidth, depth: maxDepth,
+      width: maxWidth, depth: maxDepth, darkFrac: Math.round(lastDarkFrac * 100) / 100,
       bold: coverage >= 0.6,
     };
   }
@@ -517,5 +521,113 @@
     };
   }
 
-  return { detectRegions, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
+  /**
+   * 边界诊断：把每条相邻边的实测数据摊开，用来**按这张地图自己的分布**判断题据，
+   * 而不是拍脑袋定阈值。不做任何判定，只给数据。
+   */
+  function diagnose(raster, geom, options) {
+    const opt = Object.assign({ inset: 0.28, pad: 0.07, span: 6, minWidth: 3 }, options || {});
+    const { cols, rows } = geom;
+    const { cells } = sampleCells(raster, geom, opt);
+    const idx = new Int32Array(cols * rows).fill(-1);
+    const list = [];
+    for (const cell of cells) {
+      if (!cell.ok) continue;
+      idx[cell.r * cols + cell.c] = list.length;
+      list.push(cell);
+    }
+    const edges = [];
+    const push = (i, j, r, c, dir) => {
+      const bd = borderProbe(raster, geom, r, c, dir, cellLuma(list[i]), cellLuma(list[j]), opt);
+      edges.push({
+        i, j, r, c, dir,
+        wall: Math.round((bd.coverage || 0) * Math.min(1, Math.max(0, ((bd.width || 0) - 2) / 4)) * 1000) / 1000,
+        coverage: bd.coverage, width: bd.width, depth: bd.depth,
+        d: Math.round(cellDistance(list[i], list[j]) * 10) / 10,
+        cells: [list[i].key, list[j].key],
+      });
+    };
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = idx[r * cols + c];
+        if (i < 0) continue;
+        if (c + 1 < cols) { const j = idx[r * cols + c + 1]; if (j >= 0) push(i, j, r, c, 'right'); }
+        if (r + 1 < rows) { const j = idx[(r + 1) * cols + c]; if (j >= 0) push(i, j, r, c, 'down'); }
+      }
+    }
+    const hist = new Array(10).fill(0);
+    for (const e of edges) hist[Math.min(9, Math.max(0, Math.floor(e.wall * 10)))]++;
+    return { geom, cols, rows, sampled: list.length, edges, hist,
+             keys: list.map(c2 => c2.key), cells: list };
+  }
+
+  /**
+   * 把诊断渲染成可复制的文本。
+   * @param assignment Map(cellKey → 区域名)——来自当前已识别的区域，有了它才能列出
+   *        "区域之间的边界"和"最可疑的边"
+   */
+  function formatDiagnosis(dg, assignment) {
+    const nm = k => (assignment && assignment.get(k)) || '?';
+    const L = [];
+    const g = dg.geom;
+    L.push('=== 边界诊断 ===');
+    L.push('格 ' + dg.cols + '×' + dg.rows + ' · 可用格 ' + dg.sampled + ' · 相邻边 ' + dg.edges.length +
+           ' · 格距 ' + g.pitchX.toFixed(1) + '×' + g.pitchY.toFixed(1));
+    L.push('');
+    L.push('墙强度分布（0.0~1.0，每 0.1 一档）：');
+    const maxH = Math.max(1, ...dg.hist);
+    for (let i = 0; i < 10; i++) {
+      const bar = '█'.repeat(Math.round(dg.hist[i] / maxH * 28));
+      L.push(' ' + (i / 10).toFixed(1) + '-' + ((i + 1) / 10).toFixed(1) + ' |' +
+             bar.padEnd(28) + ' ' + dg.hist[i]);
+    }
+    if (!assignment || !assignment.size) {
+      L.push('');
+      L.push('（先点「自动识别区域」，这里才会列出区域之间的边界与可疑边）');
+      return L.join('\n');
+    }
+    // 区域之间的边界
+    const pairs = new Map();
+    for (const e of dg.edges) {
+      const a = nm(e.cells[0]), b = nm(e.cells[1]);
+      if (a === b) continue;
+      const key = a < b ? a + ' ↔ ' + b : b + ' ↔ ' + a;
+      let acc = pairs.get(key);
+      if (!acc) { acc = { n: 0, sum: 0, min: 9, max: -1, dsum: 0 }; pairs.set(key, acc); }
+      acc.n++; acc.sum += e.wall; acc.dsum += e.d;
+      if (e.wall < acc.min) acc.min = e.wall;
+      if (e.wall > acc.max) acc.max = e.wall;
+    }
+    L.push('');
+    L.push('区域之间的边界（按平均墙强度升序，最可疑的在前）：');
+    [...pairs.entries()].map(([k, a]) => ({ k, ...a, mean: a.sum / a.n }))
+      .sort((x, y) => x.mean - y.mean)
+      .forEach(a => {
+        L.push(' ' + a.k + ' | ' + a.n + ' 条边 | min ' + a.min.toFixed(2) +
+               ' 均 ' + a.mean.toFixed(2) + ' max ' + a.max.toFixed(2) +
+               ' | 色差均 ' + (a.dsum / a.n).toFixed(1));
+      });
+    // 跨区域但墙强度很低的边（可能不该分开）
+    const weak = dg.edges.filter(e => nm(e.cells[0]) !== nm(e.cells[1]))
+      .sort((a, b) => a.wall - b.wall).slice(0, 14);
+    L.push('');
+    L.push('最可疑的边（跨区域、墙强度低 → 也许本不该分开）：');
+    for (const e of weak) {
+      L.push(' ' + e.cells[0] + '-' + e.cells[1] + '  ' + nm(e.cells[0]) + '|' + nm(e.cells[1]) +
+             '  wall ' + e.wall.toFixed(2) + '  cover ' + e.coverage.toFixed(2) +
+             '  width ' + e.width + '  depth ' + e.depth + '  色差 ' + e.d);
+    }
+    // 同区域但墙强度很高的边（可能该分开）
+    const strong = dg.edges.filter(e => nm(e.cells[0]) === nm(e.cells[1]) && e.wall >= 0.5)
+      .sort((a, b) => b.wall - a.wall).slice(0, 10);
+    L.push('');
+    L.push('同区域内却像墙的边（墙强度 ≥0.5 → 也许该分开）：');
+    for (const e of strong) {
+      L.push(' ' + e.cells[0] + '-' + e.cells[1] + '  ' + nm(e.cells[0]) +
+             '  wall ' + e.wall.toFixed(2) + '  width ' + e.width + '  depth ' + e.depth + '  色差 ' + e.d);
+    }
+    return L.join('\n');
+  }
+
+  return { detectRegions, diagnose, formatDiagnosis, sampleCells, cellDistance, cellLuma, borderProbe, srgbToLab, otsu1d };
 });

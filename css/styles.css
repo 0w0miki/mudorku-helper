@@ -855,3 +855,17 @@ kbd {
   pointer-events: none;
 }
 body.picking #board { cursor: crosshair; }
+
+/* 边界诊断输出（只读文本框，方便整段复制） */
+.diag {
+  width: 100%;
+  box-sizing: border-box;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+  overflow: auto;
+  background: var(--bg-soft, #f6f6f6);
+  color: var(--text, #111);
+  border: 1px solid var(--line, #ddd);
+  border-radius: 6px;
+  padding: 6px;
+}
