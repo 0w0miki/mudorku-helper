@@ -739,7 +739,26 @@
     const dg = R2.diagnose(geo.raster, geo.geom);
     const assign = new Map();
     for (const reg of MH.store.state.regions) for (const k of reg.cells) assign.set(k, reg.name || '区域');
-    MH.ui.diagText = R2.formatDiagnosis(dg, assign);
+    let text = R2.formatDiagnosis(dg, assign);
+    // 附上"标签 → 落在哪一格"：整体错位（例如整块偏一行）多半是种子格算错了，
+    // 这几行能一眼看出来
+    let labels = readLabelCache(MH.store.state) || [];
+    if (!labels.length && MH.bgPdfFile && MH.ui.mapBox) {
+      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox); } catch (_) { labels = []; }
+    }
+    if (labels.length) {
+      const rows2 = ['格 → 种子：'];
+      for (const l of labels) {
+        const cell = window.MurdokuLabels.labelToCell(l, geo.geom);
+        const cell2 = window.MurdokuLabels.labelToCell(
+          { x: l.x, y: l.y + geo.geom.pitchY * 0.5 }, geo.geom);   // 视觉中心大约在基线下半格
+        rows2.push(' "' + l.name + '" @(' + Math.round(l.x) + ',' + Math.round(l.y) + ') 字号 ' +
+          Math.round(l.h) + ' → 基线格 ' + (cell ? '(' + cell.r + ',' + cell.c + ')' : '框外') +
+          ' · 视觉中心格 ' + (cell2 ? '(' + cell2.r + ',' + cell2.c + ')' : '框外'));
+      }
+      text = text + '\n\n' + rows2.join('\n');
+    }
+    MH.ui.diagText = text;
     MH.render();
     MH.toast('诊断完成：' + dg.edges.length + ' 条相邻边 · ' + (Date.now() - t0) + 'ms · 点「复制」发我', 'ok');
   }
