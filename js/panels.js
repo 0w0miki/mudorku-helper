@@ -63,12 +63,16 @@
       '</div>';
   }
 
-  /** 物品编辑界面里的"补格子"按钮（结果直接进当前草稿 ✓） */
+  /**
+   * 物品编辑界面里的"点样例补格子"按钮。
+   * 用法（按钮就在编辑界面里）：点它 → 在棋盘上点一个格子当样例 → 自动找出所有同类格子
+   * → **追加到正在编辑的这件物品**（不会新建 ✓）。多找几次可以叠加，找到的还能手动加减。
+   */
   function draftSampleButtons() {
     if (!MH.store.state.bg) return '';
     return '<button class="ghost sm" data-act="item-sample"' + (MH.ui.itemPicking ? ' disabled' : '') +
-        ' title="点棋盘上任意一个物品格子当样例，自动把长得一样的格子都圈出来（结果直接进下面这个清单）">' +
-        (MH.ui.itemPicking ? '🔍 请点一个物品格子…' : '🔍 从样例找同类') + '</button>';
+        ' title="点这里，然后在棋盘上点一个格子当样例 → 自动找出所有长得一样的格子，&#10;追加到这件物品（不会新建物品）。&#10;可以多找几次叠加；棋盘上还能手动加减格子。">' +
+        (MH.ui.itemPicking ? '🔍 请在棋盘上点一个格子…' : '🔍 点样例补格子') + '</button>';
   }
 
   function draftHTML(st, d, opts) {
@@ -192,7 +196,6 @@
           ? '<button class="occ ' + (t.occupiable ? '' : 'blocked') + '" data-act="toggle-occ" data-id="' + esc(t.id) + '" title="切换是否可占据">' + (t.occupiable ? '可占据' : '不可占据') + '</button>'
           : '') +
         '<button class="ghost sm" data-act="edit-' + kind + '" data-id="' + esc(t.id) + '">编辑</button>' +
-        '<button class="ghost sm" data-act="rename-' + kind + '" data-id="' + esc(t.id) + '">改名</button>' +
         '<button class="ghost sm danger" data-act="del-' + kind + '" data-id="' + esc(t.id) + '">删除</button>' +
         inline +
         '</li>';
@@ -1731,7 +1734,7 @@
       MH.ui.itemPicking = !MH.ui.itemPicking;
       document.body.classList.toggle('picking', MH.ui.itemPicking);
       MH.toast(MH.ui.itemPicking
-        ? '点棋盘上任意一个物品所在的格子（就以它为样例找同类；再点一次按钮取消）'
+        ? '请在棋盘上点一个格子当样例：会自动找出所有同类格子并追加到当前物品（再点一次按钮取消）'
         : '已取消取样', MH.ui.itemPicking ? 'ok' : 'warn');
       MH.render();
     },
@@ -1754,8 +1757,6 @@
       MH.toast('已只保留最大的连通块', 'ok');
     },
     'rename-person'(el) { renamePerson(el.dataset.id); },
-    'rename-region'(el) { renameEntity('region', el.dataset.id); },
-    'rename-item'(el) { renameEntity('item', el.dataset.id); },
     'color-region'(el) { cycleColor('region', el.dataset.id); },
     'color-item'(el) { cycleColor('item', el.dataset.id); },
     'del-region'(el) { deleteEntity('region', el.dataset.id); },
@@ -1899,22 +1900,6 @@
     if (label == null) return;
     const res = MH.store.commit('修改人物编号', s => Core.setPersonLabel(s, id, label));
     if (res && res.message) MH.toast(res.message, res.ok === false ? 'warn' : 'ok');
-  }
-
-  function renameEntity(kind, id) {
-    const st = MH.store.state;
-    const t = kind === 'region' ? Core.region(st, id) : Core.item(st, id);
-    if (!t) return;
-    const name = prompt('给' + kindName(kind) + '起个名字：', t.name);
-    if (name == null) return;
-    const clean = name.trim();
-    if (!clean) { MH.toast('名称不能为空', 'warn'); return; }
-    MH.store.commit('重命名' + kindName(kind), s => {
-      const target = kind === 'region' ? Core.region(s, id) : Core.item(s, id);
-      if (!target) return { ok: false, message: '目标不存在' };
-      target.name = clean;
-      return { ok: true, message: '已重命名为「' + clean + '」' };
-    });
   }
 
   function cycleColor(kind, id) {
