@@ -458,51 +458,124 @@
   }
 
   /**
+   * 图例来自 PDF 时走这条路：**直接读文字层**（名字 + 精确坐标 + 两栏说明），
+   * 一个像素都不用猜。图标只需在"名字上方那条带"里取一次色差外接框 ——
+   * 带子很小、底色占主导，很稳。真实图例画在彩色药丸面板里，纯像素切分没有稳定解 ✗
+   */
+  async function readLegendByPdf() {
+    const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
+    const file = Sn && Sn.file;
+    if (!file || !/pdf/i.test(file.type || file.name || '')) return null;
+    await MH.ensurePdfLib();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const doc = await window.pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
+    try {
+      const page = await doc.getPage(Math.min(Math.max(1, Sn.page || 1), doc.numPages));
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(3, Math.max(0.3, 1600 / Math.max(base.width, base.height)));
+      const vp = page.getViewport({ scale });
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const img = ctx.getImageData(0, 0, cv.width, cv.height);
+      const tc = await page.getTextContent();
+      const items = [];
+      for (const it of tc.items) {
+        const str = String(it.str || '').trim();
+        if (!str) continue;
+        const pt = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+        items.push({
+          str, x: pt[0], y: pt[1],
+          w: (it.width || 0) * scale || str.length * 6,
+          h: Math.abs(it.transform[3]) * scale || 10,
+        });
+      }
+      return window.MurdokuLegend.legendFromText(items, { data: img.data, width: img.width, height: img.height });
+    } finally {
+      if (doc.destroy) doc.destroy();
+    }
+  }
+
+  /**
    * 从图例卡片自动列出物品：切图标 → OCR 名字与分组说明 → 一次性建好物品。
    * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
    */
   async function runLegendAuto() {
     const Lg = window.MurdokuLegend;
     if (!Lg) { MH.toast('图例模块没加载（js/legend.js）', 'error'); return; }
-    if (!MH.store.state.bg) { MH.toast('还没有底图（不过图例自动列物品不强求底图）', 'warn'); }
     const pins = (window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || [];
-    if (!pins.length) { MH.toast('还没有图例卡片：先在右侧「PDF 摘录」里导入图例那一页，框选图标做成卡片', 'warn'); return; }
-    let raster;
-    try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
-    if (!raster) { MH.toast('读不到图例卡片', 'error'); return; }
-    MH.toast('正在切分图例卡片…', 'ok');
-    let sp;
-    try { sp = Lg.split(raster); } catch (err) { MH.toast('切分失败：' + err.message, 'error'); return; }
-    if (!sp.icons.length) { MH.toast('这张卡片上没切出图标（试试只截图例那一块，别带太多空白）', 'warn'); return; }
-    // OCR：名字与分组说明都是从卡片上读出来的文字
-    let ocr = [];
-    if (sp.textBoxes.length && window.MurdokuOCR) {
-      try {
-        ocr = await window.MurdokuOCR.readBadges(raster, sp.textBoxes.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
-          { zoom: 4, onStatus: msg => MH.toast(msg, 'ok'), onProgress: (i, n) => { if (i === n) MH.toast('文字识别完成（' + n + ' 块）', 'ok'); } });
-      } catch (err) { MH.toast('文字识别失败（名字会留空）：' + err.message, 'warn'); }
+    const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
+    const isPdf = !!(Sn && Sn.file && /pdf/i.test(Sn.file.type || Sn.file.name || ''));
+    if (!pins.length && !isPdf) {
+      MH.toast('还没有图例：在右侧「PDF 摘录」导入图例那一页（PDF 最好，能直接读文字层）', 'warn');
+      return;
     }
-    let items = [];
-    try { items = Lg.annotate(sp, ocr); } catch (err) { MH.toast('归类失败：' + err.message, 'error'); return; }
-    const unknown = sp.groups.filter(g => g.occupiable === null).length;
+    let out = null, via = '';
+    // ① 首选：PDF 文字层（名字 + 坐标 + 说明都是现成的，最稳）
+    if (isPdf) {
+      try {
+        MH.toast('正在读 PDF 文字层…', 'ok');
+        out = await readLegendByPdf();
+        if (out && out.items.length) via = 'pdf';
+      } catch (err) { MH.toast('读 PDF 文字层失败：' + err.message, 'warn'); }
+    }
+    // ② 其次：图例卡片（截图来源）→ 切分 + OCR
+    if (!out || !out.items.length) {
+      if (!pins.length) {
+        MH.toast('这张图例没有文字层，也还没有卡片：框选图例做成卡片再试', 'warn');
+        return;
+      }
+      let raster;
+      try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
+      if (!raster) { MH.toast('读不到图例卡片', 'error'); return; }
+      MH.toast('正在切分图例卡片…', 'ok');
+      let sp;
+      try { sp = Lg.split(raster); } catch (err) { MH.toast('切分失败：' + err.message, 'error'); return; }
+      if (!sp.icons.length) { MH.toast('这张卡片上没切出图标（试试只截图例那一块，别带太多空白）', 'warn'); return; }
+      let ocr = [];
+      if (sp.textBoxes.length && window.MurdokuOCR) {
+        try {
+          ocr = await window.MurdokuOCR.readBadges(raster, sp.textBoxes.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
+            { zoom: 4, onStatus: msg => MH.toast(msg, 'ok'), onProgress: (i, n) => { if (i === n) MH.toast('文字识别完成（' + n + ' 块）', 'ok'); } });
+        } catch (err) { MH.toast('文字识别失败（名字会留空）：' + err.message, 'warn'); }
+      }
+      let items = [];
+      try { items = Lg.annotate(sp, ocr); } catch (err) { MH.toast('归类失败：' + err.message, 'error'); return; }
+      out = {
+        items: items.map((it, i) => ({
+          name: it.name || ('物品 ' + (i + 1)),
+          occupiable: (sp.groups[it.group] || {}).occupiable,
+          icon: it.box,
+        })),
+        headings: sp.groups.map(g => ({ text: g.label, occupiable: g.occupiable })),
+        skipped: [],
+      };
+      via = 'image';
+    }
+    const unknown = out.items.filter(i => i.occupiable === null || i.occupiable === undefined).length;
     let made = 0;
     MH.store.commit('从图例自动列出物品', st => {
-      items.forEach((it, i) => {
-        const g = sp.groups[it.group];
-        const occ = g && g.occupiable === false ? false : true;      // 读不懂就先按"可占据"
-        Core.createItem(st, it.name || ('物品 ' + (i + 1)), [], occ);
+      out.items.forEach(it => {
+        Core.createItem(st, it.name || ('物品 ' + (made + 1)), [], it.occupiable === false ? false : true);
         made++;
       });
     });
+    MH.ui.legendItems = out.items.map(it => ({ name: it.name, occupiable: it.occupiable, icon: it.icon || null }));
     MH.ui.lastLegend = {
-      icons: sp.icons.length, groups: sp.groups.length, items: made,
-      names: items.map(i => i.name), occupiable: items.map((it, i) => (sp.groups[it.group] || {}).occupiable),
-      unknowns: unknown,
+      via, icons: out.items.length, groups: (out.headings || []).length,
+      items: made, names: out.items.map(i => i.name),
+      occupiable: out.items.map(i => i.occupiable),
+      headings: (out.headings || []).map(h => h.text + (h.occupiable === false ? '（不可）' : h.occupiable ? '（可）' : '')),
+      skipped: (out.skipped || []).length, unknowns: unknown,
     };
     MH.render();
-    MH.toast('从图例列出 ' + made + ' 件物品' +
-      (unknown ? '（有 ' + unknown + ' 组的说明没读懂，先都按"可占据"，请在物品列表里改）' : '') +
-      '：' + items.map(i => i.name || '?').join('、') + ' · 格子留空，点每件的「从样例找同类」补地点',
+    MH.toast('从图例列出 ' + made + ' 件物品（' + (via === 'pdf' ? 'PDF 文字层' : '卡片识别') + '）' +
+      ((out.headings || []).length ? '：分组说明 ' + MH.ui.lastLegend.headings.join(' / ') : '') +
+      (unknown ? ' · 有 ' + unknown + ' 件读不出分组，先都按"可占据"，请在物品列表里改' : '') +
+      ' · 格子留空，点每件的「从样例找同类」补地点',
       unknown ? 'warn' : 'ok');
   }
 

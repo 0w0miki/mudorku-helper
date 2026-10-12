@@ -229,12 +229,13 @@
   function classifyLabel(text) {
     const t = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
     if (!t) return 'unknown';
+    // 必须提到"能否占据"这件事，否则不算说明 —— 否则线索句里的 "not beside" 会被当成
+    // "不可占据"的分组说明 ✗（真实 PDF 上踩过：一次多出一个假分组）
+    const aboutOccup = /(occup|占据|放人|可进入|can be placed)/.test(t);
+    if (!aboutOccup) return 'unknown';
     // "cannot be occupied" / "can not" / "不可占据" / "不能放人" / "无法放置" ...
-    if (/(cannot|can ?not|can't|not occup|no occup|unoccup|不可|不能|无法|禁止|不可放置|不放人)/.test(t)) return 'no';
+    if (/(cannot|can ?not|can't|not occup|no occup|unoccup|不可|不能|无法|禁止|不放人)/.test(t)) return 'no';
     if (/(can be occup|occupiable|可以|可占据|可放置|能放|放人|可进入)/.test(t)) return 'yes';
-    // 兜底：出现 "no"/"✗"/"×" 当成"不能"，出现 "yes"/"✓" 当成"能"
-    if (/(^|\s)(no|not)(\s|$)|[✗×]/.test(t)) return 'no';
-    if (/(^|\s)(yes|ok)(\s|$)|[✓√]/.test(t)) return 'yes';
     return 'unknown';
   }
 
@@ -369,5 +370,173 @@
     return items;
   }
 
-  return { split, annotate, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
+
+  // ────────────────────────────────────────────────────────────────────────
+  // A. PDF 文字层当骨架（最稳的一条路）
+  //    为什么不再去"切图标"：真实图例画在彩色药丸面板里，像素级切分没有稳定解（见 docs）。
+  //    而 PDF 有**文字层**：名字 + 精确坐标。名字的坐标本身就告诉你"这里有一件物品"，
+  //    图标只需在"名字上方那条带"里取一次色差外接框即可 —— 带子很小、面板底色占主导，
+  //    这一步非常稳。说明文字（Can be occupied / Cannot be occupied）同样来自文字层。
+  // ────────────────────────────────────────────────────────────────────────
+
+  /** 把 PDF 文字项按"同一行"归并（pdf.js 常把一行拆成好几个 item） */
+  function mergeByLine(items) {
+    const list = (items || []).filter(t => t && String(t.str || '').trim())
+      .map(t => ({ str: String(t.str).trim(), x: t.x, y: t.y, w: t.w || 0, h: t.h || 10 }))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    const lines = [];
+    for (const t of list) {
+      const same = lines.find(l => Math.abs(l.y - t.y) <= Math.max(3, l.h * 0.5));
+      if (!same) { lines.push({ str: t.str, x: t.x, y: t.y, w: t.w, h: t.h, items: [t] }); continue; }
+      same.items.push(t);
+      same.str = same.str + ' ' + t.str;
+      const right = Math.max(same.x + same.w, t.x + t.w);
+      same.x = Math.min(same.x, t.x);
+      same.w = right - same.x;
+      same.h = Math.max(same.h, t.h);
+    }
+    return lines;
+  }
+
+  /** 一行里按 x 空隙拆成若干"词块"（一行可能有几个物品名） */
+  function splitByGaps(line, gapFactor) {
+    const its = line.items.slice().sort((a, b) => a.x - b.x);
+    const out = [];
+    let cur = null;
+    for (const t of its) {
+      const gapNeed = Math.max(4, t.h * (gapFactor || 1.2));
+      if (cur && t.x - (cur.x1) <= gapNeed) {
+        cur.str += ' ' + t.str;
+        cur.x1 = Math.max(cur.x1, t.x + t.w);
+        cur.h = Math.max(cur.h, t.h);
+      } else {
+        if (cur) out.push(cur);
+        cur = { str: t.str, x0: t.x, x1: t.x + t.w, y: t.y, h: t.h };
+      }
+    }
+    if (cur) out.push(cur);
+    return out.map(c => ({ str: c.str, x0: c.x0, x1: c.x1, y: c.y, h: c.h, w: c.x1 - c.x0 }));
+  }
+
+  /**
+   * 在"一条带子"里找图标：底色取带内众数颜色，取与它差异明显的像素的外接框。
+   * 带子 = 名字上方（或左侧）那一小块，面板底色在其中占主导，所以这一步很稳。
+   */
+  function findIconInBand(raster, x0, y0, x1, y1, opts) {
+    const opt = opts || {};
+    const W = raster.width, H = raster.height;
+    const bx0 = Math.max(0, Math.round(x0)), bx1 = Math.min(W - 1, Math.round(x1));
+    const by0 = Math.max(0, Math.round(y0)), by1 = Math.min(H - 1, Math.round(y1));
+    if (bx1 - bx0 < 4 || by1 - by0 < 4) return null;
+    const bins = new Int32Array(4096);
+    const idx = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const d = raster.data;
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++) {
+        const o = (y * W + x) * 4;
+        bins[idx(d[o], d[o + 1], d[o + 2])]++;
+      }
+    }
+    let bestBin = 0, bestN = -1;
+    for (let i = 0; i < bins.length; i++) if (bins[i] > bestN) { bestN = bins[i]; bestBin = i; }
+    let sr = 0, sg = 0, sb = 0, sn = 0;
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++) {
+        const o = (y * W + x) * 4;
+        if (idx(d[o], d[o + 1], d[o + 2]) !== bestBin) continue;
+        sr += d[o]; sg += d[o + 1]; sb += d[o + 2]; sn++;
+      }
+    }
+    if (!sn) return null;
+    const base = [sr / sn, sg / sn, sb / sn];
+    const diff = [];
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++) {
+        const o = (y * W + x) * 4;
+        diff.push(Math.max(Math.abs(d[o] - base[0]), Math.abs(d[o + 1] - base[1]), Math.abs(d[o + 2] - base[2])));
+      }
+    }
+    const sorted = diff.slice().sort((a, b) => a - b);
+    const p25 = sorted[Math.floor(sorted.length * 0.25)] || 0;
+    const need = Math.max(opt.minDiff || 30, p25 * 3);
+    let ix0 = W, ix1 = -1, iy0 = H, iy1 = -1, n = 0;
+    let i = 0;
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++, i++) {
+        if (diff[i] <= need) continue;
+        n++;
+        if (x < ix0) ix0 = x; if (x > ix1) ix1 = x;
+        if (y < iy0) iy0 = y; if (y > iy1) iy1 = y;
+      }
+    }
+    if (n < (opt.minPixels || 40) || ix1 < 0) return null;
+    return { x: ix0, y: iy0, w: ix1 - ix0 + 1, h: iy1 - iy0 + 1, n };
+  }
+
+  /**
+   * 从 PDF 文字层 + 渲染好的页面栅格，推出物品清单。
+   * @param {Array<{str,x,y,w,h}>} textItems 文字项（坐标与 raster 同一尺度，y 为基线）
+   * @param {{data,width,height}} raster 页面栅格
+   * @returns {{items:Array, headings:Array, skipped:Array}}
+   *   item = {name, occupiable, icon:{x,y,w,h}, heading}
+   */
+  function legendFromText(textItems, raster, options) {
+    const opt = Object.assign({ nameBoxPad: 0.3 }, options || {});
+    const lines = mergeByLine(textItems);
+    // 同一行里可能有**两条**说明（真实图例就是"Can be occupied | Cannot be occupied"并排）✗
+    // 所以先按 x 空隙把每行拆成"词块"，再逐块判定是说明还是物品名。
+    // 空隙阈值给得宽一点（1.8 倍字高）：物品名内部的词间空隙不会这么大，不会把名字拆开 ✓
+    const heads = [], nameParts = [];
+    for (const ln of lines) {
+      for (const part of splitByGaps(ln, 1.8)) {
+        const cls = classifyLabel(part.str);
+        if (cls !== 'unknown' && part.str.split(/\s+/).length <= 6) {
+          heads.push({ str: part.str, x: part.x0, w: part.w, y: part.y, h: part.h, cls, occupiable: cls === 'yes' });
+        } else {
+          nameParts.push(part);
+        }
+      }
+    }
+    const headings = heads.map(h => ({ text: h.str, x: h.x, y: h.y, w: h.w, h: h.h, occupiable: h.occupiable }));
+    // **物品名只在"说明行下方那条带"里找**：图例的结构就是
+    //     [说明行] [图标行] [名字行]
+    // 不限定范围的话，整页的线索/标题/区域名都会被当成物品
+    // （真实 PDF 上实测一次扫出 64 件 ✗）
+    let names = nameParts;
+    if (heads.length) {
+      const top = Math.min.apply(null, heads.map(h => h.y));
+      const hh = Math.max.apply(null, heads.map(h => h.h)) || 12;
+      // x 方向不设限：图例每一列常比它上面的说明行宽，限 x 会把最右边那件漏掉 ✗
+      // 真正起过滤作用的是"y 在说明行下方一条带里" + "这件名字附近要能找到一个图标"
+      names = nameParts.filter(nm => nm.y > top + hh * 0.5 && nm.y < top + hh * 14);
+    }
+    const items = [], skipped = [];
+    for (const nm of names) {
+      // 这一件属于哪一组：优先 x 范围重叠的说明；否则取最近的上方说明
+      let head = null, bestD = Infinity;
+      for (const h of heads) {
+        const ov = Math.min(h.x + h.w, nm.x1) - Math.max(h.x, nm.x0);
+        // 横向重叠 → 就是这组；否则按"横向还差多远"选最近的（说明行往往比它那列窄）
+        const gapX = ov > 0 ? 0 : Math.min(Math.abs(nm.x0 - (h.x + h.w)), Math.abs(h.x - nm.x1));
+        const d = gapX + Math.abs(nm.y - (h.y + h.h)) * 0.3;
+        if (d < bestD) { bestD = d; head = h; }
+      }
+      const nameH = Math.max(6, nm.h);
+      const pad = nameH * opt.nameBoxPad;
+      // 名字上方的带子：从"最近的说明下沿"到"名字上沿"
+      const bandTop = head ? Math.max(head.y + head.h, nm.y - nameH * 9) : nm.y - nameH * 9;
+      const bandBottom = nm.y - nameH * 0.6;
+      let icon = findIconInBand(raster, nm.x0 - pad - nameH * 0.5, bandTop, nm.x1 + pad + nameH * 0.5, bandBottom, opt);
+      // 横排图例：图标在名字左边
+      if (!icon) icon = findIconInBand(raster, nm.x0 - nameH * 8, nm.y - nameH * 1.5, nm.x0 - nameH * 0.4, nm.y + nameH * 0.6, opt);
+      if (!icon) { skipped.push({ name: nm.str, why: '名字附近找不到图标' }); continue; }
+      items.push({
+        name: nm.str, occupiable: head ? head.occupiable : null,
+        heading: head ? head.str : '', icon,
+      });
+    }
+    return { items, headings, skipped, method: 'pdf-text' };
+  }
+
+  return { split, annotate, legendFromText, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
 });

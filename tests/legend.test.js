@@ -104,3 +104,45 @@ test('说明文字读不懂时不硬猜（occupiable 留 null，交给用户定�
   L.annotate(sp, [{ x: 20, y: 20, text: 'Some heading', badge: { w: 120, h: 13 } }]);
   assert.equal(sp.groups[0].occupiable, null, '读不懂就不猜：' + JSON.stringify(sp.groups[0]));
 });
+
+/* ── A. PDF 文字层当骨架 ─────────────────────────────────────────────── */
+
+test('PDF 文字层：名字 + 坐标 → 物品清单（可占据按说明行判定）', () => {
+  // 造一页"图例"：上面两行说明，下面图标 + 名字（模拟真实图例的排版）
+  const r = makeRaster(600, 220, [235, 232, 245]);
+  icon(r, 40, 70, 1); icon(r, 150, 70, 1);
+  icon(r, 330, 70, 1); icon(r, 440, 70, 1);
+  icon(r, 550, 70, 1);
+  // 文字层（坐标为视口坐标，y 是基线）
+  const text = [
+    { str: 'Can be occupied', x: 30, y: 55, w: 150, h: 14 },
+    { str: 'Cannot be occupied', x: 320, y: 55, w: 170, h: 14 },
+    { str: 'Oil Slick', x: 28, y: 140, w: 60, h: 13 },
+    { str: 'Car', x: 140, y: 140, w: 30, h: 13 },
+    { str: 'TV', x: 320, y: 140, w: 22, h: 13 },
+    { str: 'Shelf', x: 430, y: 140, w: 45, h: 13 },
+    { str: 'Plant', x: 540, y: 140, w: 45, h: 13 },
+    { str: 'Page 1 of 2', x: 500, y: 205, w: 70, h: 10 },
+  ];
+  const out = L.legendFromText(text, r);
+  assert.equal(out.items.length, 5, '应认出 5 件物品：' + JSON.stringify(out.items.map(i => i.name)));
+  const byName = Object.fromEntries(out.items.map(i => [i.name, i]));
+  assert.ok(byName.Car && byName.TV && byName.Shelf && byName.Plant, '名字应来自文字层：' + JSON.stringify(Object.keys(byName)));
+  assert.equal(byName.Car.occupiable, true, '左栏 = 可占据');
+  assert.equal(byName.Shelf.occupiable, false, '右栏 = 不可占据');
+  assert.ok(byName.Car.icon.x < 200, 'Car 的图标应在左边那件上：' + JSON.stringify(byName.Car.icon));
+  assert.ok(byName.Shelf.icon.x > 380, 'Shelf 的图标应在右边那件上：' + JSON.stringify(byName.Shelf.icon));
+  assert.ok(!byName['Page 1 of 2'], '页脚那种"附近没有图标"的文字要被丢掉');
+});
+
+test('PDF 文字层：一行里并排的两个名字按空隙拆开', () => {
+  const r = makeRaster(400, 120, [235, 232, 245]);
+  icon(r, 30, 30, 1); icon(r, 220, 30, 1);
+  const text = [
+    { str: 'Chair', x: 25, y: 95, w: 45, h: 13 },
+    { str: 'Table', x: 215, y: 95, w: 45, h: 13 },
+  ];
+  const out = L.legendFromText(text, r);
+  assert.equal(out.items.length, 2, JSON.stringify(out.items.map(i => i.name)));
+  assert.deepEqual(out.items.map(i => i.name).sort(), ['Chair', 'Table']);
+});
