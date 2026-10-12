@@ -703,11 +703,12 @@
     // （真实 PDF 上实测一次扫出 64 件 ✗）
     let names = nameParts;
     if (heads.length) {
-      const top = Math.min.apply(null, heads.map(h => h.y));
       const hh = Math.max.apply(null, heads.map(h => h.h)) || 12;
-      // x 方向不设限：图例每一列常比它上面的说明行宽，限 x 会把最右边那件漏掉 ✗
-      // 真正起过滤作用的是"y 在说明行下方一条带里" + "这件名字附近要能找到一个图标"
-      names = nameParts.filter(nm => nm.y > top + hh * 0.5 && nm.y < top + hh * 30);
+      // 每条说明行**上下各 14 个字高**都算它的图例区。
+      // 以前只取"最上面那条说明行往下 30 个字高" ✗ —— 说明行画在图例**下方**时整块都够不着 ✓
+      // x 方向不设限：图例每一列常比说明行宽，限 x 会把最右边那件漏掉 ✗
+      const reach = hh * 14;
+      names = nameParts.filter(nm => heads.some(h => nm.y > h.y - reach && nm.y < h.y + reach));
     }
     // 三条硬判据（不然整页的线索句子都会被当成物品 ✗ —— familymurdoku/contest 上踩过）：
     //   ① 不像句子：不超过 3 个词、不含句读
@@ -722,6 +723,9 @@
       // 全大写 = 地图上的**区域名**（RECEPTION / WAITING AREA / TEACHER'S AREA…），不是物品名 ✗
       // （这三份真实 PDF 里图例物品名都是 Title case 或小写；区域名一律全大写）
       const letters = t2.replace(/[^A-Za-z]/g, '');
+      // 坐标标签（C9 / C24 / R1）那种"短、带数字"的串不是物品名 ✓（contest 页面底部就有 C1~C24）
+      if (/^[A-Za-z]{0,2}\d+$/.test(t2)) return true;
+      // 全大写 = 区域名（RECEPTION / WAITING AREA / TEACHER'S AREA…）不是物品名 ✗
       if (letters.length >= 4 && letters === letters.toUpperCase()) return true;
       return false;
     };
@@ -746,7 +750,13 @@
         // （contest：上两排属于 can't be occupied，下面那排属于 can be occupied）。
         // 只看横向距离会按 x 归错组 ✗（左边的 fire/tree 会被归到右边那条说明下）
         const above = h.y < nm.y && (nm.y - h.y) < 40 * h.h;
-        const d = above ? (nm.y - h.y) + gapX * 0.05 : 1e6 + gapX + Math.abs(nm.y - (h.y + h.h)) * 0.3;
+        // 说明行也可能画在图例**下方**（有些图例是"图标在上面、说明在下面"）✓
+        const below = h.y > nm.y && (h.y - nm.y) < 40 * h.h;
+        // "上方"永远优先于"下方"：图例一般从上方标注；只有下方才有说明时才用下方 ✓
+        // （否则页面底部那条说明会把上面那组的物品全都吸走 ✗，contest 上踩过）
+        const d = above ? (nm.y - h.y) + gapX * 0.05
+          : below ? 1e5 + (h.y - nm.y) * 1.5 + gapX * 0.2
+          : 1e6 + gapX + Math.abs(nm.y - (h.y + h.h)) * 0.3;
         if (d < bestD) { bestD = d; head = h; }
       }
       const nameH = Math.max(6, nm.h);
@@ -754,7 +764,9 @@
       // 名字上方的带子：从"最近的说明下沿"到"名字上沿"
       // 图标带：**只取名字正上方一小条**（4.5 个字高）。取太高会把上一排的图标和名字
       // 都包进来 → 外接框巨大 → 被尺寸判据否掉 ✗（contest 的两排图例就是这样只剩 5 件）
-      const bandTop = head ? Math.max(head.y + head.h, nm.y - nameH * 4.5) : nm.y - nameH * 4.5;
+      // 只有当说明行确实在名字**上方**时才用它当下界；说明行在下方时用它会把带子弄反 ✗
+      const headAbove = !!(head && head.y + head.h <= nm.y);
+      const bandTop = headAbove ? Math.max(head.y + head.h, nm.y - nameH * 4.5) : nm.y - nameH * 4.5;
       const bandBottom = nm.y - nameH * 0.6;
       let icon = findIconInBand(raster, nm.x0 - pad - nameH * 0.5, bandTop, nm.x1 + pad + nameH * 0.5, bandBottom, opt);
       // 横排图例：图标在名字左边

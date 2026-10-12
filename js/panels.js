@@ -631,13 +631,15 @@
         out = await readLegendByPdf();
         if (out && out.raster) {
           const rects = cardRectsForPage(out.raster);
+          const whole = out;                       // 整页结果留作最后的兜底
+          let restricted = null;
           if (rects.length && out.rawItems) {
-            // 用户框了图例卡片 → **以卡片框为准**重解析一次（比任何启发式都可靠）
-            const restricted = Lg.legendFromText(out.rawItems, out.raster, { rects });
-            if (restricted.items.length >= 2) {
-              restricted.raster = out.raster;
-              restricted.page = out.page;
-              restricted.rawItems = out.rawItems;
+            // 用户框了图例 → **以卡片框为准**（以前是"整页够 2 件就不看框" ✗，等于忽略用户的操作）
+            restricted = Lg.legendFromText(out.rawItems, out.raster, { rects });
+            restricted.raster = out.raster;
+            restricted.page = out.page;
+            restricted.rawItems = out.rawItems;
+            if (restricted.items.length >= 1) {
               out = restricted;
               via = 'pdf+card';
             }
@@ -686,7 +688,14 @@
               via = 'card-rows';
             }
           }
+          if (out.items.length < 1 && !restricted && whole.items.length) {
+            out = whole;                           // 框内什么都没找到 → 退回整页
+            via = 'pdf';
+          }
           if (out.items.length && via === '') via = 'pdf';
+          if (out === restricted && out.items.length < 2 && whole.items.length > out.items.length) {
+            MH.toast('卡片框里只找到 ' + out.items.length + ' 件，整页能找到 ' + whole.items.length + ' 件（如果框太小可以重新框）', 'warn');
+          }
         } else if (out && out.items.length) via = 'pdf';
       } catch (err) { MH.toast('读 PDF 文字层失败：' + err.message, 'warn'); }
     }
@@ -724,10 +733,28 @@
       via = 'image';
     }
     const unknown = out.items.filter(i => i.occupiable === null || i.occupiable === undefined).length;
-    let made = 0;
+    // **按名字去重**：同一个图例点两次不该建出两套物品 ✗（用户改了名字再点会更乱）。
+    // 已有同名物品 → 只更新"可占据"（**保留用户手填的格子**）；没有才新建 ✓
+    const keyOf = n => String(n || '').replace(/\s+/g, '').toLowerCase();
+    let made = 0, updated = 0, renamed = 0;
     MH.store.commit('从图例自动列出物品', st => {
-      out.items.forEach(it => {
-        Core.createItem(st, it.name || ('物品 ' + (made + 1) + '（请改名）'), [], it.occupiable === false ? false : true);
+      const byName = new Map();
+      st.items.forEach(x => { const k2 = keyOf(x.name); if (k2 && !byName.has(k2)) byName.set(k2, x); });
+      const unnamed = st.items.filter(x => /^物品\s*\d+/.test(String(x.name || '')));
+      let unnamedIdx = 0;
+      out.items.forEach((it, i) => {
+        const want = (it.name || '').trim();
+        let target = want ? byName.get(keyOf(want)) : null;
+        if (!target && !want && unnamedIdx < unnamed.length) target = unnamed[unnamedIdx++];
+        if (target) {
+          const occ = it.occupiable === false ? false : true;
+          if (target.occupiable !== occ) { target.occupiable = occ; updated++; }
+          if (!want && /^物品\s*\d+/.test(String(target.name || ''))) { /* 占位名保持不变 */ }
+          if (want && target.name !== want) { target.name = want; renamed++; }
+          return;
+        }
+        const nm = want || ('物品 ' + (i + 1) + '（请改名）');
+        Core.createItem(st, nm, [], it.occupiable === false ? false : true);
         made++;
       });
     });
@@ -748,7 +775,7 @@
     MH.render();
     const viaText = via === 'pdf' ? 'PDF 文字层' : via === 'pdf+card' ? '卡片框 + PDF 文字层'
       : via === 'card-icons' ? '卡片框内按图标切分（没有文字名，请改名）' : '卡片识别';
-    MH.toast('从图例列出 ' + made + ' 件物品（' + viaText + '）' +
+    MH.toast('从图例列出 ' + made + ' 件物品（' + viaText + (updated ? ' · 更新了 ' + updated + ' 件的可占据' : '') + '）' +
       ((out.headings || []).length ? '：分组说明 ' + MH.ui.lastLegend.headings.join(' / ') : '') +
       (unknown ? ' · 有 ' + unknown + ' 件读不出分组，先都按"可占据"，请在物品列表里改' : '') +
       ' · 格子留空，点每件的「从样例找同类」补地点',

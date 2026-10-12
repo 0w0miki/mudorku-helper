@@ -205,3 +205,18 @@ test('卡片图例：两排图标各自成排（contest 那种"一个说明行 +
   const xs = top.map(x => x.box.x).sort((a, b) => a - b);
   assert.ok(xs[0] < 120 && xs[2] > 320, '第一排按 x 铺开：' + JSON.stringify(xs));
 });
+
+test('PDF 文字层：说明行画在图例**下方**时也能认出（不再只往下找）', () => {
+  const r = makeRaster(700, 300, [235, 232, 245]);
+  // 图标与名字在上，说明行在下
+  icon(r, 60, 40, 1); icon(r, 260, 40, 1); icon(r, 460, 40, 1);
+  const text = [
+    { str: 'Chair', x: 55, y: 110, w: 45, h: 13 },
+    { str: 'Table', x: 255, y: 110, w: 45, h: 13 },
+    { str: 'Plant', x: 455, y: 110, w: 45, h: 13 },
+    { str: 'Can be occupied', x: 250, y: 200, w: 150, h: 14 },
+  ];
+  const out = L.legendFromText(text, r);
+  assert.equal(out.items.length, 3, '说明行在下时也该认出 3 件：' + JSON.stringify(out.items.map(i => i.name)));
+  out.items.forEach(it => assert.equal(it.occupiable, true, '都应归到"可占据"：' + it.name + ' → ' + it.occupiable));
+});
