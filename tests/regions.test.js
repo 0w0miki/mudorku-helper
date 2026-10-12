@@ -117,3 +117,14 @@ test('取样用中位数：图标挡住中心不影响颜色判断', () => {
   assert.ok(Math.abs(cell.rgb[0] - 200) < 12 && Math.abs(cell.rgb[1] - 220) < 12,
     '颜色被图标带偏了：' + cell.rgb.join(','));
 });
+
+test('孤立的小格子（会被并进邻居）不能让识别崩溃', () => {
+  // 5×5 同色，只有 (2,2) 是异色单格 → 走"过小分量并进最相似邻居"这条路径
+  const { raster, geom } = makeMap({ cols: 5, rows: 5, pitch: 40, x0: 20, y0: 20, icons: false, texture: false });
+  fillRect(raster, geom.x0, geom.y0, 5 * 40, 5 * 40, [210, 225, 200]);
+  fillRect(raster, geom.x0 + 2 * 40 + 6, geom.y0 + 2 * 40 + 6, 28, 28, [70, 90, 120]);
+  const res = R.detectRegions(raster, geom);
+  assert.ok(res.ok, '不应崩溃：' + res.reason);
+  assert.equal(res.regions.length, 1, '单格应被并进邻居，实际 ' + res.regions.length + ' 个区域');
+  assert.equal(res.regions[0].size, 25, '应覆盖全部 25 格：' + res.regions[0].size);
+});

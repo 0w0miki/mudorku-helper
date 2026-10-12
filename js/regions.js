@@ -224,7 +224,9 @@
     const compOf = new Map();      // cellIndex → compIndex
     const rebuild = () => {
       compOf.clear();
-      comps.forEach((cp, ci) => cp.ids.forEach(i => compOf.set(i, ci)));
+      // cp 可能是 null：上面把"太小被并走"的分量置成了 null，遍历时必须跳过，
+      // 否则整条识别会直接抛异常（用户点按钮时表现为"什么都没发生"）
+      comps.forEach((cp, ci) => { if (cp) cp.ids.forEach(i => compOf.set(i, ci)); });
     };
     rebuild();
     const adjacentComps = ci => {
