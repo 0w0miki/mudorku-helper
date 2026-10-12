@@ -535,7 +535,13 @@ button.occ.blocked { border-color: #fecaca; background: #fef2f2; color: #b91c1c;
   border: 1px dashed var(--accent); border-radius: var(--radius);
   background: #f8fbff;
 }
-.draft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.draft-head { display: flex; align-items: center; gap: 6px; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; }
+
+/* 编辑已有物品时：编辑界面**展开在这一行下面**（不用往上滚） */
+.list li.editing { flex-wrap: wrap; background: #f8fbff; outline: 1px dashed var(--accent); }
+.draft.inline { flex: 0 0 100%; margin: 2px 0 6px; }
+/* 编辑界面里的"补格子"工具行（从样例/从图例找同类） */
+.draft-tools { margin: 0 0 6px; }
 
 /* 人物网格：人多时不至于拉成一条长龙
    （24 人一行一个 ≈ 700px+，网格里约 4 行；角标给候选数，✓ = 已确定） */

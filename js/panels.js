@@ -63,14 +63,28 @@
       '</div>';
   }
 
-  function draftHTML(st, d) {
+  /** 物品编辑界面里的"补格子"按钮（结果直接进当前草稿 ✓） */
+  function draftSampleButtons() {
+    if (!MH.store.state.bg) return '';
+    return '<button class="ghost sm" data-act="item-sample"' + (MH.ui.itemPicking ? ' disabled' : '') +
+        ' title="点棋盘上任意一个物品格子当样例，自动把长得一样的格子都圈出来（结果直接进下面这个清单）">' +
+        (MH.ui.itemPicking ? '🔍 请点一个物品格子…' : '🔍 从样例找同类') + '</button>' +
+      '<button class="ghost sm" data-act="item-legend"' + (MH.ui.legendPicking ? ' disabled' : '') +
+        ' title="从右侧图例卡片上点那个图标当模板，再回地图上找同类（图例干净、无遮挡）">' +
+        (MH.ui.legendPicking ? '🔍 请点图例上的图标…' : '🔍 从图例找同类') + '</button>';
+  }
+
+  function draftHTML(st, d, opts) {
+    const inline = !!(opts && opts.inline);
     const cells = [...d.cells];
     const connected = d.kind !== 'region' || Core.isConnected(cells);
     const canSave = cells.length > 0 && connected;
     const showLargest = d.kind === 'region' && !connected && cells.length > 0;
-    return '<div class="draft">' +
+    return '<div class="draft' + (inline ? ' inline' : '') + '">' +
       '<div class="draft-head"><b>' + (d.editingId ? '编辑' : '新建') + kindName(d.kind) + '</b>' +
-      '<button class="ghost sm" data-act="draft-cancel">取消</button></div>' +
+      '<span class="grow"></span>' +
+      '<button class="ghost sm" data-act="draft-cancel">' + (inline ? '收起' : '取消') + '</button></div>' +
+      (d.kind === 'item' ? '<div class="row wrap draft-tools">' + draftSampleButtons() + '</div>' : '') +
       '<label class="field">名称 <input id="draftName" type="text" value="' + esc(d.name) + '" placeholder="' + (d.kind === 'region' ? '例如 红区' : '例如 苹果') + '"></label>' +
       (d.kind === 'item'
         ? '<div class="field radios">' +
@@ -167,9 +181,13 @@
   function entityList(kind, st) {
     const list = kind === 'region' ? st.regions : st.items;
     if (!list.length) return '<li class="empty">还没有' + kindName(kind) + '</li>';
+    const d = MH.ui.draft;
     return list.map(t => {
       const hover = kind === 'region' ? 'data-hover-region="' + esc(t.id) + '"' : 'data-hover-item="' + esc(t.id) + '"';
-      return '<li ' + hover + '>' +
+      // 正在编辑这一项 → 编辑界面**直接展开在这一行下面**（不用往上滚 ✓）
+      const editing = !!(d && d.kind === kind && d.editingId === t.id);
+      const inline = editing ? draftHTML(st, d, { inline: true }) : '';
+      return '<li class="' + (editing ? 'editing' : '') + '" ' + hover + '>' +
         '<button class="swatch" data-act="color-' + kind + '" data-id="' + esc(t.id) + '" style="--c:' + esc(t.color) + '" title="点击换颜色"></button>' +
         '<span class="nm">' + esc(t.name) + '</span>' +
         '<span class="meta">' + t.cells.length + ' 格</span>' +
@@ -179,6 +197,7 @@
         '<button class="ghost sm" data-act="edit-' + kind + '" data-id="' + esc(t.id) + '">编辑</button>' +
         '<button class="ghost sm" data-act="rename-' + kind + '" data-id="' + esc(t.id) + '">改名</button>' +
         '<button class="ghost sm danger" data-act="del-' + kind + '" data-id="' + esc(t.id) + '">删除</button>' +
+        inline +
         '</li>';
     }).join('');
   }
@@ -247,19 +266,13 @@
       '<h2>物品 <span class="muted">可占据 / 不可占据</span></h2>' +
       '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 新建物品</button>' +
       (!d && MH.store.state.bg
-        ? '<button class="ghost block" data-act="item-sample" ' + (MH.ui.itemPicking ? 'disabled' : '') +
-            ' title="这类地图上同一件物品是同一张画反复贴的：点一个样例格子，自动把长得一样的格子都圈出来（结果进草稿，可手改）">' +
-            (MH.ui.itemPicking ? '🔍 请在棋盘上点一个物品格子…' : '🔍 从样例找同类') + '</button>' +
-          '<button class="ghost block" data-act="legend-auto" ' +
+        ? '<button class="ghost block" data-act="legend-auto" ' +
             ' title="从右侧图例卡片自动切出每个物品图标、认名字、按图例里的说明分\"可占据/不可占据\"，一次性建好物品清单（格子留空，地点再点样例补）">' +
             '🚀 从图例自动列出物品</button>' +
           '<button class="ghost block" data-act="legend-locate" ' +
-            ' title="用图例里抠出来的图标当模板，逐件到地图上找格子（图例图标干净、无遮挡，比在地图上点样例可靠）">📍 自动找地点（用图例图标）</button>' +
-          '<button class="ghost block" data-act="item-legend" ' + (MH.ui.legendPicking ? 'disabled' : '') +
-            ' title="更稳的一条：从右侧图例卡片上点那个图标当模板，再回地图上找同类（图例里没遮挡、底色统一）。卡片可以缩放，让图标和地图上的大小接近即可">' +
-            (MH.ui.legendPicking ? '🔍 请点图例卡片上的那个图标…' : '🔍 从图例卡片找同类') + '</button>'
+            ' title="用图例里抠出来的图标当模板，逐件到地图上找格子（图例图标干净、无遮挡，比在地图上点样例可靠）">📍 自动找地点（用图例图标）</button>'
         : '') +
-      (d && d.kind === 'item' ? draftHTML(st, d) : '') +
+      (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('item', st) + '</ul>' +
       '</section>' +
 
@@ -2281,6 +2294,11 @@
       if (save) {
         const cells = [...d.cells];
         save.disabled = !(cells.length && (d.kind !== 'region' || Core.isConnected(cells)));
+      }
+      // 正在编辑的那一项：把它滚进视野（编辑界面就展开在这一行下面）
+      const editingLi = document.querySelector('.list li.editing');
+      if (editingLi && editingLi.scrollIntoView) {
+        try { editingLi.scrollIntoView({ block: 'nearest' }); } catch (e) { /* 老浏览器忽略 */ }
       }
       const largest = document.querySelector('[data-act="draft-largest"]');
       if (largest && d.kind === 'region') {

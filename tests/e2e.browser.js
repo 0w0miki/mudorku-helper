@@ -1229,9 +1229,11 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForFunction(() => window.MH.store.state.regions.length === 17, null, { timeout: 60000 });
   ok(Date.now() - t2 < 5000, '再点一次走缓存、不重新 OCR：' + (Date.now() - t2) + 'ms');
 
-  // 32) 物品：点一个样例格 → 自动找出同类 → 存成物品（结果进草稿，可手改）
+  // 32) 物品：新建 → 在编辑界面里点「从样例找同类」→ 点样例格 → 自动找出同类 → 存成物品
   await p.evaluate(() => { window.MH.ui.itemPicking = false; window.MH.ui.lastItemMatch = null; });
-  await p.click('[data-act="item-sample"]');
+  await p.click('[data-act="new-item"]');                 // 先开一个物品草稿
+  await p.waitForSelector('.draft #draftName');
+  await p.click('.draft [data-act="item-sample"]');      // 取样按钮现在在编辑界面里
   ok(await p.evaluate(() => !!window.MH.ui.itemPicking), '点「从样例找同类」进入取样模式');
   await p.locator('.cell[data-k="18,20"]').click();           // 酒馆里的白椅子
   await p.waitForFunction(() => window.MH.ui.lastItemMatch, null, { timeout: 60000 });
