@@ -391,7 +391,8 @@ family     : TEACHER'S AREA / FRONT AREA / BACK AREA        ← 正好 3 个区�
 有了真值就能**离线客观评测**（不再靠来回试）。实现：
 
 1. **候选生成**（都由种子位置直接给出，不做几十次合并）
-   - `candidateVoronoi`：最近种子（能表达凹口）
+   - `candidateVoronoi`：最近种子（唯一能给出**非横非竖**分界的候选；实测在这张真值上直接给
+     77.6%，凹口其实是被 `refine` 补上的，见 `docs/region-algorithm.md` §2.1）
    - `candidateBands`：按行/按列切带（枚举分界线，要求每个种子落在自己的带里）
    - 原来的"逐个合并"结果也作为候选
 2. **打分**：`scorePartition = 内部边界上的平均墙证据 + 0.02 × 平均色差`
