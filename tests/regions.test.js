@@ -191,3 +191,30 @@ test('种子模式：没有种子时不受影响（仍走颜色/粗线自适应�
   assert.ok(!res.seeded);
   assert.ok(res.ok, '仍应能识别');
 });
+
+test('隔墙被家具挡住一段（FRONT 多占 BACK 右边几格）→ 墙线补全后仍能分开', () => {
+  // 6×6；两块上下分区；横向隔墙只在左边 3 列可见，右边 3 列被"家具"挡住
+  const pitch = 60, x0 = 30, y0 = 30, N = 6;
+  const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  fillRect(r, x0, y0, N * pitch, N * pitch, [196, 205, 186]);
+  // 每格边界都有砖缝（3px，中等）
+  for (let c = 1; c < N; c++) fillRect(r, x0 + c * pitch - 1, y0, 3, N * pitch, [150, 158, 140]);
+  for (let rr = 1; rr < N; rr++) fillRect(r, x0, y0 + rr * pitch - 1, N * pitch, 3, [150, 158, 140]);
+  // 区域隔墙：画 4 列（另外 2 列被家具挡住）
+  fillRect(r, x0, y0 + 3 * pitch - 3, 4 * pitch, 6, [40, 42, 46]);
+  // 挡住缺口的大块家具
+  fillRect(r, x0 + 4 * pitch + 4, y0 + 3 * pitch - 26, 2 * pitch - 8, 52, [96, 90, 78]);
+  const geom = { x0, y0, pitchX: pitch, pitchY: pitch, cols: N, rows: N };
+  const seeds = [{ name: 'FRONT', r: 1, c: 1 }, { name: 'BACK', r: 4, c: 1 }];
+  const res = R.detectRegions(r, geom, { seeds });
+  assert.ok(res.seeded);
+  assert.equal(res.regions.length, 2, '应恰好 2 块：' + JSON.stringify(res.stats));
+  const front = res.regions.find(x => x.name === 'FRONT');
+  const back = res.regions.find(x => x.name === 'BACK');
+  assert.ok(front && back, '名字应保留：' + res.regions.map(x => x.name).join(','));
+  assert.equal(front.size, 18, 'FRONT 应是上面 3 行 = 18 格，实际 ' + front.size);
+  assert.equal(back.size, 18, 'BACK 应是下面 3 行 = 18 格，实际 ' + back.size);
+  const frontRows = [...new Set(front.cells.map(k => +k.split(',')[0]))].sort((a, b) => a - b);
+  assert.deepEqual(frontRows, [0, 1, 2], 'FRONT 不该越到下面几行：' + frontRows.join(','));
+});
