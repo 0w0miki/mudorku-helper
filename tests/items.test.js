@@ -94,6 +94,36 @@ function renderChairIcon(k) {
   return img;
 }
 
+test('图例卡片：一排图标里点哪个就只取哪个（点哪团取哪团）', () => {
+  // 图例卡片常见长这样：[图标][图标][图标]  物品名文字
+  // 早期实现取"窗口内所有非底色像素"的并集 → 模板变成"好几个图标的组合" ✗
+  const W = 320, H = 170;
+  const r = makeRaster(W, H);
+  fillRect(r, 0, 0, W, H, [245, 243, 238]);                      // 卡片底色（干净白底）
+  const icon = (ox, oy) => {
+    fillRect(r, ox + 4, oy + 6, 34, 26, [80, 74, 68]);           // 主体
+    fillRect(r, ox + 4, oy, 34, 6, [120, 112, 104]);             // 顶边
+    fillRect(r, ox + 10, oy + 32, 6, 10, [70, 64, 58]);          // 腿
+    fillRect(r, ox + 26, oy + 32, 6, 10, [70, 64, 58]);
+  };
+  icon(60, 60); icon(135, 60); icon(210, 60);                    // 三个图标并排
+  fillRect(r, 250, 130, 60, 8, [60, 60, 60]);                    // 物品名文字（另一团）
+  const gray = I.toGray(r);
+  const cx = 135 + 21, cy = 60 + 20;                             // 点中间那个图标
+  const win = 130;
+  const m = I.cellMask(r, gray, W, H, cx - win / 2, cy - win / 2, win, win, { at: [cx, cy] });
+  assert.ok(m, '应能在卡片上抠出一团');
+  const bw = m.box.x1 - m.box.x0 + 1, bh = m.box.y1 - m.box.y0 + 1;
+  assert.ok(bw <= 46 && bh <= 46, '只该抠出被点的那一个图标（约 40×42），实得 ' + bw + '×' + bh);
+  // 点左边那个图标：抠出来的框应当整体往左移 75px（说明"跟着点击走"）
+  const cxL = 60 + 21;                                    // 实际使用中窗口永远以点击处为中心
+  const mL = I.cellMask(r, gray, W, H, cxL - win / 2, cy - win / 2, win, win, { at: [cxL, cy] });
+  assert.ok(mL, '点左边的图标也该抠出一团');
+  const absMid = cx - win / 2 + m.box.x0, absLeft = cxL - win / 2 + mL.box.x0;
+  assert.ok(Math.abs((absMid - absLeft) - 75) <= 6,
+    '两个图标相距 75px，抠出来的框也该相差 75px：' + (absMid - absLeft));
+});
+
 test('图例模板（实验性）：能找到一部分同类，且不会匹配出一大片', () => {
   // 现状说明：图例模板路线**还没调准** —— 同尺度下通常只能找到一部分同类，
   // 尺度和地图差太多、或物品本身长得平凡（墓碑那种）时基本找不到。

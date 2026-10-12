@@ -73,7 +73,8 @@
    * （不只看"更暗"：白椅子/白床这类浅色物品只有轮廓线更暗，用"只看暗"会把它们漏掉）。
    * 顺带清掉贯穿整格的直线（格线/区域边框漏进来时就是这种），并拒掉细长条。
    */
-  function cellMask(raster, gray, W, H, rx0, ry0, rw, rh) {
+  function cellMask(raster, gray, W, H, rx0, ry0, rw, rh, options) {
+    const opt = options || {};
     const padX = Math.max(1, Math.round(rw * 0.16)), padY = Math.max(1, Math.round(rh * 0.16));
     const x0 = rx0 + padX, y0 = ry0 + padY, w = rw - padX * 2, h = rh - padY * 2;
     if (w < 6 || h < 6 || x0 < 0 || y0 < 0 || x0 + w > W || y0 + h > H) return null;
@@ -113,6 +114,18 @@
     let n = 0;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (diff[y * w + x] > need) { mask[y * w + x] = 1; n++; }
     if (n < 12) return null;
+    // opt.at=[px,py]（原图坐标）：**只保留包含这个点的那一团**。
+    // 用途：从图例卡片上"点哪团取哪团"——一排 4 个图标里点一个就只取一个，
+    // 旁边的物品名文字也自动排除（它是另一团）✗ 不这么做就只能取"窗口里所有非底色像素"的并集。
+    if (opt.at) {
+      const comp = componentAt(mask, w, h, Math.round(opt.at[0]) - x0, Math.round(opt.at[1]) - y0);
+      if (comp && comp.n >= 12) {
+        const only = new Uint8Array(w * h);
+        for (const i2 of comp.cells) only[i2] = 1;
+        mask.set(only);
+        n = comp.n;
+      }
+    }
     // 清掉贯穿整格的直线（≥90% 的一整行/一整列都算图标 → 那是格线/边框，不是物品）
     const rowDark = new Int32Array(h), colDark = new Int32Array(w);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (mask[y * w + x]) { rowDark[y]++; colDark[x]++; }
@@ -147,6 +160,39 @@
       mask, w, h, box: { x0: bx0, y0: by0, x1: bx1, y1: by1, within: { x0, y0 } },
       pixels: n, bw, bh, fill: n / (bw * bh), rgb, lab: srgbToLab(rgb[0], rgb[1], rgb[2]),
     };
+  }
+
+  /** 掩码里"包含某一点"的那一团连通域（4 邻）；中心不在掩码上就取离它最近的那一团 */
+  function componentAt(mask, w, h, px, py) {
+    const seen = new Uint8Array(w * h);
+    let seed = -1;
+    if (px >= 0 && px < w && py >= 0 && py < h && mask[py * w + px]) seed = py * w + px;
+    if (seed < 0) {
+      let bd = Infinity;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (!mask[y * w + x]) continue;
+          const d = (x - px) * (x - px) + (y - py) * (y - py);
+          if (d < bd) { bd = d; seed = y * w + x; }
+        }
+      }
+    }
+    if (seed < 0) return null;
+    const stack = [seed];
+    const cells = [];
+    seen[seed] = 1;
+    let n = 0, x0 = w, x1 = -1, y0 = h, y1 = -1;
+    while (stack.length) {
+      const i = stack.pop(), ix = i % w, iy = (i - ix) / w;
+      n++; cells.push(i);
+      if (ix < x0) x0 = ix; if (ix > x1) x1 = ix;
+      if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
+      for (const j of [i - 1, i + 1, i - w, i + w]) {
+        if (j < 0 || j >= w * h || Math.abs((j % w) - ix) > 1) continue;
+        if (!seen[j] && mask[j]) { seen[j] = 1; stack.push(j); }
+      }
+    }
+    return { n, x0, y0, x1, y1, cells };
   }
 
   /** 把掩码按外接框归一化成 GRID×GRID 位图（保持长宽比） */
@@ -649,5 +695,5 @@
     };
   }
 
-  return { findSimilar, findSimilarFromTemplate, tmplFromImage, resampleTmpl, maskedNccAt, toGray, patchAt, nccAt, nccMap, downscale, cellMask, shapeDesc, descIoU, SCALES };
+  return { findSimilar, findSimilarFromTemplate, tmplFromImage, resampleTmpl, maskedNccAt, componentAt, toGray, patchAt, nccAt, nccMap, downscale, cellMask, shapeDesc, descIoU, SCALES };
 });

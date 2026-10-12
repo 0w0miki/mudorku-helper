@@ -457,11 +457,13 @@
     let data;
     try { data = ctx.getImageData(0, 0, natW, natH); } catch (err) { MH.toast('读不到卡片像素（跨域？）', 'error'); return; }
     // 局部窗口：取卡片短边的 ~30%，再让"与底色不同的那团"自动收紧
-    const win = Math.max(16, Math.min(240, Math.round(Math.min(natW, natH) * 0.3)));
+    // 窗口放大到卡片短边的 45%：反正接下来只取"点中的那一团"，窗口给宽一点容错更好
+    const win = Math.max(16, Math.min(320, Math.round(Math.min(natW, natH) * 0.45)));
     const rx0 = Math.max(0, px - Math.round(win / 2)), ry0 = Math.max(0, py - Math.round(win / 2));
     const rw = Math.min(win, natW - rx0), rh = Math.min(win, natH - ry0);
     const gray = I2.toGray({ data: data.data, width: natW, height: natH });
-    const m = I2.cellMask({ data: data.data, width: natW, height: natH }, gray, natW, natH, rx0, ry0, rw, rh);
+    const m = I2.cellMask({ data: data.data, width: natW, height: natH }, gray, natW, natH, rx0, ry0, rw, rh,
+      { at: [px, py] });      // 点哪团取哪团（一排图标里点一个就只取一个）
     let bx = rx0, by = ry0, bw = rw, bh = rh;
     if (m) {
       bx = Math.max(0, rx0 + m.box.x0 - 1); by = Math.max(0, ry0 + m.box.y0 - 1);
