@@ -196,7 +196,7 @@ test('卡片图例：两排图标各自成排（contest 那种"一个说明行 +
   const r = makeRaster(560, 320, [190, 120, 120]);
   [60, 200, 340].forEach(ox => { icon(r, ox, 30, 1); text(r, ox + 4, 78, 40, 11); });   // 第一排
   [60, 200, 340].forEach(ox => { icon(r, ox, 170, 1); text(r, ox + 4, 218, 40, 11); }); // 第二排
-  const rows = L.readCardLegend(r, { x: 20, y: 20, w: 520, h: 260 });
+  const rows = L.readCardLegend(r, { x: 20, y: 20, w: 520, h: 260 }).items;
   assert.equal(rows.length, 6, '两排各 3 个图标 = 6 个：' + JSON.stringify(rows.map(x => [x.box.x, x.box.y])));
   const top = rows.filter(x => x.box.y < 120), bottom = rows.filter(x => x.box.y >= 120);
   assert.equal(top.length, 3, '第一排 3 个');

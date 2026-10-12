@@ -491,15 +491,26 @@
   }
 
   /** 行投影：把 y 方向连续的"有墨"段找出来（每段 = 一排图标 或 一排名字） */
-  function rowBands(mask, W, x0, x1, y0, y1, minInk) {
+  function rowBands(mask, W, x0, x1, y0, y1, minInk, rowRatio) {
+    // 先量一遍每行有多少"墨"，再按**相对阈值**切分：
+    // 图例面板自己的底色在细节掩码里有残余（每行都有几十个像素），
+    // 用"必须完全无墨"当分界会把整块面板粘成一个大带 ✗（真实截图实测：两排图标+两排名字
+    // 粘成一个 240px 高的带）。改成"低于最密一排的 rowRatio"就算分界 ✓
+    const ink = new Float64Array(Math.max(0, y1 - y0 + 1));
+    let maxInk = 0;
+    for (let y = y0; y <= y1; y++) {
+      let n = 0;
+      for (let x = x0; x <= x1; x++) if (mask[y * W + x]) n++;
+      ink[y - y0] = n;
+      if (n > maxInk) maxInk = n;
+    }
+    // 默认 0.18（合成夹具/常规卡片都用它）；**真实截图**需要更大的值（面板有底色纹理，
+    // 行墨量永远不会掉到很低），由调用方显式传 rowRatio ≈ 0.4 ✓
+    const thr = Math.max(minInk || 2, maxInk * (rowRatio == null ? 0.18 : rowRatio));
     const bands = [];
     let start = -1;
     for (let y = y0; y <= y1 + 1; y++) {
-      let ink = 0;
-      if (y <= y1) {
-        for (let x = x0; x <= x1; x++) if (mask[y * W + x]) ink++;
-      }
-      const on = y <= y1 && ink >= (minInk || 2);
+      const on = y <= y1 && ink[y - y0] >= thr;
       if (on && start < 0) start = y;
       if (!on && start >= 0) { bands.push({ y0: start, y1: y - 1, h: y - start }); start = -1; }
     }
@@ -529,6 +540,45 @@
   }
 
   /**
+   * 找"图例面板"：卡片上**大块纯色**的区域（图例都画在色块面板里）。
+   * 为什么需要：真实截图除了图例，还有页面底色、地图残条、页脚版权文字……
+   * 只在面板内部切分，这些就自然排除了 ✓（用户也不必把卡片框得那么准）
+   * @returns {Array<{x,y,w,h,fill}>} 按像素数从多到少
+   */
+  function colourPanels(raster, opts) {
+    const opt = opts || {};
+    const W = raster.width, H = raster.height, d = raster.data;
+    const bins = new Int32Array(4096);
+    const idx = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    for (let i = 0, o = 0; i < W * H; i++, o += 4) bins[idx(d[o], d[o + 1], d[o + 2])]++;
+    const order = Array.from(bins.keys()).sort((a, b) => bins[b] - bins[a]);
+    const page = order[0];                                   // 出现最多的 = 页面底色
+    const out = [];
+    for (const bin of order.slice(0, 12)) {
+      if (bin === page) continue;
+      const n = bins[bin];
+      if (n < W * H * (opt.minArea || 0.03)) break;
+      // **取这个颜色最大的一团连通域**，而不是它的包围框：
+      // 同一颜色可能零散出现在别处（版权字、图标高光…），包围框会横跨整张图 ✗
+      const cmask = new Uint8Array(W * H);
+      for (let i = 0, o = 0; i < W * H; i++, o += 4) {
+        if (idx(d[o], d[o + 1], d[o + 2]) === bin) cmask[i] = 1;
+      }
+      const comps = components(cmask, W, H).sort((a, b2) => b2.n - a.n);
+      const big = comps[0];
+      if (!big || big.n < W * H * (opt.minArea || 0.03)) continue;
+      const x0 = big.x0, x1 = big.x1, y0 = big.y0, y1 = big.y1, cnt = big.n;
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      const fill = cnt / (bw * bh);
+      if (fill < (opt.minFill || 0.45)) continue;             // 太散 → 不是一块面板
+      if (bw * bh > W * H * (opt.maxArea || 0.85)) continue;  // 太大 → 就是整页
+      out.push({ x: x0, y: y0, w: bw, h: bh, fill });
+      if (out.length >= (opt.maxPanels || 4)) break;
+    }
+    return out;
+  }
+
+  /**
    * **卡片图例解析（多排也能处理）**：contest 的图例是"一个说明行 + 两排图标"，
    * 直接对整张卡片做列投影会把两排的图标并成一根根跨排的柱子 ✗。
    * 正确顺序：先按**行投影**切出每一排（图标排 / 名字排），再在每排内部做**列投影**，
@@ -537,15 +587,47 @@
    */
   function readCardLegend(raster, rect, options) {
     const opt = options || {};
+    // 先找"图例面板"（大块纯色）—— 截图里除了图例还有页面底色/地图残条/页脚版权文字，
+    // 只在面板内部切分，这些杂东西自然被排除 ✓（卡片也就不用框得那么准了）
+    const panels = opt.noPanels ? [] : colourPanels(raster, opt);
+    if (panels.length) {
+      const items = [], headings = [];
+      for (const p of panels) {
+        const r2 = readRectLegend(raster, p, opt);
+        items.push(...r2.items);
+        headings.push(...r2.headings);
+      }
+      if (items.length >= 2) return { items, headings, panels };
+    }
+    return readRectLegend(raster, rect, opt);
+  }
+
+  /** 在一个矩形里切分（readCardLegend 的实现部分） */
+  function readRectLegend(raster, rect, options) {
+    const opt = options || {};
     const W = raster.width, H = raster.height;
     const x0 = Math.max(0, Math.round(rect.x)), x1 = Math.min(W - 1, Math.round(rect.x + rect.w - 1));
     const y0 = Math.max(0, Math.round(rect.y)), y1 = Math.min(H - 1, Math.round(rect.y + rect.h - 1));
-    if (x1 - x0 < 12 || y1 - y0 < 12) return [];
+    if (x1 - x0 < 12 || y1 - y0 < 12) return { items: [], headings: [] };
     const dm = detailMask(raster, opt);
-    let bands = rowBands(dm.mask, W, x0, x1, y0, y1, Math.max(2, (x1 - x0) * 0.01));
+    let bands = rowBands(dm.mask, W, x0, x1, y0, y1, Math.max(2, (x1 - x0) * 0.01), opt.rowRatio);
     // 丢掉太薄的噪声带
     bands = bands.filter(b => b.h >= 5);
-    if (!bands.length) return [];
+    // 同一排图标有时被内部空隙切成两段（棕榈树的树干、椅子腿之间…）→ 间隙很小的相邻带先并起来 ✓
+    // 不并的话"图标排 ↔ 名字排"会配错，件数也不对（真实截图实测：17 件被切成 12 件）
+    const merged = [];
+    for (const b of bands) {
+      const last = merged[merged.length - 1];
+      const gap = last ? b.y0 - last.y1 - 1 : 1e9;
+      if (last && gap <= Math.max(2, Math.min(last.h, b.h) * 0.15)) {
+        last.y1 = b.y1;
+        last.h = last.y1 - last.y0 + 1;
+        continue;
+      }
+      merged.push({ y0: b.y0, y1: b.y1, h: b.h });
+    }
+    bands = merged;
+    if (!bands.length) return { items: [], headings: [] };
     const hs = bands.map(b => b.h).sort((a, b) => a - b);
     const maxH = hs[hs.length - 1];
     // 名字排 = 明显矮的那些（名字字号远小于图标）。阈值取"最高排的 65%"：
@@ -553,14 +635,21 @@
     // （两排图例因此被切成 12 个碎片，踩过）
     const isName = b => b.h <= Math.max(8, maxH * 0.65);
     const rows = [];
+    const usedAsName = new Set();
     for (let i = 0; i < bands.length; i++) {
       const b = bands[i];
       if (isName(b)) continue;
       // 紧跟在它下面的名字排（间隙不超过 1.5 个名字高）
       const next = bands[i + 1];
       const name = next && isName(next) && (next.y0 - b.y1) <= Math.max(6, next.h * 2.5) ? next : null;
+      if (name) usedAsName.add(i + 1);
       rows.push({ icons: b, name });
     }
+    // 没被当成名字排的矮带 = 说明行候选（"can't be occupied" 那种）→ 交给 OCR 判定可占据 ✓
+    const headingBands = bands
+      .map((b, i) => ({ b, i }))
+      .filter(x => isName(x.b) && !usedAsName.has(x.i))
+      .map(x => ({ x: x0, y: x.b.y0, w: x1 - x0 + 1, h: x.b.h }));
     const out = [];
     for (const row of rows) {
       // **用"名字排"当骨架**：名字之间有明显空隙，切得准；图标本身是几块拼的（椅子=靠背+坐垫+腿），
@@ -598,7 +687,7 @@
         out.push({ box: { x: s2[0], y: row.icons.y0, w, h: row.icons.h }, nameBox: null });
       }
     }
-    return out;
+    return { items: out, headings: headingBands };
   }
 
   /**
@@ -819,5 +908,5 @@
   function namePartsOf(it) { return it.__name || { x0: it.icon ? it.icon.x : 0, y: it.icon ? it.icon.y : 0 };
   }
 
-  return { split, annotate, legendFromText, readCardLegend, rowBands, colBands, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
+  return { split, annotate, legendFromText, readCardLegend, colourPanels, rowBands, colBands, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
 });

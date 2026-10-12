@@ -519,6 +519,34 @@
     }
   }
 
+  /** 批量 OCR 一批框（失败就返回空串，不抛） */
+  async function ocrBoxes(raster, boxes) {
+    const empty = new Array(boxes.length).fill('');
+    if (!boxes.length || !window.MurdokuOCR) return empty;
+    try {
+      const got = await window.MurdokuOCR.readBadges(raster, boxes, { zoom: 4, onStatus: m => MH.toast(m, 'ok') });
+      return got.map(r2 => String(r2.text || '').replace(/\s+/g, ' ').trim());
+    } catch (err) {
+      MH.toast('文字识别失败（名字/分组会留空，可手动改）：' + err.message, 'warn');
+      return empty;
+    }
+  }
+
+  /** 用"说明行"给每件物品定可占据：优先它**上方**那条，否则取最近的 ✓ */
+  function occupiableByHeads(items, heads) {
+    items.forEach(it => {
+      const ic = it.icon || it.box || { x: 0, y: 0, w: 1, h: 1 };
+      let best = null, bestD = Infinity;
+      (heads || []).forEach(h => {
+        const above = h.y + (h.h || 0) <= ic.y + Math.max(4, ic.h * 0.3);
+        const d = above ? (ic.y - h.y) : 1e5 + Math.abs(ic.y - h.y);
+        if (d < bestD) { bestD = d; best = h; }
+      });
+      it.occupiable = best ? best.occupiable : null;
+    });
+    return items;
+  }
+
   /**
    * 从图例卡片自动列出物品：切图标 → OCR 名字与分组说明 → 一次性建好物品。
    * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
@@ -667,9 +695,21 @@
             // 先分出"图标排 / 名字排"，再用名字排当骨架（名字之间空隙明显，切得准），
             // 每个名字正上方那一段墨水的外接框 = 该物品的图标 ✓ 多排图例也能处理 ✓
             MH.toast('这张图的图例物品没有文字名，改按"排 + 列"切分…', 'ok');
-            const boxes = [];
-            for (const r2 of rects) boxes.push(...Lg.readCardLegend(out.raster, r2));
-            const heads = out.headings || [];
+            const boxes = [], headBoxes = [];
+            for (const r2 of rects) {
+              const parsed = Lg.readCardLegend(out.raster, r2);
+              boxes.push(...parsed.items);
+              headBoxes.push(...parsed.headings);
+            }
+            // 文字层给了说明行就用它；没有就把图片上那几条"说明带"OCR 出来判 ✓
+            let heads = out.headings || [];
+            if (!heads.length && headBoxes.length) {
+              const texts = await ocrBoxes(out.raster, headBoxes);
+              heads = headBoxes.map((b, i) => {
+                const cls = window.MurdokuLegend.classifyLabel(texts[i]);
+                return { x: b.x, y: b.y, w: b.w, h: b.h, text: texts[i], occupiable: cls === 'yes' ? true : cls === 'no' ? false : null };
+              });
+            }
             // 只保留"落在某条说明行下方"的图标带（地图上的杂图案不在这些带里 ✓）
             const nearHead = b => {
               if (!heads.length) return true;
@@ -680,26 +720,15 @@
             const use = kept.length >= 2 ? kept : boxes;
             // 名字：每个名字框单独 OCR（比"整条名字行一起 OCR"准得多 ✓ —— 一行几个名字时
             // 整条丢给 OCR 会认成一串乱码）
-            const names = new Array(use.length).fill('');
-            if (use.length && window.MurdokuOCR && use.some(b => b.nameBox)) {
-              try {
-                const targets = use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 });
-                const got = await window.MurdokuOCR.readBadges(out.raster, targets,
-                  { zoom: 4, onStatus: m => MH.toast(m, 'ok') });
-                got.forEach((r2, i) => { names[i] = String(r2.text || '').replace(/\s+/g, ' ').trim(); });
-              } catch (err) { MH.toast('名字识别失败（名字留空，可手动改）：' + err.message, 'warn'); }
-            }
+            const names = await ocrBoxes(out.raster, use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 }));
             if (use.length >= 2) {
               out = {
-                items: use.map((b, i) => ({
+                items: occupiableByHeads(use.map((b, i) => ({
                   name: names[i] || '',
-                  occupiable: heads.length ? heads.reduce((best, h) => {
-                    const ov = Math.min(h.x + h.w, b.box.x + b.box.w) - Math.max(h.x, b.box.x);
-                    return ov > (best.ov || -1e9) ? { ov, occ: h.occupiable } : best;
-                  }, { ov: -1e9, occ: null }).occ : null,
+                  occupiable: null,
                   icon: b.box,
                   nameBox: b.nameBox || null,
-                })),
+                })), heads),
                 headings: heads, skipped: out.skipped || [], raster: out.raster, page: out.page,
                 method: 'card-rows',
               };
@@ -726,26 +755,37 @@
       let raster;
       try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
       if (!raster) { giveUp('读不到图例卡片'); return; }
+      // **和 PDF 路线同一套算法**：按行投影分出"图标排 / 名字排"，用名字排当骨架切列，
+      // 每个名字框单独 OCR；说明行也 OCR 出来判可占据 ✓
+      // （以前这里用的是旧的二维切分 + 整行 OCR，真实图例上只会得到一堆乱码名字 ✗）
       MH.toast('正在切分图例卡片…', 'ok');
-      let sp;
-      try { sp = Lg.split(raster); } catch (err) { MH.toast('切分失败：' + err.message, 'error'); return; }
-      if (!sp.icons.length) { MH.toast('这张卡片上没切出图标（试试只截图例那一块，别带太多空白）', 'warn'); return; }
-      let ocr = [];
-      if (sp.textBoxes.length && window.MurdokuOCR) {
-        try {
-          ocr = await window.MurdokuOCR.readBadges(raster, sp.textBoxes.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
-            { zoom: 4, onStatus: msg => MH.toast(msg, 'ok'), onProgress: (i, n) => { if (i === n) MH.toast('文字识别完成（' + n + ' 块）', 'ok'); } });
-        } catch (err) { MH.toast('文字识别失败（名字会留空）：' + err.message, 'warn'); }
+      let parsed;
+      try {
+        // rowRatio 0.4：截图里的图例面板自带底色纹理，行墨量掉不到很低，
+        // 用默认 0.18 会把"图标排 + 名字排"粘成一块（实测只剩 5 件）
+        parsed = Lg.readCardLegend(raster, { x: 0, y: 0, w: raster.width, h: raster.height }, { rowRatio: 0.4 });
+      } catch (err) { giveUp('切分失败：' + err.message); return; }
+      const heads = [];
+      if (parsed.headings.length) {
+        MH.toast('识别说明行…', 'ok');
+        const texts = await ocrBoxes(raster, parsed.headings);
+        parsed.headings.forEach((b, i) => {
+          const cls = Lg.classifyLabel(texts[i]);
+          if (cls !== 'unknown') heads.push({ x: b.x, y: b.y, w: b.w, h: b.h, text: texts[i], occupiable: cls === 'yes' });
+        });
       }
-      let items = [];
-      try { items = Lg.annotate(sp, ocr); } catch (err) { MH.toast('归类失败：' + err.message, 'error'); return; }
+      const use = parsed.items;
+      if (use.length < 2) { giveUp('这张卡片上没切出成排的图标（试试框紧一点，只框图例那一块）'); return; }
+      MH.toast('识别物品名…', 'ok');
+      const names = await ocrBoxes(raster, use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 }));
       out = {
-        items: items.map((it, i) => ({
-          name: it.name || ('物品 ' + (i + 1)),
-          occupiable: (sp.groups[it.group] || {}).occupiable,
-          icon: it.box,
-        })),
-        headings: sp.groups.map(g => ({ text: g.label, occupiable: g.occupiable })),
+        items: occupiableByHeads(use.map((b, i) => ({
+          name: names[i] || '',
+          occupiable: null,
+          icon: b.box,
+          nameBox: b.nameBox || null,
+        })), heads),
+        headings: heads.map(h => ({ text: h.text, occupiable: h.occupiable })),
         skipped: [],
       };
       via = 'image';
