@@ -581,9 +581,29 @@
       L.push(' ' + (i / 10).toFixed(1) + '-' + ((i + 1) / 10).toFixed(1) + ' |' +
              bar.padEnd(28) + ' ' + dg.hist[i]);
     }
+    // 按线看：**区域边界在这些题里是贯穿整条的直线**，而家具（课桌/柜台）造成的"墙"
+    // 只出现在少数几段上。这一节就是用来区分二者的。
+    const lineMap = new Map();
+    for (const e of dg.edges) {
+      const key = e.dir === 'down' ? 'H' + (e.r + 1) : 'V' + (e.c + 1);
+      let a = lineMap.get(key);
+      if (!a) { a = { key, n: 0, w9: 0, w6: 0, sum: 0 }; lineMap.set(key, a); }
+      a.n++;
+      a.sum += e.wall;
+      if (e.wall >= 0.9) a.w9++;
+      if (e.wall >= 0.6) a.w6++;
+    }
+    L.push('');
+    L.push('按线看（H=行界 V=列界；区域边界应是"整条几乎都是墙"，家具只在少数段上）：');
+    [...lineMap.values()].sort((a, b) => (b.w6 / b.n) - (a.w6 / a.n)).forEach(a => {
+      const pct = Math.round(a.w6 / a.n * 100);
+      L.push(' ' + a.key.padEnd(4) + ' | ' + a.n + ' 段 | ≥0.9: ' + String(a.w9).padStart(2) +
+             ' | ≥0.6: ' + String(a.w6).padStart(2) + ' | 占比 ' + String(pct).padStart(3) + '%' +
+             ' | 墙强度均 ' + (a.sum / a.n).toFixed(2) + (pct >= 85 ? '   ← 很可能是区域边界' : ''));
+    });
     if (!assignment || !assignment.size) {
       L.push('');
-      L.push('（先点「自动识别区域」，这里才会列出区域之间的边界与可疑边）');
+      L.push('（本次没有已识别的区域：先点「自动识别区域」再诊断，才会列出区域之间的边界与可疑边）');
       return L.join('\n');
     }
     // 区域之间的边界

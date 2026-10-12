@@ -712,10 +712,15 @@
     if (!st.bg.bound) { MH.toast('先用「▭ 框地图外框」把底图和网格对好', 'warn'); return; }
     const geo = await regionGeometry();
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    // 没有已识别的区域时，先自动跑一遍识别（否则诊断里缺"区域之间的边界"那几节）
+    if (!MH.store.state.regions.length) {
+      MH.toast('先跑一遍区域识别，再做诊断', 'ok');
+      await detectRegionsFromBg();
+    }
     const t0 = Date.now();
     const dg = R2.diagnose(geo.raster, geo.geom);
     const assign = new Map();
-    for (const reg of st.regions) for (const k of reg.cells) assign.set(k, reg.name || '区域');
+    for (const reg of MH.store.state.regions) for (const k of reg.cells) assign.set(k, reg.name || '区域');
     MH.ui.diagText = R2.formatDiagnosis(dg, assign);
     MH.render();
     MH.toast('诊断完成：' + dg.edges.length + ' 条相邻边 · ' + (Date.now() - t0) + 'ms · 点「复制」发我', 'ok');

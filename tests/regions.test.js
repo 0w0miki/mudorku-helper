@@ -218,4 +218,5 @@ test('边界诊断：直方图与可疑边能被列出来', () => {
   assert.ok(/(FRONT ↔ BACK|BACK ↔ FRONT)/.test(text), '应列出区域对：' + text.slice(0, 300));
   assert.ok(/最可疑的边/.test(text) && /cover/.test(text), '应列出可疑边明细');
   assert.ok(/0\.0-0\.1/.test(text), '应有直方图');
+  assert.ok(/按线看/.test(text) && /H3/.test(text), '应有"按线看"分节：' + text.slice(-500));
 });
