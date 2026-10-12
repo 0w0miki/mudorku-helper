@@ -1165,13 +1165,21 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(/标签徽章/.test(selfText) && /区域名从哪来/.test(selfText), '自检报告列出区域名来源');
   await p.evaluate(() => { window.MH.ui.diagText = null; window.MH.render(); });
 
-  await p.evaluate(() => {
-    const s = window.MH.store.state;
-    s.settings.cellSize = 49; s.bg.scale = 1;                 // 图 1194×1200、格距 49
-    window.MurdokuCore.updateBackground(s, { bound: true });
-    window.MurdokuCore.setGridOffset(s, 2, 2);
-    window.MH.store.setSettings({}); window.MH.render();
+  // 30b) 走用户的真实路径完成对位：点「▭ 框地图外框」→ 拖一个矩形圈住整张图（24×24 → 格距≈49）
+  await p.click('[data-act="bg-region"]');
+  const bgBox = await p.locator('#bgLayer').boundingBox();
+  await p.mouse.move(bgBox.x + 2, bgBox.y + 2);
+  await p.mouse.down();
+  await p.mouse.move(bgBox.x + bgBox.width - 2, bgBox.y + bgBox.height - 2, { steps: 8 });
+  await p.mouse.up();
+  await p.waitForFunction(() => window.MH.store.state.bg.bound === true, null, { timeout: 20000 });
+  const alignInfo = await p.evaluate(() => window.MH.ui.alignInfo);
+  ok(/格距/.test(alignInfo || ''), '框地图外框完成对位：' + alignInfo);
+  const fitRatio = await p.evaluate(() => {
+    const L = window.MurdokuCore.boardLayout(window.MH.store.state);
+    return Math.min(L.gridW / L.bgW, L.gridH / L.bgH);
   });
+  ok(fitRatio > 0.8, '对位后网格与底图基本重合（' + Math.round(fitRatio * 100) + '%）');
   const tShot = Date.now();
   await p.click('[data-act="detect-regions"]');
   await p.waitForFunction(() => window.MH.ui.ocrNames, null, { timeout: 300000 });
