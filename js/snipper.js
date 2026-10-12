@@ -390,7 +390,11 @@
     let url = cv.toDataURL('image/png');
     if (url.length > 400_000) url = cv.toDataURL('image/jpeg', 0.9);
 
-    S.pins.push({ id: 'snip' + (++seq) + '-' + Date.now().toString(36), page: S.page, w: ow, h: oh, url });
+    // 顺手记住这张卡片在**页面上的位置**（源图像素坐标）：图例识别要靠它划定"图例区域" ✓
+    S.pins.push({
+      id: 'snip' + (++seq) + '-' + Date.now().toString(36), page: S.page, w: ow, h: oh, url,
+      srcX: sx, srcY: sy, srcW: sw, srcH: sh, srcPageW: img.naturalWidth, srcPageH: img.naturalHeight,
+    });
     savePins();
     render();
     if (S.collapsed) { S.collapsed = false; saveUi(); render(); }

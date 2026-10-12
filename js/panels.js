@@ -498,6 +498,7 @@
       const pageRaster = { data: img.data, width: img.width, height: img.height };
       const parsed = window.MurdokuLegend.legendFromText(items, pageRaster);
       parsed.raster = pageRaster;           // 供"裁出每个物品的图标当模板"用
+      parsed.rawItems = items;              // 原始文字项：按卡片框重解析时要用
       parsed.page = { w: img.width, h: img.height, pageNo: Sn.page || 1 };
       return parsed;
     } finally {
@@ -509,6 +510,19 @@
    * 从图例卡片自动列出物品：切图标 → OCR 名字与分组说明 → 一次性建好物品。
    * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
    */
+  /** 把当前页的卡片框换算成页面栅格坐标（图例区域 = 用户框出来的那块） */
+  function cardRectsForPage(raster) {
+    const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
+    if (!Sn || !raster) return [];
+    const out = [];
+    for (const pin of (Sn.pins || [])) {
+      if (pin.page !== (Sn.page || 1) || !pin.srcPageW || !pin.srcPageH) continue;
+      const kx = raster.width / pin.srcPageW, ky = raster.height / pin.srcPageH;
+      out.push({ x: pin.srcX * kx, y: pin.srcY * ky, w: pin.srcW * kx, h: pin.srcH * ky });
+    }
+    return out;
+  }
+
   /** 从栅格上裁一小块（做模板用） */
   function cropPatch(raster, box) {
     const w = Math.max(1, Math.round(box.w)), h = Math.max(1, Math.round(box.h));
@@ -615,7 +629,49 @@
       try {
         MH.toast('正在读 PDF 文字层…', 'ok');
         out = await readLegendByPdf();
-        if (out && out.items.length) via = 'pdf';
+        if (out && out.raster) {
+          const rects = cardRectsForPage(out.raster);
+          if (rects.length && out.rawItems) {
+            // 用户框了图例卡片 → **以卡片框为准**重解析一次（比任何启发式都可靠）
+            const restricted = Lg.legendFromText(out.rawItems, out.raster, { rects });
+            if (restricted.items.length >= 2) {
+              restricted.raster = out.raster;
+              restricted.page = out.page;
+              restricted.rawItems = out.rawItems;
+              out = restricted;
+              via = 'pdf+card';
+            }
+          }
+          if (out.items.length < 2 && rects.length) {
+            // 文字层里没有物品名（contest 就是这样）→ 在卡片框里按**列投影**切出图标
+            MH.toast('这张图的图例物品没有文字名，改按图标切分…', 'ok');
+            const icons = [];
+            for (const r2 of rects) icons.push(...Lg.splitIconsByColumns(out.raster, r2));
+            const heads0 = out.headings || [];
+            // 图例的图标都在"某条说明行下方"那一带；地图上的杂图案不在这条带里 ✓
+            const heads = heads0;
+            const under = heads.length ? icons.filter(b => heads.some(h => {
+              const cy2 = b.y + b.h / 2;
+              return cy2 > h.y + h.h * 0.2 && cy2 < h.y + Math.max(120, h.h * 14);
+            })) : icons;
+            const iconsKept = under.length >= 2 ? under : icons;
+            if (iconsKept.length >= 2) {
+              out = {
+                items: iconsKept.map((b, i) => ({
+                  name: '', occupiable: heads.length ? heads.reduce((best, h) => {
+                    const ov = Math.min(h.x + h.w, b.x + b.w) - Math.max(h.x, b.x);
+                    return ov > (best.ov || -1e9) ? { ov, occ: h.occupiable } : best;
+                  }, { ov: -1e9, occ: null }).occ : null,
+                  icon: b,
+                })),
+                headings: heads, skipped: out.skipped || [], raster: out.raster, page: out.page,
+                method: 'card-icons',
+              };
+              via = 'card-icons';
+            }
+          }
+          if (out.items.length && via === '') via = 'pdf';
+        } else if (out && out.items.length) via = 'pdf';
       } catch (err) { MH.toast('读 PDF 文字层失败：' + err.message, 'warn'); }
     }
     // ② 其次：图例卡片（截图来源）→ 切分 + OCR
@@ -655,7 +711,7 @@
     let made = 0;
     MH.store.commit('从图例自动列出物品', st => {
       out.items.forEach(it => {
-        Core.createItem(st, it.name || ('物品 ' + (made + 1)), [], it.occupiable === false ? false : true);
+        Core.createItem(st, it.name || ('物品 ' + (made + 1) + '（请改名）'), [], it.occupiable === false ? false : true);
         made++;
       });
     });
@@ -674,7 +730,9 @@
       skipped: (out.skipped || []).length, unknowns: unknown,
     };
     MH.render();
-    MH.toast('从图例列出 ' + made + ' 件物品（' + (via === 'pdf' ? 'PDF 文字层' : '卡片识别') + '）' +
+    const viaText = via === 'pdf' ? 'PDF 文字层' : via === 'pdf+card' ? '卡片框 + PDF 文字层'
+      : via === 'card-icons' ? '卡片框内按图标切分（没有文字名，请改名）' : '卡片识别';
+    MH.toast('从图例列出 ' + made + ' 件物品（' + viaText + '）' +
       ((out.headings || []).length ? '：分组说明 ' + MH.ui.lastLegend.headings.join(' / ') : '') +
       (unknown ? ' · 有 ' + unknown + ' 件读不出分组，先都按"可占据"，请在物品列表里改' : '') +
       ' · 格子留空，点每件的「从样例找同类」补地点',

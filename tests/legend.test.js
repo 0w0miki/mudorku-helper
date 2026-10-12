@@ -169,3 +169,23 @@ test('PDF 文字层：正文句子不会被当成物品（不超过 3 个词、�
   assert.deepEqual(names, ['Chair', 'Shelf', 'Window'], '只该认图例里那三件：' + JSON.stringify(names));
   assert.ok(!out.items.some(i => /would|caricature|Someone/.test(i.name)), '正文不该进来：' + JSON.stringify(names));
 });
+
+test('图例区域没有文字名时：按列投影切出一排图标（面板渐变不能干扰）', () => {
+  // contest 第 2 页那种情况：图例物品在文字层里没名字，只能靠图标本身切分。
+  // 二维连通域在这种"彩色药丸面板"上会整块粘住 ✗，列投影稳得多 ✓
+  const r = makeRaster(560, 200, [60, 60, 90]);
+  // 面板：带渐变的浅色药丸（模拟真实图例）
+  for (let y = 60; y < 160; y++) {
+    for (let x = 30; x < 530; x++) {
+      const t2 = (x - 30) / 500;
+      const g = Math.round(220 + 18 * Math.sin(t2 * 3.1));
+      fill(r, x, y, 1, 1, [g, g - 6, g - 18]);
+    }
+  }
+  [70, 190, 310, 430].forEach(ox => icon(r, ox, 90, 1));       // 四个图标排成一行
+  const boxes = L.splitIconsByColumns(r, { x: 20, y: 50, w: 520, h: 130 });
+  assert.ok(boxes.length >= 3 && boxes.length <= 6, '应切出约 4 个图标，实得 ' + boxes.length + '：' + JSON.stringify(boxes));
+  const xs = boxes.map(b => b.x).sort((a, b) => a - b);
+  assert.ok(xs[0] < 120 && xs[xs.length - 1] > 380, '应覆盖左右两端：' + JSON.stringify(xs));
+  boxes.forEach(b => assert.ok(b.h >= 10 && b.w >= 10, '框要像图标：' + JSON.stringify(b)));
+});

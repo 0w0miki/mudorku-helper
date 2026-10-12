@@ -227,7 +227,11 @@
 
   /** "可占据"判定：**根据图例里的说明文字**，不靠左右位置猜 */
   function classifyLabel(text) {
-    const t = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    // 弯引号统一成直引号：真实 PDF 里写的是 "can’t be occupied"（U+2019）✗
+    // 之前只认 ASCII 的 can't，导致这一条被判成"读不懂"，整组可占据旗标为空 ✗
+    const t = String(text || '').toLowerCase()
+      .replace(/[\u2018\u2019\u02bc\u2032]/g, "'")
+      .replace(/\s+/g, ' ').trim();
     if (!t) return 'unknown';
     // 必须提到"能否占据"这件事，否则不算说明 —— 否则线索句里的 "not beside" 会被当成
     // "不可占据"的分组说明 ✗（真实 PDF 上踩过：一次多出一个假分组）
@@ -487,6 +491,66 @@
   }
 
   /**
+   * 卡片框内没有文字名时（contest 那种：图例物品在文字层里没名字）：
+   * 用**列投影**把一排图标切开 —— 一维投影比二维连通域稳得多：
+   * 面板的渐变只是抬高一点点基线，而图标会在列投影上形成一串明显的峰 ✓
+   * @param {object} raster 页面栅格
+   * @param {{x,y,w,h}} rect 卡片在页面栅格里的位置（图例区域）
+   * @returns {Array<{x,y,w,h,n}>} 每个图标一个框
+   */
+  function splitIconsByColumns(raster, rect, options) {
+    const opt = options || {};
+    const W = raster.width, H = raster.height;
+    const rx = Math.max(0, Math.round(rect.x)), ry = Math.max(0, Math.round(rect.y));
+    const rx1 = Math.min(W - 1, Math.round(rect.x + rect.w - 1)), ry1 = Math.min(H - 1, Math.round(rect.y + rect.h - 1));
+    if (rx1 - rx < 8 || ry1 - ry < 8) return [];
+    const dm = detailMask(raster, opt);
+    const col = new Float64Array(W);
+    let maxCol = 0;
+    for (let x = rx; x <= rx1; x++) {
+      let n = 0;
+      for (let y = ry; y <= ry1; y++) if (dm.mask[y * W + x]) n++;
+      col[x] = n;
+      if (n > maxCol) maxCol = n;
+    }
+    if (maxCol < 2) return [];
+    const thr = Math.max(2, maxCol * (opt.colRatio || 0.25));
+    const segs = [];
+    let start = -1;
+    for (let x = rx; x <= rx1 + 1; x++) {
+      const on = x <= rx1 && col[x] >= thr;
+      if (on && start < 0) start = x;
+      if (!on && start >= 0) { segs.push({ x0: start, x1: x - 1 }); start = -1; }
+    }
+    if (!segs.length) return [];
+    const widths = segs.map(s2 => s2.x1 - s2.x0 + 1).sort((a, b) => a - b);
+    const medW = widths[widths.length >> 1];
+    const merged = [];
+    for (const s2 of segs) {
+      const last = merged[merged.length - 1];
+      if (last && s2.x0 - last.x1 <= Math.max(3, medW * 0.25)) { last.x1 = s2.x1; continue; }
+      merged.push({ x0: s2.x0, x1: s2.x1 });
+    }
+    const out = [];
+    for (const s2 of merged) {
+      const w = s2.x1 - s2.x0 + 1;
+      if (w < Math.max(6, medW * 0.4)) continue;
+      let y0 = H, y1 = -1, n = 0;
+      for (let x = s2.x0; x <= s2.x1; x++) {
+        for (let y = ry; y <= ry1; y++) {
+          if (!dm.mask[y * W + x]) continue;
+          n++;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+      if (n < (opt.minPixels || 30) || y1 < 0 || y1 - y0 < 5) continue;
+      out.push({ x: s2.x0, y: y0, w, h: y1 - y0 + 1, n });
+    }
+    return out;
+  }
+
+  /**
    * 从 PDF 文字层 + 渲染好的页面栅格，推出物品清单。
    * @param {Array<{str,x,y,w,h}>} textItems 文字项（坐标与 raster 同一尺度，y 为基线）
    * @param {{data,width,height}} raster 页面栅格
@@ -495,7 +559,15 @@
    */
   function legendFromText(textItems, raster, options) {
     const opt = Object.assign({ nameBoxPad: 0.3 }, options || {});
-    const lines = mergeByLine(textItems);
+    // 有卡片框时**只在框里找**（用户框出来的就是图例区域，这比任何启发式都可靠 ✓）
+    let src = textItems || [];
+    if (opt.rects && opt.rects.length) {
+      src = src.filter(t => opt.rects.some(r2 => {
+        const cx2 = (t.x || 0) + (t.w || 0) / 2, cy2 = (t.y || 0) + (t.h || 0) / 2;
+        return cx2 >= r2.x && cx2 <= r2.x + r2.w && cy2 >= r2.y && cy2 <= r2.y + r2.h;
+      }));
+    }
+    const lines = mergeByLine(src);
     // 同一行里可能有**两条**说明（真实图例就是"Can be occupied | Cannot be occupied"并排）✗
     // 所以先按 x 空隙把每行拆成"词块"，再逐块判定是说明还是物品名。
     // 空隙阈值给得宽一点（1.8 倍字高）：物品名内部的词间空隙不会这么大，不会把名字拆开 ✓
@@ -609,5 +681,5 @@
   function namePartsOf(it) { return it.__name || { x0: it.icon ? it.icon.x : 0, y: it.icon ? it.icon.y : 0 };
   }
 
-  return { split, annotate, legendFromText, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
+  return { split, annotate, legendFromText, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
 });
