@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.28.5",
   "description": "Murdoku（类 N 皇后）本地谜题辅助网页：地图准备 + 游玩标注",
   "scripts": {
-    "test": "node --test tests/align.test.js tests/regions.test.js tests/core.test.js tests/store.test.js tests/ui.test.js",
+    "test": "node --test tests/align.test.js tests/regions.test.js tests/labels.test.js tests/core.test.js tests/store.test.js tests/ui.test.js",
     "test:core": "node --test tests/core.test.js tests/store.test.js",
     "serve": "node scripts/serve.js",
     "test:browser": "node tests/e2e.browser.js",

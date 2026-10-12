@@ -521,6 +521,8 @@
         MH.toast('正在渲染 PDF…', 'ok');
         res = await renderPdfPage(file, 1);
         file.__pdfName = file.name;
+        // 会话内留着：区域名要从 PDF 的文字层读（精确、免费）
+        MH.bgPdfFile = file;
       } else {
         const img = await loadImageFile(file);
         res = encodeBitmap(img, 1600);
@@ -603,6 +605,7 @@
     try { raster = await bgRaster(); } catch (err) { MH.toast(err.message, 'warn'); return; }
     const W = raster.width, H = raster.height;
     const box = { x: rectRatio.x * W, y: rectRatio.y * H, w: rectRatio.w * W, h: rectRatio.h * H };
+    MH.ui.mapBox = box;                       // 记下来：区域名/物品名按这个框过滤
     const pitchX = box.w / st.cols;
     const pitchY = box.h / st.rows;
     if (!(pitchX > 4) || !(pitchY > 4)) { MH.toast('框太小了，重新框一次', 'warn'); return; }
@@ -659,6 +662,37 @@
     };
   }
 
+  /**
+   * 从 PDF 文字层读"区域名"。区域名是画在地图上的全大写短标签
+   * （RECEPTION / WAITING AREA / STORAGE / TEACHER'S AREA …），
+   * 拿到它同时得到三样东西：**区域个数 k、区域名字、每个名字落在哪一格（种子）**。
+   */
+  async function readRegionLabels(file, geom, box) {
+    if (!file || !window.MurdokuLabels) return [];
+    await MH.ensurePdfLib();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const doc = await window.pdfjsLib.getDocument({ data }).promise;
+    const st = MH.store.state;
+    const pageNo = Math.min(doc.numPages, Math.max(1, (st.bg && st.bg.page) || 1));
+    const page = await doc.getPage(pageNo);
+    const base = page.getViewport({ scale: 1 });
+    // 与 bgData 同尺度（bg.w 就是底图栅格宽）
+    const scale = ((st.bg && st.bg.w) || 1600) / base.width;
+    const vp = page.getViewport({ scale });
+    const tc = await page.getTextContent();
+    const items = [];
+    for (const it of tc.items) {
+      const str = (it.str || '').trim();
+      if (!str) continue;
+      const pt = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+      items.push({ str, x: pt[0], y: pt[1], h: Math.abs(it.transform[3]) * scale });
+    }
+    if (doc.destroy) doc.destroy();
+    return window.MurdokuLabels.pickRegionLabels(items, box, {
+      maxSize: 0.6 * Math.min(geom.pitchX, geom.pitchY),
+    });
+  }
+
   /** 自动识别区域：产出候选后**一次提交**（可撤销），用户再手工增删改 */
   async function detectRegionsFromBg() {
     const R = window.MurdokuRegions;
@@ -670,16 +704,25 @@
     try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
     const t0 = Date.now();
-    const res = R.detectRegions(geo.raster, geo.geom);
+    // ① 先从 PDF 文字层读区域名 → 给出 k 个种子（截图档没有文字层，会跳过）
+    let labels = [];
+    if (MH.bgPdfFile && MH.ui.mapBox) {
+      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox); }
+      catch (err) { labels = []; }
+    }
+    const seeds = labels.length && window.MurdokuLabels
+      ? window.MurdokuLabels.labelsToSeeds(labels, geo.geom) : [];
+    // ② 有种子 → 种子约束的层次合并（不需要任何绝对阈值）；没有 → 回到颜色/粗线自适应
+    const res = R.detectRegions(geo.raster, geo.geom, seeds.length >= 2 ? { seeds } : {});
     if (!res.ok) { MH.toast('没认出区域：' + (res.reason || '未知原因'), 'warn'); return; }
-    const names = res.regions.map((r2, i) => '区域 ' + (i + 1));
     MH.store.commit('识别区域', s2 => {
-      res.regions.forEach((r2, i) => Core.createRegion(s2, names[i], r2.cells));
+      res.regions.forEach((r2, i) => Core.createRegion(s2, r2.name || ('区域 ' + (i + 1)), r2.cells));
       // 用识别到的颜色覆盖默认配色，一眼能对上底图
       s2.regions.slice(-res.regions.length).forEach((reg, i) => { reg.color = res.regions[i].color; });
     });
-    MH.toast('识别出 ' + res.regions.length + ' 个候选区域（' + res.stats.sampled + ' 格，' +
-      (Date.now() - t0) + 'ms）· 不满意可 ⌘Z 撤销，或直接改名字/加格子', 'ok');
+    MH.toast('识别出 ' + res.regions.length + ' 个候选区域' +
+      (seeds.length >= 2 ? '（按图上的区域名：' + labels.map(l => l.name).join(' / ') + '）' : '') +
+      ' · ' + res.stats.sampled + ' 格 · ' + (Date.now() - t0) + 'ms · 不满意可 ⌘Z 撤销', 'ok');
   }
 
   /** 视口坐标 → 底图比例（0..1，相对底图左上角与显示尺寸） */

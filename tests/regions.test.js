@@ -150,3 +150,44 @@ test('同色地面 + 粗隔墙（car-repair 风格）：靠隔墙切分，不靠
   assert.deepEqual(cols.map(c => c.join('-')), ['0-1', '2-3', '4-5'], '每块的列范围应等于真值：' + JSON.stringify(cols));
   for (const reg of out.regions) assert.equal(reg.size, 12, '每块 12 格：' + reg.size);
 });
+
+test('种子模式：区域名给出 k 与种子 → 用"边界强度"合并出恰好 k 块', () => {
+  // 6×6；地面完全同色；每格之间都有 3px/深度50 的砖缝；区域隔墙是 6px/深度90
+  const pitch = 60, x0 = 30, y0 = 30, N = 6;
+  const r = makeRaster(x0 * 2 + N * pitch, y0 * 2 + N * pitch);
+  fillRect(r, 0, 0, r.width, r.height, [250, 248, 242]);
+  fillRect(r, x0, y0, N * pitch, N * pitch, [205, 190, 160]);
+  // 砖缝：每一格边界都有一条（3px，中等深）
+  for (let c = 1; c < N; c++) fillRect(r, x0 + c * pitch - 1, y0, 3, N * pitch, [150, 138, 112]);
+  for (let rr = 1; rr < N; rr++) fillRect(r, x0, y0 + rr * pitch - 1, N * pitch, 3, [150, 138, 112]);
+  // 区域隔墙（6px，更深）：第 3 列、第 3 行 → 切成 4 块 3×3
+  for (const c of [3]) fillRect(r, x0 + c * pitch - 3, y0, 6, N * pitch, [40, 42, 46]);
+  for (const rr of [3]) fillRect(r, x0, y0 + rr * pitch - 3, N * pitch, 6, [40, 42, 46]);
+  const geom = { x0, y0, pitchX: pitch, pitchY: pitch, cols: N, rows: N };
+  const seeds = [{ name: '左上', r: 1, c: 1 }, { name: '右上', r: 1, c: 4 },
+                 { name: '左下', r: 4, c: 1 }, { name: '右下', r: 4, c: 4 }];
+  const res = R.detectRegions(r, geom, { seeds });
+  assert.ok(res.seeded, '应走种子模式');
+  assert.equal(res.regions.length, 4, '应恰好 4 块：' + JSON.stringify(res.stats));
+  for (const reg of res.regions) {
+    assert.equal(reg.size, 9, reg.name + ' 应为 3×3=9 格：' + reg.size);
+    const rs = [...new Set(reg.cells.map(k => Number(k.split(',')[0])))].sort((a, b) => a - b);
+    const cs = [...new Set(reg.cells.map(k => Number(k.split(',')[1])))].sort((a, b) => a - b);
+    assert.equal(rs.length, 3, '应占连续 3 行：' + rs.join(','));
+    assert.equal(cs.length, 3, '应占连续 3 列：' + cs.join(','));
+    assert.equal(rs[1] - rs[0], 1, '行要连续');
+    assert.equal(cs[1] - cs[0], 1, '列要连续');
+  }
+  const names = res.regions.map(x => x.name).sort();
+  assert.deepEqual(names, ['右上', '右下', '左上', '左下']);
+  // 名字与位置要对上
+  const find = n => res.regions.find(x => x.name === n);
+  assert.ok(find('左上').cells.includes('1,1') && !find('左上').cells.includes('1,4'), '左上应含 (1,1) 不含 (1,4)');
+});
+
+test('种子模式：没有种子时不受影响（仍走颜色/粗线自适应）', () => {
+  const { raster, geom } = makeMap({ cols: 6, rows: 6, pitch: 40, x0: 20, y0: 20 });
+  const res = R.detectRegions(raster, geom, {});
+  assert.ok(!res.seeded);
+  assert.ok(res.ok, '仍应能识别');
+});

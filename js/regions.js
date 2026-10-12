@@ -253,19 +253,84 @@
           const j = idx[r * cols + c + 1];
           if (j >= 0) {
             const bd = borderProbe(raster, geom, r, c, 'right', lumI, cellLuma(list[j]), opt);
-            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop });
+            const wall = Math.max(0, (bd.width || 0) - 2) * (bd.depth || 0);
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop, width: bd.width, wall,
+                         cost: cellDistance(li, list[j]) + wall });
           }
         }
         if (r + 1 < rows) {
           const j = idx[(r + 1) * cols + c];
           if (j >= 0) {
             const bd = borderProbe(raster, geom, r, c, 'down', lumI, cellLuma(list[j]), opt);
-            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop });
+            const wall = Math.max(0, (bd.width || 0) - 2) * (bd.depth || 0);
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop, width: bd.width, wall,
+                         cost: cellDistance(li, list[j]) + wall });
           }
         }
       }
     }
     if (!edges.length) return { ok: false, reason: '没有相邻格', regions: [] };
+    // ---------------- 种子模式：由区域名给出 k 与种子，层次合并到恰好 k 块 ----------------
+    // 不需要任何绝对阈值：只要求能排出"哪条边界更像墙"。合并最便宜的一对，
+    // 硬约束是"两块都已经带区域名就不许合并"（那就是不同区域），直到剩 k 块。
+    if (opt.seeds && opt.seeds.length) {
+      const seedList = [];
+      for (const sd of opt.seeds) {
+        const i = idx[sd.r * cols + sd.c];
+        if (i >= 0 && !seedList.some(x => x.i === i)) seedList.push({ i, name: sd.name || ('区域 ' + (seedList.length + 1)) });
+      }
+      if (seedList.length >= 1) {
+        let live = list.map((_, i) => ({ ids: [i], names: new Set(), size: 1 }));
+        seedList.forEach(sd => live[sd.i].names.add(sd.name));
+        const compOf = new Int32Array(list.length);
+        const rebuild = () => { compOf.fill(-1); live.forEach((c, ci) => c.ids.forEach(i => compOf[i] = ci)); };
+        rebuild();
+        const k = seedList.length;
+        let guard = 0;
+        while (live.length > k && guard++ <= list.length) {
+          let bi = -1, bj = -1, best = Infinity;
+          for (const e of edges) {
+            const a = compOf[e.i], b = compOf[e.j];
+            if (a < 0 || b < 0 || a === b) continue;
+            if (live[a].names.size && live[b].names.size) continue;   // 两块已有名字 → 不同区域
+            if (e.cost < best) { best = e.cost; bi = a; bj = b; }
+          }
+          if (bi < 0) break;
+          const A = live[bi], B = live[bj];
+          A.ids = A.ids.concat(B.ids);
+          A.size += B.size;
+          for (const nm of B.names) A.names.add(nm);
+          live = live.filter((_, ix) => ix !== bj);
+          rebuild();
+        }
+        const hex2 = rgb => '#' + rgb.map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+        const seeded = live.map(cp => {
+          const rgb = [0, 1, 2].map(ki => {
+            const v = cp.ids.map(i => list[i].rgb[ki]).sort((x, y) => x - y);
+            return v[v.length >> 1];
+          });
+          const lab = { L: 0, a: 0, b: 0 };
+          for (const i of cp.ids) { lab.L += list[i].lab.L; lab.a += list[i].lab.a; lab.b += list[i].lab.b; }
+          lab.L /= cp.ids.length; lab.a /= cp.ids.length; lab.b /= cp.ids.length;
+          return { ids: cp.ids, rgb, lab, size: cp.ids.length, name: [...cp.names][0] || '' };
+        }).sort((a, b) => b.size - a.size);
+        return {
+          ok: seeded.length > 0,
+          seeded: true,
+          regions: seeded.map(cp => ({
+            name: cp.name, cells: cp.ids.map(i => list[i].key), rgb: cp.rgb, color: hex2(cp.rgb),
+            size: cp.size, lab: cp.lab,
+          })),
+          stats: {
+            sampled: list.length, total: cols * rows, edges: edges.length,
+            boldEdges: edges.filter(e => e.bold).length, walls: false, seeded: true,
+            seeds: seedList.length, reached: seeded.length,
+            threshold: null, sizes: seeded.map(r2 => r2.size),
+          },
+        };
+      }
+    }
+
     // 阈值只用"没有粗线"的相邻对来标定：这样它反映的是这张地图**同一个区域内部**的
     // 颜色波动，而不是被跨区域的巨大色差拉偏（拿不到双峰时退到 45 分位）
     const open = edges.filter(e => !e.bold);
