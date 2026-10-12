@@ -38,7 +38,7 @@
       const x = Number(it.x), y = Number(it.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       if (opt.maxSize > 0 && Number(it.h) > opt.maxSize) continue;
-      if (box && !(x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h)) continue;
+      if (!inBox(it, box)) continue;
       out.push({ name: s, x, y, h: Number(it.h) || 0 });
     }
     // 同一个名字在同一处只留一次（pdf.js 会把一行拆成多个 item）
@@ -52,6 +52,32 @@
     }
     uniq.sort((a, b) => a.y - b.y || a.x - b.x);
     return uniq;
+  }
+
+  /**
+   * 识别用的"图片区域" —— **直接由对齐好的网格推出**，不再依赖手画的框。
+   * 网格矩形四周放宽 pad 格（默认 0.2），免得贴边的区域名因为基线坐标差几像素被切掉。
+   * 手画的外框只用来定标（算格距与原点），定完就没有别的用途了：
+   * 所以之后无论怎么微调网格、裁切底图，区域都自动跟着走。
+   *
+   * @param {{x0:number,y0:number,pitchX:number,pitchY:number,cols:number,rows:number}} geom
+   * @param {number} [pad] 四周放宽的格数
+   */
+  function areaBox(geom, pad) {
+    const p = pad == null ? 0.2 : Math.max(0, Number(pad) || 0);
+    const mx = geom.pitchX * p, my = geom.pitchY * p;
+    return {
+      x: geom.x0 - mx, y: geom.y0 - my,
+      w: geom.cols * geom.pitchX + 2 * mx, h: geom.rows * geom.pitchY + 2 * my,
+    };
+  }
+
+  /** 文字块（基线左端坐标）是否落在区域里 */
+  function inBox(item, box) {
+    if (!box) return true;
+    const x = Number(item && item.x), y = Number(item && item.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
   }
 
   /** 标签坐标 → 格子 (r,c)；格子外返回 null */
@@ -74,5 +100,5 @@
     return seeds;
   }
 
-  return { pickRegionLabels, labelToCell, labelsToSeeds };
+  return { pickRegionLabels, labelToCell, labelsToSeeds, areaBox, inBox };
 });

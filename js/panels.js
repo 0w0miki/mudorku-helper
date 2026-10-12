@@ -612,7 +612,6 @@
     try { raster = await bgRaster(); } catch (err) { MH.toast(err.message, 'warn'); return; }
     const W = raster.width, H = raster.height;
     const box = { x: rectRatio.x * W, y: rectRatio.y * H, w: rectRatio.w * W, h: rectRatio.h * H };
-    MH.ui.mapBox = box;                       // 记下来：区域名/物品名按这个框过滤
     const pitchX = box.w / st.cols;
     const pitchY = box.h / st.rows;
     if (!(pitchX > 4) || !(pitchY > 4)) { MH.toast('框太小了，重新框一次', 'warn'); return; }
@@ -667,6 +666,44 @@
         cols: st.cols, rows: st.rows,
       },
     };
+  }
+
+  /**
+   * 识别用的"图片区域" —— 由 regionGeometry() 的网格矩形直接推出（四周放宽 0.2 格）。
+   * 手画的「地图外框」只负责**定标**（算格距与原点），定完就退场：
+   * 之后不管怎么微调网格、改格子大小、裁切底图，区域都自动跟着走，不会再"框一次就固定住"。
+   */
+  function regionArea(geo) {
+    const L2 = window.MurdokuLabels;
+    if (L2 && L2.areaBox) return L2.areaBox(geo.geom);
+    const g = geo.geom;
+    return { x: g.x0, y: g.y0, w: g.cols * g.pitchX, h: g.rows * g.pitchY };
+  }
+
+  /** 缓存里的标签是按"上一次的框"筛的：对齐变过就按当前区域重筛一遍 */
+  function filterLabels(labels, box) {
+    const L2 = window.MurdokuLabels;
+    if (!L2 || !L2.inBox) return labels || [];
+    return (labels || []).filter(l => L2.inBox(l, box));
+  }
+
+  /** 网格矩形压在底图上的比例（挡住"网格根本不在图上就点识别"） */
+  function gridOnBg(geo) {
+    const g = geo.geom, W = geo.raster.width, H = geo.raster.height;
+    const w = g.cols * g.pitchX, h = g.rows * g.pitchY;
+    if (!(w > 0) || !(h > 0)) return 0;
+    const ix = Math.max(0, Math.min(g.x0 + w, W) - Math.max(g.x0, 0));
+    const iy = Math.max(0, Math.min(g.y0 + h, H) - Math.max(g.y0, 0));
+    return (ix * iy) / (w * h);
+  }
+
+  /** 识别的共同前提：网格已经对到底图上（框过、裁过、或在「对齐底图」里手动对过） */
+  function requireAligned(st) {
+    if (!st.bg.bound) {
+      MH.toast('先对好底图：勾「对齐底图」手动把网格对准地图，或用「▭ 框地图外框」自动定标', 'warn');
+      return false;
+    }
+    return true;
   }
 
   const LABEL_KEY = 'murdoku-helper.v1.labels';
@@ -727,9 +764,10 @@
     if (!R2 || !R2.diagnose) { MH.toast('诊断模块没加载', 'error'); return; }
     const st = MH.store.state;
     if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
-    if (!st.bg.bound) { MH.toast('先用「▭ 框地图外框」把底图和网格对好', 'warn'); return; }
+    if (!requireAligned(st)) return;
     const geo = await regionGeometry();
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    if (gridOnBg(geo) < 0.6) { MH.toast('网格大部分落在底图外面，先把网格对准地图', 'warn'); return; }
     // 没有已识别的区域时，先自动跑一遍识别（否则诊断里缺"区域之间的边界"那几节）
     if (!MH.store.state.regions.length) {
       MH.toast('先跑一遍区域识别，再做诊断', 'ok');
@@ -742,9 +780,9 @@
     let text = R2.formatDiagnosis(dg, assign);
     // 附上"标签 → 落在哪一格"：整体错位（例如整块偏一行）多半是种子格算错了，
     // 这几行能一眼看出来
-    let labels = readLabelCache(MH.store.state) || [];
-    if (!labels.length && MH.bgPdfFile && MH.ui.mapBox) {
-      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox); } catch (_) { labels = []; }
+    let labels = filterLabels(readLabelCache(MH.store.state), regionArea(geo));
+    if (!labels.length && MH.bgPdfFile) {
+      try { labels = await readRegionLabels(MH.bgPdfFile, geo.geom, regionArea(geo)); } catch (_) { labels = []; }
     }
     if (labels.length) {
       const rows2 = ['格 → 种子：'];
@@ -769,22 +807,24 @@
     if (!R) { MH.toast('区域识别模块没加载（js/regions.js）', 'error'); return; }
     const st = MH.store.state;
     if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
-    if (!st.bg.bound) { MH.toast('先用「▭ 框地图外框」把底图和网格对好，再来识别区域', 'warn'); return; }
+    if (!requireAligned(st)) return;
     let geo;
     try { geo = await regionGeometry(); } catch (err) { MH.toast(err.message, 'warn'); return; }
     if (!geo) { MH.toast('底图尺寸异常', 'warn'); return; }
+    if (gridOnBg(geo) < 0.6) { MH.toast('网格大部分落在底图外面，先把网格对准地图', 'warn'); return; }
     const t0 = Date.now();
     // ① 先从 PDF 文字层读区域名 → 给出 k 个种子
     //    顺序：本地缓存 → 会话内文件 → 都没有就请用户重选一次这份 PDF
     //    （读不到名字会退化成"无种子"，区域会碎成几十块——不能静默降级）
-    let labels = readLabelCache(st) || [];
-    if (!labels.length && MH.bgPdfFile && MH.ui.mapBox) {
+    const area = regionArea(geo);
+    let labels = filterLabels(readLabelCache(st), area);
+    if (!labels.length && MH.bgPdfFile) {
       try {
-        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, MH.ui.mapBox);
+        labels = await readRegionLabels(MH.bgPdfFile, geo.geom, area);
         if (labels.length) writeLabelCache(st, labels);
       } catch (err) { labels = []; }
     }
-    if (!labels.length && st.bg.kind === 'pdf' && MH.ui.mapBox) {
+    if (!labels.length && st.bg.kind === 'pdf') {
       MH.toast('读区域名需要再选一次这份 PDF（只需一次，之后会记住）', 'ok');
       const inp = document.getElementById('labelFileInput');
       if (inp) { MH.ui.awaitLabels = geo; inp.click(); return; }
@@ -1176,8 +1216,15 @@
     'bg-reset'() { MH.store.commit('网格归位', s => Core.setGridOffset(s, 0, 0)); },
     'bg-page'(el) { switchPdfPage(Number(el.dataset.dir)); },
     'bg-align'() {
+      const was = MH.ui.aligning;
       MH.ui.aligning = !MH.ui.aligning;
       MH.ui.draft = null;
+      // 退出对齐模式 = 这次对齐到此为止：记下 bound（识别区域与后续缩放都以此为前提），
+      // 这样"只靠对齐网格"这条路径不需要再画一次外框就能开始识别
+      if (was && !MH.ui.aligning && MH.store.state.bg && !MH.store.state.bg.bound) {
+        MH.store.commit('记录对齐', s => Core.updateBackground(s, { bound: true }));
+        MH.toast('已记下这次对齐（之后改格子大小，底图与网格一起缩放）', 'ok');
+      }
       MH.render();
       if (MH.ui.aligning) MH.toast('拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调', 'ok');
     },

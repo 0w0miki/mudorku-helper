@@ -944,6 +944,29 @@ test('对齐模式：拖动移动网格，不会误刷区域，方向键可微�
   dom.window.close();
 });
 
+test('只靠对齐网格：退出「对齐底图」即记下对齐，不必再画一次外框', async () => {
+  const { dom } = await boot();
+  withBg(dom);
+  assert.equal(dom.window.MH.store.state.bg.bound, false, '刚放上底图还没对齐');
+  clickSel(dom, '[data-act="bg-align"]');           // 进对齐模式（手动拉动网格）
+  clickSel(dom, '[data-act="bg-align"]');           // 退出 = 这次对齐到此为止
+  assert.equal(dom.window.MH.store.state.bg.bound, true, '退出对齐模式应记下 bound');
+  // 再切一次不会重复记（bound 已 true）
+  clickSel(dom, '[data-act="bg-align"]');
+  clickSel(dom, '[data-act="bg-align"]');
+  assert.equal(dom.window.MH.store.state.bg.bound, true);
+  dom.window.close();
+});
+
+test('识别区域：底图还没对好时只提示，不写区域', async () => {
+  const { dom, doc } = await boot();
+  withBg(dom);
+  clickSel(dom, '[data-act="detect-regions"]');
+  assert.equal(dom.window.MH.store.state.regions.length, 0, '没对齐就不该产出候选区域');
+  assert.ok(/对齐/.test(q(doc, '#toast').textContent || ''), '应提示先对好底图：' + q(doc, '#toast').textContent);
+  dom.window.close();
+});
+
 test('对齐模式：右下角手柄等比缩放网格（保持左上角不动）', async () => {
   const { dom, doc } = await boot();
   withBg(dom);

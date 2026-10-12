@@ -53,6 +53,27 @@ test('标签坐标 → 格子：正确落格，框外返回 null', () => {
   assert.equal(dup.length, 1);
 });
 
+test('识别区域由对齐好的网格推出：pad=0 就是网格矩形，默认四周放宽 0.2 格', () => {
+  // car-repair：手画外框与网格矩形本来就是同一个（框用来定标），所以等价
+  assert.deepEqual(L.areaBox(GEOM, 0), { x: 869, y: 384, w: 654, h: 648 });
+  const a = L.areaBox(GEOM);
+  assert.ok(Math.abs(a.x - BOX.x + 0.2 * 109) < 1e-9 && Math.abs(a.y - BOX.y + 0.2 * 108) < 1e-9,
+    '默认 pad 应为 0.2 格：' + JSON.stringify(a));
+  // 用推出来的区域挑名字，结果和手画框一致 —— 说明"框"退场后判据不变
+  const names = L.pickRegionLabels(CAR_ITEMS, a, { maxSize: 0.5 * 109 }).map(l => l.name).sort();
+  assert.deepEqual(names, ['GARAGE', 'RECEPTION', 'STORAGE', 'WAITING AREA']);
+});
+
+test('inBox：框内 / 框外 / 坐标缺失', () => {
+  const box = L.areaBox(GEOM, 0);
+  assert.equal(L.inBox({ x: 869, y: 384 }, box), true);            // 左上角算框内
+  assert.equal(L.inBox({ x: 869 + 654, y: 384 + 648 }, box), true); // 右下角算框内
+  assert.equal(L.inBox({ x: 868, y: 384 }, box), false);
+  assert.equal(L.inBox({ x: 869, y: 384 + 649 }, box), false);
+  assert.equal(L.inBox({ x: NaN, y: 384 }, box), false);
+  assert.equal(L.inBox({ x: 0, y: 0 }, null), true, '没有框时不过滤');
+});
+
 test('family 风格：TEACHER’S AREA 里的撇号不影响判定', () => {
   const items = [
     { str: 'TEACHER’S AREA', x: 1177, y: 682, h: 26 },
