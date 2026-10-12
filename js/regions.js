@@ -164,53 +164,58 @@
    */
   function borderProbe(raster, geom, r, c, dir, lumaA, lumaB, options) {
     const opt = Object.assign(
-      { span: 6, samples: 5, depthAbs: 22, depthRel: 0.09, minWidth: 4 }, options || {});
+      { span: 6, samples: 9, depthAbs: 22, depthRel: 0.09, minWidth: 3 }, options || {});
     const { data, width: W, height: H } = raster;
     const { x0, y0, pitchX, pitchY } = geom;
     const px0 = Math.round(x0 + c * pitchX), py0 = Math.round(y0 + r * pitchY);
     const px1 = Math.round(x0 + (c + 1) * pitchX), py1 = Math.round(y0 + (r + 1) * pitchY);
     const span = Math.max(2, Math.round(opt.span));
     const n = span * 2 + 1;
-    const acc = new Float64Array(n);
-    const cnt = new Int32Array(n);
     const lumaAt = (x, y) => {
       const o = (y * W + x) * 4;
       return 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
     };
+    const cellsLuma = (lumaA + lumaB) / 2;
+    const need = Math.max(opt.depthAbs, cellsLuma * opt.depthRel);
     const samples = Math.max(3, Math.round(opt.samples));
-    for (let s2 = 0; s2 < samples; s2++) {
-      const t = 0.25 + 0.5 * (samples === 1 ? 0.5 : s2 / (samples - 1));   // 沿边取 25%~75%
+    // 沿**整条边**均匀取截面（不只中间那段）：被家具挡住的地方会空出来，
+    // 用"覆盖率"表示这条边上有多长是墙，而不是要求整条边都连续是墙
+    let covered = 0, maxWidth = 0, maxDepth = 0;
+    for (let si = 0; si < samples; si++) {
+      const t = 0.06 + 0.88 * (si / (samples - 1));
+      const prof = [];
       if (dir === 'right') {
         const y = Math.round(py0 + (py1 - py0) * t);
         for (let i = 0; i < n; i++) {
           const x = px1 - span + i;
-          if (x < 0 || y < 0 || x >= W || y >= H) continue;
-          acc[i] += lumaAt(x, y); cnt[i]++;
+          if (x < 0 || y < 0 || x >= W || y >= H) { prof.push(255); continue; }
+          prof.push(lumaAt(x, y));
         }
       } else {
         const x = Math.round(px0 + (px1 - px0) * t);
         for (let i = 0; i < n; i++) {
           const y = py1 - span + i;
-          if (x < 0 || y < 0 || x >= W || y >= H) continue;
-          acc[i] += lumaAt(x, y); cnt[i]++;
+          if (x < 0 || y < 0 || x >= W || y >= H) { prof.push(255); continue; }
+          prof.push(lumaAt(x, y));
         }
       }
+      let best = 0, cur = 0;
+      for (let i = 0; i < n; i++) {
+        if (prof[i] < cellsLuma - need) { cur++; if (cur > best) best = cur; }
+        else cur = 0;
+      }
+      let minL = 255;
+      for (const v of prof) if (v < minL) minL = v;
+      const depth = Math.round((cellsLuma - minL) * 10) / 10;
+      if (best > maxWidth) maxWidth = best;
+      if (depth > maxDepth) maxDepth = depth;
+      if (best >= opt.minWidth && depth >= need) covered++;
     }
-    const prof = [];
-    for (let i = 0; i < n; i++) prof.push(cnt[i] ? acc[i] / cnt[i] : 255);
-    const cellsLuma = (lumaA + lumaB) / 2;
-    const need = Math.max(opt.depthAbs, cellsLuma * opt.depthRel);
-    // 找"比两格明显更暗"的连续段，最长的一段就是线宽
-    let best = 0, cur = 0;
-    for (let i = 0; i < n; i++) {
-      if (prof[i] < cellsLuma - need) { cur++; if (cur > best) best = cur; }
-      else cur = 0;
-    }
-    const minLuma = Math.min.apply(null, prof);
+    const coverage = covered / samples;
     return {
-      width: best,
-      depth: Math.round((cellsLuma - minLuma) * 10) / 10,
-      bold: best >= opt.minWidth,
+      coverage: Math.round(coverage * 1000) / 1000,
+      width: maxWidth, depth: maxDepth,
+      bold: coverage >= 0.6,
     };
   }
 
@@ -253,18 +258,18 @@
           const j = idx[r * cols + c + 1];
           if (j >= 0) {
             const bd = borderProbe(raster, geom, r, c, 'right', lumI, cellLuma(list[j]), opt);
-            const wall = Math.max(0, (bd.width || 0) - 2) * (bd.depth || 0);
-            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop, width: bd.width, wall,
-                         cost: cellDistance(li, list[j]) + wall });
+            const wall = (bd.coverage || 0) * Math.min(1, Math.max(0, ((bd.width || 0) - 2) / 4));        // 这条边上"有多长是墙"（0~1）
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, width: bd.width,
+                         wall, cost: cellDistance(li, list[j]) + wall * 300 });
           }
         }
         if (r + 1 < rows) {
           const j = idx[(r + 1) * cols + c];
           if (j >= 0) {
             const bd = borderProbe(raster, geom, r, c, 'down', lumI, cellLuma(list[j]), opt);
-            const wall = Math.max(0, (bd.width || 0) - 2) * (bd.depth || 0);
-            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, drop: bd.drop, width: bd.width, wall,
-                         cost: cellDistance(li, list[j]) + wall });
+            const wall = (bd.coverage || 0) * Math.min(1, Math.max(0, ((bd.width || 0) - 2) / 4));        // 这条边上"有多长是墙"（0~1）
+            edges.push({ i, j, d: cellDistance(li, list[j]), bold: bd.bold, width: bd.width,
+                         wall, cost: cellDistance(li, list[j]) + wall * 300 });
           }
         }
       }
@@ -288,21 +293,74 @@
         const k = seedList.length;
         let guard = 0;
         while (live.length > k && guard++ <= list.length) {
-          let bi = -1, bj = -1, best = Infinity;
+          // 组件对之间用**平均代价**：只看最便宜的一条边，会被墙上一个缺口骗过去
+          const pair = new Map();
           for (const e of edges) {
             const a = compOf[e.i], b = compOf[e.j];
             if (a < 0 || b < 0 || a === b) continue;
-            if (live[a].names.size && live[b].names.size) continue;   // 两块已有名字 → 不同区域
-            if (e.cost < best) { best = e.cost; bi = a; bj = b; }
+            if (live[a].names.size && live[b].names.size) continue;
+            const key = a < b ? a + ':' + b : b + ':' + a;
+            let acc = pair.get(key);
+            if (!acc) { acc = { a: Math.min(a, b), b: Math.max(a, b), sum: 0, cnt: 0 }; pair.set(key, acc); }
+            acc.sum += e.cost; acc.cnt++;
           }
-          if (bi < 0) break;
-          const A = live[bi], B = live[bj];
+          let best = null;
+          for (const acc of pair.values()) {
+            const mean = acc.sum / acc.cnt;
+            if (!best || mean < best.mean) best = { a: acc.a, b: acc.b, mean };
+          }
+          if (!best) break;
+          const A = live[best.a], B = live[best.b];
           A.ids = A.ids.concat(B.ids);
           A.size += B.size;
           for (const nm of B.names) A.names.add(nm);
-          live = live.filter((_, ix) => ix !== bj);
+          live = live.filter((_, ix) => ix !== best.b);
           rebuild();
         }
+
+        // 多数投票平滑：被同一区域包围的零星格子归并过去，把边界修干净。
+        // 保护两条：种子格不动；不让任何区域被清空。
+        const owner = new Int32Array(list.length).fill(-1);
+        const ownerOf = () => { owner.fill(-1); live.forEach((cp, ci) => cp.ids.forEach(i => owner[i] = ci)); };
+        ownerOf();
+        const seedCells = new Set(seedList.map(sd => sd.i));
+        for (let iter = 0; iter < 4; iter++) {
+          let changed = 0;
+          for (let ii = 0; ii < list.length; ii++) {
+            if (seedCells.has(ii)) continue;
+            const cell = list[ii];
+            const mine = owner[ii];
+            if (mine < 0 || live[mine].size <= 1) continue;
+            const counts = new Map();
+            for (const dr of [-1, 0, 1]) {
+              for (const dc of [-1, 0, 1]) {
+                if (!dr && !dc) continue;
+                const rr = cell.r + dr, cc = cell.c + dc;
+                if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
+                const j = idx[rr * cols + cc];
+                if (j < 0 || j === ii) continue;
+                const o = owner[j];
+                if (o < 0) continue;
+                counts.set(o, (counts.get(o) || 0) + 1);
+              }
+            }
+            let bestO = -1, bestN = 0, total = 0;
+            for (const [o, nn] of counts) { total += nn; if (nn > bestN) { bestN = nn; bestO = o; } }
+            if (total >= 4 && bestO !== mine && bestN >= total * 0.75) {
+              // 把这一格从原分量搬到 bestO
+              live[mine].ids = live[mine].ids.filter(x => x !== ii);
+              live[mine].size--;
+              live[bestO].ids.push(ii);
+              live[bestO].size++;
+              owner[ii] = bestO;
+              changed++;
+            }
+          }
+          live = live.filter(cp => cp.ids.length > 0);
+          ownerOf();
+          if (!changed) break;
+        }
+
         const hex2 = rgb => '#' + rgb.map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
         const seeded = live.map(cp => {
           const rgb = [0, 1, 2].map(ki => {
