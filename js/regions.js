@@ -169,8 +169,6 @@
     const { x0, y0, pitchX, pitchY } = geom;
     const px0 = Math.round(x0 + c * pitchX), py0 = Math.round(y0 + r * pitchY);
     const px1 = Math.round(x0 + (c + 1) * pitchX), py1 = Math.round(y0 + (r + 1) * pitchY);
-    // 窗口保持窄（±6px）：放宽会开始抓到家具，反而更差（实测过）。
-    // "被挡住的那一段墙"改由**墙线补全**解决（见 detectRegions）。
     const span = Math.max(2, Math.round(opt.span));
     const n = span * 2 + 1;
     const lumaAt = (x, y) => {
@@ -277,35 +275,6 @@
       }
     }
     if (!edges.length) return { ok: false, reason: '没有相邻格', regions: [] };
-    // ---------------- 墙线补全 ----------------
-    // 区域分界在这些题里是**直线**（贯穿若干格的隔墙）。某一段被家具挡住时，这一段的
-    // 墙证据会消失，区域就从缺口漏过去（用户实测：FRONT AREA 多占了 BACK AREA 右边 4 格）。
-    // 做法：统计每条线（行界 / 列界）上"够像墙"的边占多少比例，够高就把整条线补成墙。
-    const WALL_EDGE = 0.6;    // 单条边：3px 砖缝≈0.25，6px 隔墙≈1.0
-    // 一条线上有 60% 是墙才补全：门槛低了会在"砖缝也比较深"的地图（car-repair）上
-    // 把很多线误判成墙，反而切碎（实测过 40% 会这样）
-    const WALL_LINE = 0.6;
-    const lineKey = e => (e.dir === 'down' ? 'H' + e.r : 'V' + e.c);
-    const lineTot = new Map(), lineWall = new Map();
-    for (const e of edges) {
-      const k2 = lineKey(e);
-      lineTot.set(k2, (lineTot.get(k2) || 0) + 1);
-      if (e.wall >= WALL_EDGE) lineWall.set(k2, (lineWall.get(k2) || 0) + 1);
-    }
-    const completed = new Set();
-    for (const [k2, n2] of lineWall) {
-      if (n2 / (lineTot.get(k2) || 1) >= WALL_LINE) completed.add(k2);
-    }
-    let completedEdges = 0;
-    for (const e of edges) {
-      if (e.wall >= WALL_EDGE) continue;
-      if (!completed.has(lineKey(e))) continue;
-      e.wall = 1;
-      e.bold = true;
-      e.cost = e.d + 300;
-      completedEdges++;
-    }
-
     // ---------------- 种子模式：由区域名给出 k 与种子，层次合并到恰好 k 块 ----------------
     // 不需要任何绝对阈值：只要求能排出"哪条边界更像墙"。合并最便宜的一对，
     // 硬约束是"两块都已经带区域名就不许合并"（那就是不同区域），直到剩 k 块。
@@ -411,7 +380,7 @@
             size: cp.size, lab: cp.lab,
           })),
           stats: {
-            sampled: list.length, total: cols * rows, edges: edges.length, completedEdges,
+            sampled: list.length, total: cols * rows, edges: edges.length,
             boldEdges: edges.filter(e => e.bold).length, walls: false, seeded: true,
             seeds: seedList.length, reached: seeded.length,
             threshold: null, sizes: seeded.map(r2 => r2.size),
