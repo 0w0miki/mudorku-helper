@@ -625,6 +625,19 @@
   }
 
   /**
+   * 异步动作的保险丝：异步函数里抛异常会变成 unhandled rejection，
+   * 表现就是"点了按钮什么都没发生"（识别区域那次静默崩溃就是这么被漏掉的）。
+   */
+  function guard(fn) {
+    return async (...args) => {
+      try { await fn(...args); }
+      catch (err) {
+        MH.toast('操作出错：' + (err && err.message ? err.message : String(err)), 'error');
+      }
+    };
+  }
+
+  /**
    * 由当前对位参数算出"每格在底图上的像素矩形"。
    * 场景里：网格左上角相对底图左上角偏移 = grid.x/grid.y（显示 px），
    * 底图显示宽度 = boardLayout().bgW；所以 原图像素 = 显示 px × (原图宽 / 显示宽)。
@@ -748,7 +761,7 @@
       const c01 = v => Math.max(0, Math.min(1, v));
       const rectRatio = { x: c01(fx), y: c01(fy), w: c01(Math.min(fw, 1 - c01(fx))), h: c01(Math.min(fh, 1 - c01(fy))) };
       if (rectRatio.w <= 0.02 || rectRatio.h <= 0.02) { MH.toast('框到底图外面了，重新框一次', 'warn'); return; }
-      applyBoxGeometry(rectRatio);
+      guard(applyBoxGeometry)(rectRatio);
     });
   }
 
@@ -996,7 +1009,7 @@
     },
     'bg-crop'() { cropBackground(); },
     'bg-region'() { pickRegion(); },
-    'detect-regions'() { detectRegionsFromBg(); },
+    'detect-regions'() { guard(detectRegionsFromBg)(); },
     'bg-scale-step'(el, e) {
       const st = MH.store.state;
       if (!st.bg) { MH.toast('还没有底图', 'warn'); return; }
