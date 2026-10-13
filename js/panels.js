@@ -525,79 +525,112 @@
    * （猜出来的框会把相邻两个名字粘在一起，例如 "flowers shark"）
    * @returns {{items:Array, headings:Array}|null}
    */
+  /** 线索句里的常见虚词（图例物品名不会长这样）—— car-repair 全页曾把 "was" 列成物品 ✗ */
+  const STOP_WORDS = new Set(['was', 'is', 'are', 'the', 'a', 'an', 'in', 'on', 'at', 'of', 'to', 'and', 'or',
+    'he', 'she', 'it', 'they', 'his', 'her', 'their', 'with', 'beside', 'alone', 'left', 'right', 'above',
+    'under', 'same', 'area', 'was.', 'be', 'not', 'no', 'yes', 'this', 'that', 'there', 'where', 'who']);
+
   async function readCardLegendByOcr(raster, rect) {
     const O = window.MurdokuOCR;
     if (!O || !O.readWords) return null;
     const Lg = window.MurdokuLegend;
-    // **逐面板 OCR**：页面底色、地图残条、页脚版权文字都在面板之外，逐面板就自然排除了 ✓
-    // （实测逐面板比"整张卡 OCR 再筛"更准：整卡那次把 "bed" 漏了、"tombstone" 多带了个尾巴）
-    const panels = Lg.colourPanels(raster, { minArea: 0.02, maxPanels: 6 });
-    const areas = panels.length ? panels : [rect];
-    let all = [];
-    for (const a of areas) {
-      const got = await O.readWords(raster, a,
-        { zoom: 5, psm: 11, chars: O.WORDS, minConf: 65, onStatus: m => MH.toast(m, 'ok') });
-      if (got && got.length) all.push(...got);
-    }
-    // 兜底：面板一个都没认出来（或认出来的词太少）→ 整张卡再来一次 ✓
-    if (all.length < 4) {
-      const got = await O.readWords(raster, rect,
-        { zoom: 5, psm: 11, chars: O.WORDS, minConf: 65, onStatus: m => MH.toast(m, 'ok') });
-      if (got && got.length) all = got;
-    }
-    if (!all.length) return null;
-    const words = all;
-    // 按 y 归行
+    // ① 整张卡 OCR 一次（大区域会自动分块）：拿到每个词的框 + 文字 + 置信度 ✓
+    const all = await O.readWords(raster, rect,
+      { zoom: 5, psm: 11, chars: O.WORDS, minConf: 65, onStatus: m => MH.toast(m, "ok") });
+    if (!all || !all.length) return null;
+    // ② 按 y 归行；行内再按 x 间隙分组（间隙 ≤0.6 字高 = 同一个名字，如 "Oil Slick"）
     const lines = [];
-    for (const w of words) {
+    for (const w of all) {
       const ln = lines.find(l => Math.abs(l.y - w.y) < Math.max(6, w.h * 0.7));
       if (ln) { ln.words.push(w); ln.y = Math.min(ln.y, w.y); ln.h = Math.max(ln.h, w.h); }
       else lines.push({ y: w.y, h: w.h, words: [w] });
     }
-    const heads = [], names = [];
-    for (const ln of lines) {
+    const groupsOf = ln => {
       ln.words.sort((a, b) => a.x - b.x);
-      const groups = [];
+      const gs = [];
       for (const w of ln.words) {
-        const last = groups[groups.length - 1];
-        // 间隙 ≤ 0.6 字高 → 同一个名字（"Oil Slick"）；更大 → 相邻的两个名字 ✓
+        const last = gs[gs.length - 1];
         const gap = last ? w.x - (last.x + last.w) : 1e9;
         if (last && gap <= Math.max(3, w.h * 0.6)) {
           last.text = last.text + ' ' + w.text;
           last.w = (w.x + w.w) - last.x;
           last.h = Math.max(last.h, w.h);
         } else {
-          groups.push({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h });
+          gs.push({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h });
         }
       }
-      for (const g of groups) {
-        const cls = Lg.classifyLabel(g.text);
-        if (cls !== 'unknown' && g.text.split(/\s+/).length <= 6) {
-          heads.push({ x: g.x, y: g.y, w: g.w, h: g.h, text: g.text, occupiable: cls === 'yes' });
-          continue;
+      return gs;
+    };
+    // ③ 说明行 = 含 "occupied/占据" 的行（**真去认字**，不再靠"没配上图标的矮排"反推 ✓）
+    //    极性优先用 classifyLabel；OCR 把整行读残（"can occupied"）时退回关键词判断 ✓
+    // 按"词块"分类（一行里可能有两条说明并排 ✓）。**只认 classifyLabel 判得出来的**：
+    // 之前加过"含 occupied 就算"的放宽，会把别的行也糊进来（实测把整组极性搞乱 ✗）
+    // 先按"词块"找**含 occupied/占据 的那块**（OCR 常把整行读残 ✗，按整行分类会漏掉整组），
+    // 极性则取它**左边紧邻的 1~3 个词块**："can't" / "cannot" → 不可；"can"/别的 → 可 ✓
+    // （car-repair 两个说明行在同一行，所以不能按"整行"判极性 ✗）
+    const heads = [];
+    for (const ln of lines) {
+      const gs = groupsOf(ln);
+      for (let i = 0; i < gs.length; i++) {
+        if (!/occup|占据|放人/i.test(gs[i].text)) continue;
+        const near = [];
+        for (let k = i - 1; k >= 0 && k >= i - 3; k--) {
+          if (gs[k].x + gs[k].w < gs[i].x - Math.max(24, gs[i].h * 3.5)) break;   // 隔太远就不算
+          near.unshift(gs[k].text);
         }
-        // 物品名过滤：≥2 字母、不是全大写（区域名那种）、不是纯数字/坐标
-        const letters = g.text.replace(/[^A-Za-z]/g, '');
-        if (letters.length < 2) continue;
-        if (letters === letters.toUpperCase()) continue;
-        if (/^[A-Za-z]{0,2}\d+$/.test(g.text)) continue;
-        if (g.text.split(/\s+/).length > 3 || /[.,;:!?…]/.test(g.text)) continue;   // 句子不是名字
-        names.push(g);
+        let cls = Lg.classifyLabel(near.concat([gs[i].text]).join(' '));
+        if (cls === 'unknown') cls = /(can't|cannot|no|not)/i.test(near.join(' ')) ? 'no' : 'yes';
+        const x0 = near.length ? gs[i - near.length].x : gs[i].x;
+        if (x0 > gs[i].x) { /* 保险：别越界 */ }
+        heads.push({ x: Math.min(x0, gs[i].x), y: gs[i].y, w: gs[i].x + gs[i].w - Math.min(x0, gs[i].x),
+          h: gs[i].h, text: near.concat([gs[i].text]).join(' '), occupiable: cls === 'yes' });
       }
     }
+    if (!heads.length) return null;                      // 没有说明行就不是图例，别硬认
+    // ④ 每条说明行的**板底色**（它周围一圈的众数颜色）
+    for (const h of heads) h.bg = Lg.ringColour(raster, h, 0.8);
+    // ⑤ 名字 = 与某条说明行**同一块色板**上的词 ✓（比"切面板矩形"稳：真实截图底色有渐变，
+    //    一切就整页连成一块，大面板会整个消失 —— contest 里 14 件物品的粉面板就这么丢过 ✗）
+    const names = [], seen = [];
+    for (const w of all) {
+      const t2 = String(w.text || '').trim();
+      const letters = t2.replace(/[^A-Za-z]/g, '');
+      if (letters.length < 2) continue;
+      if (letters === letters.toUpperCase()) continue;             // 全大写 = 区域名，不是物品
+      if (/^[A-Za-z]{0,2}\d+$/.test(t2)) continue;                 // C9 这种坐标
+      if (t2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(t2)) continue;
+      if (STOP_WORDS.has(t2.toLowerCase())) continue;               // 句子里的虚词（"was"）
+      const bg = Lg.ringColour(raster, w, 0.8);
+      const hit = heads.filter(h => Lg.colourGap(bg, h.bg) <= 30);
+      if (!hit.length) continue;
+      if (heads.some(h => Math.abs(h.y - w.y) < Math.max(8, w.h))) continue;   // 说明行自己不算
+      const ln = lines.find(l => l.words.includes(w));
+      const merged = { text: t2, x: w.x, y: w.y, w: w.w, h: w.h, head: hit[0] };
+      if (ln) {
+        const gs = groupsOf(ln).find(g => Math.abs(g.x - w.x) < 2);
+        if (gs) Object.assign(merged, { text: gs.text, w: gs.w, h: gs.h });
+      }
+      if (seen.some(q => Math.abs(q.x - merged.x) < 3 && Math.abs(q.y - merged.y) < 3)) continue;
+      seen.push(merged);
+      names.push(merged);
+    }
     if (!names.length) return null;
-    void 0;
-    // 每个名字 → 它**正上方**那块墨迹 = 图标
+    // ⑥ 每个名字 → 正上方那块墨迹 = 图标（找不到也算一件 —— 清单/可占据只需要名字 ✓）
     const items = [];
     for (const nm of names) {
       const nameH = Math.max(6, nm.h);
       const pad = nameH * 0.8;
       let icon = Lg.findIconInBand(raster, nm.x - pad, nm.y - nameH * 5, nm.x + nm.w + pad, nm.y - nameH * 0.3);
       if (!icon) icon = Lg.findIconInBand(raster, nm.x - nameH * 8, nm.y - nameH * 1.5, nm.x - 2, nm.y + nameH * 0.6);
-      if (!icon) continue;
-      items.push({ name: nm.text, occupiable: null, icon });
+      if (icon) {
+        // 图标在名字正上方才收（横向大致对齐、图标比字高），否则只当"没有图标"
+        const icx = icon.x + icon.w / 2, ncx = nm.x + nm.w / 2;
+        if (Math.abs(icx - ncx) > Math.max(icon.w * 0.55, nameH * 2)) icon = null;
+        else if (icon.h < nameH * 1.3) icon = null;
+      }
+      items.push({ name: nm.text, occupiable: nm.head ? nm.head.occupiable : null, icon: icon || null });
     }
-    if (!items.length) return null;
+    if (items.length < 2) return null;
     return { items, headings: heads };
   }
 

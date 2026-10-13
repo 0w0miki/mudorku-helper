@@ -125,6 +125,35 @@
   async function readWords(raster, box, opts) {
     const opt = opts || {};
     const { M, api } = await ready(opt.onStatus);
+    // **大区域要分块**：整幅放大 5 倍会超过 OCR 能处理的尺寸，结果会被悄悄截断 ✗
+    // （真实图例截图 1210×772 时就漏掉了整组名字）。分块后每块也更容易识别小字 ✓
+    const maxSide = opt.maxTile || 300;   // 放 5 倍后 1500px，稳在 OCR 的舒适区 ✓
+    if (box.w > maxSide * 1.6 || box.h > maxSide * 1.6) {
+      const parts = [];
+      const step = Math.round(maxSide * 0.72);                // 28% 重叠：每个词至少完整落在某一块里 ✓
+      for (let y = box.y; y < box.y + box.h; y += step) {
+        for (let x = box.x; x < box.x + box.w; x += step) {
+          const tw = Math.min(maxSide, box.x + box.w - x);
+          const th = Math.min(maxSide, box.y + box.h - y);
+          if (tw < 12 || th < 12) continue;
+          const part = await readWords(raster, { x, y, w: tw, h: th }, Object.assign({}, opt, { maxTile: Infinity }));
+          for (const w of part) parts.push(w);
+        }
+      }
+      // 去重：被别的词框"含住大半"的碎片丢掉（分块边缘会把词切成 "tombstc"+"tone" ✗）
+      const inside = (a, b2) => {
+        const ox = Math.min(a.x + a.w, b2.x + b2.w) - Math.max(a.x, b2.x);
+        const oy = Math.min(a.y + a.h, b2.y + b2.h) - Math.max(a.y, b2.y);
+        return ox > 0 && oy > 0 && (ox * oy) / (a.w * a.h) > 0.7;
+      };
+      const out = [];
+      for (const w of parts.slice().sort((a, b2) => (b2.w * b2.h) - (a.w * a.h))) {
+        if (out.some(q => q.text === w.text && Math.abs(q.x - w.x) < 3 && Math.abs(q.y - w.y) < 3)) continue;
+        if (out.some(q => inside(w, q))) continue;             // 小块里读出来的半截词
+        out.push(w);
+      }
+      return out;
+    }
     api.SetVariable('tessedit_char_whitelist', opt.chars != null ? opt.chars : WORDS);
     api.SetVariable('tessedit_pageseg_mode', String(opt.psm != null ? opt.psm : 11)); // 11 = 稀疏文字
     const z = opt.zoom || 3;
