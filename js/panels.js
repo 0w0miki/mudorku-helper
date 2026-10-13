@@ -859,9 +859,13 @@
             // **但"先按卡片裁掉文字再解析"会丢上下文** ✗：实测 car-repair 框住图例后
             // 只剩 Oil Slick/Car/Chair/TV（第二组整组丢、TV 极性也错），整页解析却是 7/7 ✓。
             // 所以再算一份"整页解析 + 按卡片筛物品"，谁给得多用谁 ✓
+            // 收不收这件：看**框与卡片的重叠比例**（文字层给的框可能跨过卡片边界，
+            // 只看中心点会把刚好压线的整件丢掉 ✗ —— TV 就这么丢过）
             const inCard = (b) => !!b && rects.some(r => {
-              const cx2 = b.x + b.w / 2, cy2 = b.y + b.h / 2;
-              return cx2 >= r.x - 6 && cx2 <= r.x + r.w + 6 && cy2 >= r.y - 6 && cy2 <= r.y + r.h + 6;
+              const ox = Math.min(b.x + b.w, r.x + r.w) - Math.max(b.x, r.x);
+              const oy = Math.min(b.y + b.h, r.y + r.h) - Math.max(b.y, r.y);
+              if (ox <= 0 || oy <= 0) return false;
+              return (ox * oy) / (b.w * b.h) > 0.3;
             });
             const wholeInCard = {
               items: whole.items.filter(it => inCard(it.icon) || inCard(it.nameBox)),
