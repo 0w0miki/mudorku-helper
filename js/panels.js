@@ -617,7 +617,10 @@
       const t2 = String(w.text || '').trim();
       const letters = t2.replace(/[^A-Za-z]/g, '');
       if (letters.length < 2) continue;
-      if (letters === letters.toUpperCase()) continue;             // 全大写 = 区域名，不是物品
+      // 全大写通常是区域名（STORAGE / RECEPTION…），但**短的可能是真物品名**（TV）✗→✓
+      // 短全大写要额外把关：必须正上方有对齐图标（见 ⑥），否则多半是版面上的碎片（"NS" ✗）
+      const shortCaps = letters === letters.toUpperCase() && letters.length < 4;
+      if (letters === letters.toUpperCase() && letters.length >= 4) continue;
       if (/^[A-Za-z]{0,2}\d+$/.test(t2)) continue;                 // C9 这种坐标
       if (t2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(t2)) continue;
       if (STOP_WORDS.has(t2.toLowerCase())) continue;               // 句子里的虚词（"was"）
@@ -629,13 +632,21 @@
       if (!matched) continue;      // 对不上任何说明行的色板 → 不是这组图例的名字
       if (heads.some(h => Math.abs(h.y - w.y) < Math.max(8, w.h))) continue;   // 说明行自己不算
       const ln = lines.find(l => l.words.includes(w));
-      const merged = { text: t2, x: w.x, y: w.y, w: w.w, h: w.h, bg, matched,
+      const merged = { text: t2, x: w.x, y: w.y, w: w.w, h: w.h, bg, matched, shortCaps,
         lineWords: ln ? ln.words.length : 1 };
       if (ln) {
         const gs = groupsOf(ln).find(g => Math.abs(g.x - w.x) < 2);
         if (gs) Object.assign(merged, { text: gs.text, w: gs.w, h: gs.h });
       }
-      if (seen.some(q => Math.abs(q.x - merged.x) < 3 && Math.abs(q.y - merged.y) < 3)) continue;
+      // 去重：**按框重叠**判同一处文字（"Oil Slick" 这个合并结果与它里面的 "Slick"
+      // 框是重叠的 ✓；以前只比 x/y 临近，两个都会留下 → 同一件物品出现两遍 ✗）
+      const clash = (a, b2) => {
+        const ox = Math.min(a.x + a.w, b2.x + b2.w) - Math.max(a.x, b2.x);
+        const oy = Math.min(a.y + a.h, b2.y + b2.h) - Math.max(a.y, b2.y);
+        if (ox <= 0 || oy <= 0) return false;
+        return (ox * oy) / Math.min(a.w * a.h, b2.w * b2.h) > 0.5;
+      };
+      if (seen.some(q => clash(q, merged))) continue;
       seen.push(merged);
       names.push(merged);
     }
@@ -677,6 +688,7 @@
           if (!head || dx < head.__dx) { head = h; head.__dx = dx; }
         }
       }
+      if (nm.shortCaps && !icon) continue;      // 短全大写（TV 这种）要有图标才算数 ✓
       items.push({ name: nm.text, occupiable: head ? head.occupiable : null, icon: icon || null });
     }
     if (items.length < 2) return null;
