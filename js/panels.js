@@ -856,12 +856,37 @@
             restricted.raster = out.raster;
             restricted.page = out.page;
             restricted.rawItems = out.rawItems;
-            if (restricted.items.length >= 1) {
-              out = restricted;
+            // **但"先按卡片裁掉文字再解析"会丢上下文** ✗：实测 car-repair 框住图例后
+            // 只剩 Oil Slick/Car/Chair/TV（第二组整组丢、TV 极性也错），整页解析却是 7/7 ✓。
+            // 所以再算一份"整页解析 + 按卡片筛物品"，谁给得多用谁 ✓
+            const inCard = (b) => !!b && rects.some(r => {
+              const cx2 = b.x + b.w / 2, cy2 = b.y + b.h / 2;
+              return cx2 >= r.x - 6 && cx2 <= r.x + r.w + 6 && cy2 >= r.y - 6 && cy2 <= r.y + r.h + 6;
+            });
+            const wholeInCard = {
+              items: whole.items.filter(it => inCard(it.icon) || inCard(it.nameBox)),
+              headings: whole.headings, skipped: whole.skipped || [],
+              raster: out.raster, page: out.page, rawItems: out.rawItems,
+            };
+            // 优先用"整页解析 + 按卡片筛"（上下文完整、过滤更可靠 ✓）；
+            // 它不足 2 件时才用"先裁文字再解析"的结果 ✓
+            const better = wholeInCard.items.length >= 2 ? wholeInCard
+              : (restricted.items.length >= 2 ? restricted : null);
+            if (better) {
+              out = better;
               via = 'pdf+card';
+            } else if (whole.items.length >= 2) {
+              // 卡片里实在没有成件的图例（框太小/框偏了）→ 用整页并提示 ✓
+              MH.toast('卡片框里没找到成件的图例（框太小或框偏了？）→ 已按整页列出', 'warn');
+              out = whole;
+              via = 'pdf';
             }
           }
-          if (out.items.length < 2 && rects.length) {
+          const base = out;
+          const needCardRows = rects.length && (base.items.length < whole.items.length || whole.items.length < 2);
+          if (needCardRows) {
+            // 只有"整页文字层也没有名字"（contest 那种）才走卡片切分 + OCR ✓；
+            // 整页明明有名字，只是卡片没框到 → 用整页结果并提示，别去猜（猜出来是乱码 ✗）
             // 文字层里没有物品名（contest 就是这样）→ 在卡片框里按**行投影 + 列投影**切分：
             // 先分出"图标排 / 名字排"，再用名字排当骨架（名字之间空隙明显，切得准），
             // 每个名字正上方那一段墨水的外接框 = 该物品的图标 ✓ 多排图例也能处理 ✓
@@ -893,17 +918,42 @@
             // 整条丢给 OCR 会认成一串乱码）
             const names = await ocrBoxes(out.raster, use.map(b => b.nameBox || { x: 0, y: 0, w: 1, h: 1 }));
             if (use.length >= 2) {
-              out = {
-                items: occupiableByHeads(use.map((b, i) => ({
-                  name: names[i] || '',
-                  occupiable: null,
-                  icon: b.box,
-                  nameBox: b.nameBox || null,
-                })), heads),
-                headings: heads, skipped: out.skipped || [], raster: out.raster, page: out.page,
-                method: 'card-rows',
-              };
-              via = 'card-rows';
+              const cardItems = occupiableByHeads(use.map((b, i) => ({
+                name: names[i] || '',
+                occupiable: null,
+                icon: b.box,
+                nameBox: b.nameBox || null,
+              })), heads);
+              // **并进 base**（不能替换 ✗）：contest 的文字层只有说明没有名字，
+              // 名字全靠这里的 OCR ✓；car-repair 则是文字层已经全了，这里只做补充 ✓
+              const key = n => String(n || '').replace(/\s+/g, '').toLowerCase();
+              const have = new Set(base.items.map(it => key(it.name)).filter(Boolean));
+              const extra = cardItems.filter(it => {
+                if (!it.name || have.has(key(it.name))) return false;
+                // OCR 碎片（"oo" 这种两个字母的）不要
+                if (String(it.name).replace(/[^A-Za-z]/g, '').length < 3) return false;
+                // 同一个物品在两个来源里的框会有出入（文字层给的是文字块、OCR 给的是墨迹框），
+                // 所以按**框重叠**判重（重叠 > 较小框的一半 = 同一件 ✓），名字只作辅助 ✓
+                const boxes = [it.icon, it.nameBox].filter(Boolean);
+                const overlap = (a, b2) => {
+                  if (!a || !b2) return 0;
+                  const ox = Math.min(a.x + a.w, b2.x + b2.w) - Math.max(a.x, b2.x);
+                  const oy = Math.min(a.y + a.h, b2.y + b2.h) - Math.max(a.y, b2.y);
+                  if (ox <= 0 || oy <= 0) return 0;
+                  return (ox * oy) / Math.min(a.w * a.h, b2.w * b2.h);
+                };
+                return !base.items.some(b2 => boxes.some(bx => overlap(bx, b2.icon) > 0.5 || overlap(bx, b2.nameBox) > 0.5));
+              });
+              const merged = base.items.length ? base.items.concat(extra) : cardItems;
+              if (merged.length > base.items.length || base.items.length < 2) {
+                out = {
+                  items: merged,
+                  headings: (heads && heads.length ? heads : base.headings) || [],
+                  skipped: base.skipped || [], raster: base.raster, page: base.page,
+                  method: 'card-rows',
+                };
+                via = base.items.length >= 2 ? base.via || 'pdf+card' : 'card-rows';
+              }
             }
           }
           if (out.items.length < 1 && !restricted && whole.items.length) {
@@ -911,8 +961,9 @@
             via = 'pdf';
           }
           if (out.items.length && via === '') via = 'pdf';
-          if (out === restricted && out.items.length < 2 && whole.items.length > out.items.length) {
-            MH.toast('卡片框里只找到 ' + out.items.length + ' 件，整页能找到 ' + whole.items.length + ' 件（如果框太小可以重新框）', 'warn');
+          // 卡片是按用户意图定义范围的：框小了就只列框内的 ✓（不再偷偷换成整页结果）
+          if (rects.length && out.items.length && out.items.length < whole.items.length) {
+            MH.toast('按卡片框列出 ' + out.items.length + ' 件（整页有 ' + whole.items.length + ' 件）；框大一点可以多列', 'ok');
           }
         } else if (out && out.items.length) via = 'pdf';
       } catch (err) { MH.toast('读 PDF 文字层失败：' + err.message, 'warn'); }
