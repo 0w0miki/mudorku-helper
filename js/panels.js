@@ -1009,6 +1009,9 @@
           items: occupiableByHeads(ocrRes.items, ocrRes.headings),
           headings: ocrRes.headings.map(h => ({ text: h.text, occupiable: h.occupiable })),
           skipped: [],
+          // **必须带上 raster** ✗→✓：图例模板（`patch`）是从它裁的，
+          // 少了它 `legendItems` 里 patch/mask 全是 null →「📍 自动找地点」一件也匹配不了 ✗
+          raster,
         };
         via = 'image-ocr';
       } else {
@@ -1041,6 +1044,7 @@
       };
       const names = rawNames.map(t => (looksLikeName(t) ? t : ''));
       out = {
+        raster,
         items: occupiableByHeads(use.map((b, i) => ({
           name: names[i] || '',
           occupiable: null,
