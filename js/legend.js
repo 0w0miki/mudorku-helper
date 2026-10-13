@@ -548,34 +548,73 @@
   function colourPanels(raster, opts) {
     const opt = opts || {};
     const W = raster.width, H = raster.height, d = raster.data;
+    // ① 页面底色 = 出现最多的颜色（4 位/通道量化）
     const bins = new Int32Array(4096);
     const idx = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
     for (let i = 0, o = 0; i < W * H; i++, o += 4) bins[idx(d[o], d[o + 1], d[o + 2])]++;
-    const order = Array.from(bins.keys()).sort((a, b) => bins[b] - bins[a]);
-    const page = order[0];                                   // 出现最多的 = 页面底色
-    const out = [];
-    for (const bin of order.slice(0, 12)) {
-      if (bin === page) continue;
-      const n = bins[bin];
-      if (n < W * H * (opt.minArea || 0.03)) break;
-      // **取这个颜色最大的一团连通域**，而不是它的包围框：
-      // 同一颜色可能零散出现在别处（版权字、图标高光…），包围框会横跨整张图 ✗
-      const cmask = new Uint8Array(W * H);
-      for (let i = 0, o = 0; i < W * H; i++, o += 4) {
-        if (idx(d[o], d[o + 1], d[o + 2]) === bin) cmask[i] = 1;
-      }
-      const comps = components(cmask, W, H).sort((a, b2) => b2.n - a.n);
-      const big = comps[0];
-      if (!big || big.n < W * H * (opt.minArea || 0.03)) continue;
-      const x0 = big.x0, x1 = big.x1, y0 = big.y0, y1 = big.y1, cnt = big.n;
-      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-      const fill = cnt / (bw * bh);
-      if (fill < (opt.minFill || 0.45)) continue;             // 太散 → 不是一块面板
-      if (bw * bh > W * H * (opt.maxArea || 0.85)) continue;  // 太大 → 就是整页
-      out.push({ x: x0, y: y0, w: bw, h: bh, fill });
-      if (out.length >= (opt.maxPanels || 4)) break;
+    let pageBin = 0, bestN = -1;
+    for (let i = 0; i < bins.length; i++) if (bins[i] > bestN) { bestN = bins[i]; pageBin = i; }
+    const page = [(pageBin >> 8) << 4 | 8, ((pageBin >> 4) & 15) << 4 | 8, (pageBin & 15) << 4 | 8];
+    // ② 掩码 = **与页面底色差得明显**的像素
+    //    （以前是"某个量化颜色的连通域" ✗ —— 真实面板有渐变/抗锯齿，同色像素被拆到多个色桶，
+    //     结果大面板常常整个漏掉：contest 图例里 14 件物品的那块粉面板就是这样消失的）
+    const minDiff = opt.minDiff != null ? opt.minDiff : 34;
+    const mask = new Uint8Array(W * H);
+    for (let i = 0, o = 0; i < W * H; i++, o += 4) {
+      const diff = Math.max(Math.abs(d[o] - page[0]), Math.abs(d[o + 1] - page[1]), Math.abs(d[o + 2] - page[2]));
+      if (diff > minDiff) mask[i] = 1;
     }
-    return out;
+    // ③ 连通域 → 大块的（面板 / 地图 / 说明框）都在这儿
+    const minArea = W * H * (opt.minArea || 0.02);
+    const comps = components(mask, W, H)
+      .filter(c => c.n >= minArea)
+      .map(c => ({ x: c.x0, y: c.y0, w: c.x1 - c.x0 + 1, h: c.y1 - c.y0 + 1,
+        n: c.n, fill: c.n / ((c.x1 - c.x0 + 1) * (c.y1 - c.y0 + 1)) }))
+      .filter(c => c.fill >= (opt.minFill || 0.3))
+      .filter(c => c.w * c.h <= W * H * (opt.maxArea || 0.9))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, opt.maxPanels || 5);
+    return comps;
+  }
+
+  /**
+   * 一个框**周围那一圈**的底色（取众数颜色）。
+   * 用途：图例是一块色板上的文字 —— 用"它周围是什么颜色"就能判断
+   * "这几个名字和那条说明行是同一块面板上的" ✓
+   * （比去切"面板矩形"稳得多：真实截图的页面底色有渐变，一切就整页连成一块 ✗）
+   */
+  function ringColour(raster, box, expand) {
+    const W = raster.width, H = raster.height, d = raster.data;
+    const k = expand == null ? 0.6 : expand;
+    const pad = Math.max(3, Math.round((box.h || 10) * k));
+    const x0 = Math.max(0, Math.round(box.x) - pad), x1 = Math.min(W - 1, Math.round(box.x + box.w + pad));
+    const y0 = Math.max(0, Math.round(box.y) - pad), y1 = Math.min(H - 1, Math.round(box.y + box.h + pad));
+    const bins = new Int32Array(4096);
+    const idx = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const o = (y * W + x) * 4;
+        bins[idx(d[o], d[o + 1], d[o + 2])]++;
+      }
+    }
+    let bestBin = 0, bestN = -1;
+    for (let i = 0; i < bins.length; i++) if (bins[i] > bestN) { bestN = bins[i]; bestBin = i; }
+    let sr = 0, sg = 0, sb = 0, sn = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const o = (y * W + x) * 4;
+        if (idx(d[o], d[o + 1], d[o + 2]) !== bestBin) continue;
+        sr += d[o]; sg += d[o + 1]; sb += d[o + 2]; sn++;
+      }
+    }
+    if (!sn) return null;
+    return [sr / sn, sg / sn, sb / sn];
+  }
+
+  /** 两个颜色差多少（取通道最大差） */
+  function colourGap(a, b) {
+    if (!a || !b) return 999;
+    return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
   }
 
   /**
@@ -920,5 +959,5 @@
   function namePartsOf(it) { return it.__name || { x0: it.icon ? it.icon.x : 0, y: it.icon ? it.icon.y : 0 };
   }
 
-  return { split, annotate, legendFromText, readCardLegend, colourPanels, rowBands, colBands, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
+  return { split, annotate, legendFromText, readCardLegend, colourPanels, ringColour, colourGap, rowBands, colBands, splitIconsByColumns, mergeByLine, splitByGaps, findIconInBand, classifyLabel, backgroundMask, detailMask, otsu01, components, mergeNearby, groupIcons, toGray };
 });
