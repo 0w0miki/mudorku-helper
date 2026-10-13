@@ -519,6 +519,88 @@
     }
   }
 
+  /**
+   * 用**词级 OCR**（tesseract 的 TSV）从卡片上读图例：
+   * 直接拿到"说明行"和"每个物品名"的**真实框** ✓ —— 不再靠"行墨量分排 + 列投影猜名字框" ✗
+   * （猜出来的框会把相邻两个名字粘在一起，例如 "flowers shark"）
+   * @returns {{items:Array, headings:Array}|null}
+   */
+  async function readCardLegendByOcr(raster, rect) {
+    const O = window.MurdokuOCR;
+    if (!O || !O.readWords) return null;
+    const Lg = window.MurdokuLegend;
+    // **逐面板 OCR**：页面底色、地图残条、页脚版权文字都在面板之外，逐面板就自然排除了 ✓
+    // （实测逐面板比"整张卡 OCR 再筛"更准：整卡那次把 "bed" 漏了、"tombstone" 多带了个尾巴）
+    const panels = Lg.colourPanels(raster, { minArea: 0.02, maxPanels: 6 });
+    const areas = panels.length ? panels : [rect];
+    let all = [];
+    for (const a of areas) {
+      const got = await O.readWords(raster, a,
+        { zoom: 5, psm: 11, chars: O.WORDS, minConf: 65, onStatus: m => MH.toast(m, 'ok') });
+      if (got && got.length) all.push(...got);
+    }
+    // 兜底：面板一个都没认出来（或认出来的词太少）→ 整张卡再来一次 ✓
+    if (all.length < 4) {
+      const got = await O.readWords(raster, rect,
+        { zoom: 5, psm: 11, chars: O.WORDS, minConf: 65, onStatus: m => MH.toast(m, 'ok') });
+      if (got && got.length) all = got;
+    }
+    if (!all.length) return null;
+    const words = all;
+    // 按 y 归行
+    const lines = [];
+    for (const w of words) {
+      const ln = lines.find(l => Math.abs(l.y - w.y) < Math.max(6, w.h * 0.7));
+      if (ln) { ln.words.push(w); ln.y = Math.min(ln.y, w.y); ln.h = Math.max(ln.h, w.h); }
+      else lines.push({ y: w.y, h: w.h, words: [w] });
+    }
+    const heads = [], names = [];
+    for (const ln of lines) {
+      ln.words.sort((a, b) => a.x - b.x);
+      const groups = [];
+      for (const w of ln.words) {
+        const last = groups[groups.length - 1];
+        // 间隙 ≤ 0.6 字高 → 同一个名字（"Oil Slick"）；更大 → 相邻的两个名字 ✓
+        const gap = last ? w.x - (last.x + last.w) : 1e9;
+        if (last && gap <= Math.max(3, w.h * 0.6)) {
+          last.text = last.text + ' ' + w.text;
+          last.w = (w.x + w.w) - last.x;
+          last.h = Math.max(last.h, w.h);
+        } else {
+          groups.push({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h });
+        }
+      }
+      for (const g of groups) {
+        const cls = Lg.classifyLabel(g.text);
+        if (cls !== 'unknown' && g.text.split(/\s+/).length <= 6) {
+          heads.push({ x: g.x, y: g.y, w: g.w, h: g.h, text: g.text, occupiable: cls === 'yes' });
+          continue;
+        }
+        // 物品名过滤：≥2 字母、不是全大写（区域名那种）、不是纯数字/坐标
+        const letters = g.text.replace(/[^A-Za-z]/g, '');
+        if (letters.length < 2) continue;
+        if (letters === letters.toUpperCase()) continue;
+        if (/^[A-Za-z]{0,2}\d+$/.test(g.text)) continue;
+        if (g.text.split(/\s+/).length > 3 || /[.,;:!?…]/.test(g.text)) continue;   // 句子不是名字
+        names.push(g);
+      }
+    }
+    if (!names.length) return null;
+    void 0;
+    // 每个名字 → 它**正上方**那块墨迹 = 图标
+    const items = [];
+    for (const nm of names) {
+      const nameH = Math.max(6, nm.h);
+      const pad = nameH * 0.8;
+      let icon = Lg.findIconInBand(raster, nm.x - pad, nm.y - nameH * 5, nm.x + nm.w + pad, nm.y - nameH * 0.3);
+      if (!icon) icon = Lg.findIconInBand(raster, nm.x - nameH * 8, nm.y - nameH * 1.5, nm.x - 2, nm.y + nameH * 0.6);
+      if (!icon) continue;
+      items.push({ name: nm.text, occupiable: null, icon });
+    }
+    if (!items.length) return null;
+    return { items, headings: heads };
+  }
+
   /** 批量 OCR 一批框（失败就返回空串，不抛） */
   async function ocrBoxes(raster, boxes) {
     const empty = new Array(boxes.length).fill('');
@@ -756,9 +838,21 @@
       let raster;
       try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
       if (!raster) { giveUp('读不到图例卡片'); return; }
-      // **和 PDF 路线同一套算法**：按行投影分出"图标排 / 名字排"，用名字排当骨架切列，
-      // 每个名字框单独 OCR；说明行也 OCR 出来判可占据 ✓
-      // （以前这里用的是旧的二维切分 + 整行 OCR，真实图例上只会得到一堆乱码名字 ✗）
+      // **优先用词级 OCR**：直接读出说明行和每个物品名的真实框 ✓
+      // 读不出来（没引擎/字太小）再退回"行投影分排 + 列投影猜名字框"
+      MH.toast('正在识别图例文字…', 'ok');
+      let ocrRes = null;
+      try {
+        ocrRes = await readCardLegendByOcr(raster, { x: 0, y: 0, w: raster.width, h: raster.height });
+      } catch (err) { MH.toast('文字识别失败，改按版面切分：' + err.message, 'warn'); }
+      if (ocrRes && ocrRes.items.length >= 2) {
+        out = {
+          items: occupiableByHeads(ocrRes.items, ocrRes.headings),
+          headings: ocrRes.headings.map(h => ({ text: h.text, occupiable: h.occupiable })),
+          skipped: [],
+        };
+        via = 'image-ocr';
+      } else {
       MH.toast('正在切分图例卡片…', 'ok');
       let parsed;
       try {
@@ -798,6 +892,7 @@
         skipped: [],
       };
       via = 'image';
+      }
     }
     const unknown = out.items.filter(i => i.occupiable === null || i.occupiable === undefined).length;
     // **按名字去重**：同一个图例点两次不该建出两套物品 ✗（用户改了名字再点会更乱）。
@@ -841,7 +936,8 @@
     };
     MH.render();
     const viaText = via === 'pdf' ? 'PDF 文字层' : via === 'pdf+card' ? '卡片框 + PDF 文字层'
-      : via === 'card-icons' ? '卡片框内按图标切分（没有文字名，请改名）' : '卡片识别';
+      : via === 'card-icons' ? '卡片框内按图标切分（没有文字名，请改名）'
+      : via === 'image-ocr' ? '截图文字识别' : '卡片版面切分';
     MH.toast('从图例列出 ' + made + ' 件物品（' + viaText + (updated ? ' · 更新了 ' + updated + ' 件的可占据' : '') + '）' +
       ((out.headings || []).length ? '：分组说明 ' + MH.ui.lastLegend.headings.join(' / ') : '') +
       (unknown ? ' · 有 ' + unknown + ' 件读不出分组，先都按"可占据"，请在物品列表里改' : '') +

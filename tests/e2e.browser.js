@@ -1271,6 +1271,28 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   });
   ok(saved.n === beforeItems && saved.cells >= 3, '保存后仍是一件物品、格子已补上：' + JSON.stringify(saved));
 
+  // 34) 图片（截图）路径：把一张"合成图例截图"当卡片 → 应读出名字与分组
+  //     （词级 OCR：tesseract 的 TSV 给出每个词的框，不再靠"行墨量分排 + 列投影猜名字框"）
+  await p.evaluate((b64) => { window.__legendPng = b64; },
+    fs.readFileSync(path.join(__dirname, 'fixtures/legend-synthetic.png')).toString('base64'));
+  await p.evaluate(() => {
+    const url = 'data:image/png;base64,' + window.__legendPng;
+    window.MurdokuSnipper.state.pins = [{ id: 'lg', page: 1, w: 620, h: 260, url, srcX: 0, srcY: 0, srcW: 620, srcH: 260, srcPageW: 620, srcPageH: 260 }];
+    window.MurdokuSnipper.render();
+    window.MH.ui.lastLegend = null;
+    // 把 snipper 当成"导入的是图片"（不是 PDF）→ 走图片路线
+    window.MurdokuSnipper.state.file = { name: 'legend.png', type: 'image/png' };
+  });
+  await p.evaluate(() => window.MH.panels.legendAuto());
+  await p.waitForFunction(() => window.MH.ui.lastLegend, null, { timeout: 120000 });
+  const lg = await p.evaluate(() => window.MH.ui.lastLegend);
+  const got = (lg.names || []).slice().sort().join(',');
+  const want = ['bed', 'boulder', 'crate', 'rope', 'shrub'].join(',');
+  ok(got === want, '截图路径应读出这 5 个名字：' + JSON.stringify(lg.names));
+  ok(lg.via === 'image-ocr', '走的是词级 OCR 路线：' + lg.via);
+  ok((lg.headings || []).join(' / ').indexOf('不可') >= 0,
+    '说明行认出来了（合成图例只有一条 can\'t be occupied）：' + JSON.stringify(lg.headings));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

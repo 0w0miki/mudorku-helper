@@ -113,9 +113,68 @@
     return out;
   }
 
+  /**
+   * 对**一整块区域**做一次 OCR，返回**词级框**（tesseract 的 TSV 输出）。
+   * 为什么要这个：以前只能"先按行墨量猜出名字排、再按列投影猜名字框" ✗ ——
+   * 猜出来的框会互相粘连（"flowers shark"）。词级框是 OCR 自己给出的，直接准 ✓
+   * @param {object} raster 栅格
+   * @param {{x,y,w,h}} box 要识别的区域（栅格坐标）
+   * @param {{zoom?:number,psm?:number,chars?:string,minConf?:number,onStatus?:Function}} [opts]
+   * @returns {Promise<Array<{text:string,x:number,y:number,w:number,h:number,conf:number,line:number}>>}
+   */
+  async function readWords(raster, box, opts) {
+    const opt = opts || {};
+    const { M, api } = await ready(opt.onStatus);
+    api.SetVariable('tessedit_char_whitelist', opt.chars != null ? opt.chars : WORDS);
+    api.SetVariable('tessedit_pageseg_mode', String(opt.psm != null ? opt.psm : 11)); // 11 = 稀疏文字
+    const z = opt.zoom || 3;
+    const bx = Math.max(0, Math.round(box.x)), by = Math.max(0, Math.round(box.y));
+    const bw = Math.max(1, Math.min(raster.width - bx, Math.round(box.w)));
+    const bh = Math.max(1, Math.min(raster.height - by, Math.round(box.h)));
+    const src = document.createElement('canvas');
+    src.width = raster.width; src.height = raster.height;
+    const sctx = src.getContext('2d');
+    const frame = sctx.createImageData(raster.width, raster.height);
+    frame.data.set(raster.data);
+    sctx.putImageData(frame, 0, 0);
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(8, Math.round(bw * z));
+    cv.height = Math.max(8, Math.round(bh * z));
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, bx, by, bw, bh, 0, 0, cv.width, cv.height);
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    M.FS.writeFile('/input', bytes);
+    if (api.SetImageFile(1, 0) === 1) throw new Error('这块图读不进去');
+    api.Recognize(null);
+    const tsv = api.GetTSVText() || '';
+    api.Clear();
+    const out = [];
+    for (const line of tsv.split('\n')) {
+      if (!line) continue;
+      const f = line.split('\t');
+      if (f.length < 12) continue;
+      if (Number(f[0]) !== 5) continue;                       // 5 = word 级
+      const conf = Number(f[10]);
+      const text = String(f.slice(11).join('\t')).trim();
+      if (!text || !(conf >= (opt.minConf != null ? opt.minConf : 20))) continue;
+      out.push({
+        text, conf,
+        x: bx + Number(f[6]) / z, y: by + Number(f[7]) / z,
+        w: Number(f[8]) / z, h: Number(f[9]) / z,
+        line: Number(f[4]),
+      });
+    }
+    return out;
+  }
+
   root.MurdokuOCR = {
     UPPER_ONLY,
     WORDS,
+    readWords,
     ready,
     readBadges,
     /** 引擎已经加载好了吗（UI 用它决定按钮文字） */
