@@ -525,11 +525,6 @@
    * （猜出来的框会把相邻两个名字粘在一起，例如 "flowers shark"）
    * @returns {{items:Array, headings:Array}|null}
    */
-  /** 线索句里的常见虚词（图例物品名不会长这样）—— car-repair 全页曾把 "was" 列成物品 ✗ */
-  const STOP_WORDS = new Set(['was', 'is', 'are', 'the', 'a', 'an', 'in', 'on', 'at', 'of', 'to', 'and', 'or',
-    'he', 'she', 'it', 'they', 'his', 'her', 'their', 'with', 'beside', 'alone', 'left', 'right', 'above',
-    'under', 'same', 'area', 'was.', 'be', 'not', 'no', 'yes', 'this', 'that', 'there', 'where', 'who']);
-
   async function readCardLegendByOcr(raster, rect) {
     const O = window.MurdokuOCR;
     if (!O || !O.readWords) return null;
@@ -623,8 +618,10 @@
       // 短全大写（TV / NS 这种）另外把关：必须正上方有对齐图标（见 ⑥），挡掉版面碎片 ✓
       const shortCaps = letters === letters.toUpperCase() && letters.length < 4;
       if (/^[A-Za-z]{0,2}\d+$/.test(t2)) continue;                 // C9 这种坐标
-      if (t2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(t2)) continue;
-      if (STOP_WORDS.has(t2.toLowerCase())) continue;               // 句子里的虚词（"was"）
+      // **"像不像句子 / 像不像虚词"这两条只留给整页解析** ✗→✓
+      // 截图路径的输入是用户框定的图例 ✓：图例里可能有长短语（"bag of gold coins"）✗，
+      // 也可能正好叫 Area / Left 的物品 ✗ —— 拿地图/正文的启发式去挡是错的。
+      // 这里只保留硬规则：≥2 字母、不是纯坐标（上面两条）+ 必须落在图例色板上（下面 ✓）
       const bg = Lg.ringColour(raster, w, 0.8);
       // 颜色对不上任何说明行时**先别丢**：可能只是那条说明没被认出来 ✓
       // （contest 的绿面板整组就是这么消失的 —— 名字读出来了却因为没锚点被丢 ✗）
@@ -653,7 +650,7 @@
     }
     if (!names.length) return null;
     // ⑥ 每个名字 → 正上方那块墨迹 = 图标（找不到也算一件 —— 清单/可占据只需要名字 ✓）
-    const items = [];
+    const withIcon = [];
     for (const nm of names) {
       const nameH = Math.max(6, nm.h);
       const pad = nameH * 0.8;
@@ -665,6 +662,7 @@
         if (Math.abs(icx - ncx) > Math.max(icon.w * 0.55, nameH * 2)) icon = null;
         else if (icon.h < nameH * 1.3) icon = null;
       }
+      if (nm.shortCaps && !icon) continue;      // 短全大写（TV 这种）要有图标才算数 ✓
       // 归属分两步：
       // ① 先取"名字上方最近的一**行**说明"（把 y 相近的说明合成一行 —— car-repair 两个面板
       //    的说明就在同一行 ✓）；
@@ -689,8 +687,13 @@
           if (!head || dx < head.__dx) { head = h; head.__dx = dx; }
         }
       }
-      if (nm.shortCaps && !icon) continue;      // 短全大写（TV 这种）要有图标才算数 ✓
-      items.push({ name: nm.text, occupiable: head ? head.occupiable : null, icon: icon || null });
+      withIcon.push({ nm, icon, head });
+    }
+    const items = [];
+    for (const it of withIcon) {
+      const nm = it.nm;
+      items.push({ name: nm.text, occupiable: it.head ? it.head.occupiable : null,
+        icon: it.icon || null, nameBox: { x: nm.x, y: nm.y, w: nm.w, h: nm.h } });
     }
     if (items.length < 2) return null;
     // 诊断用（e2e/探针也会读）：说明行与名字的框
