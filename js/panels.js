@@ -270,7 +270,8 @@
             ' title="从右侧图例卡片自动切出每个物品图标、认名字、按图例里的说明分\"可占据/不可占据\"，一次性建好物品清单（格子留空，地点再点样例补）">' +
             '🚀 从图例自动列出物品</button>' +
           '<button class="ghost block" data-act="legend-locate" ' +
-            ' title="用图例里抠出来的图标当模板，逐件到地图上找格子（图例图标干净、无遮挡，比在地图上点样例可靠）">📍 自动找地点（用图例图标）</button>'
+            ' title="用图例里抠出来的图标当模板，逐件到地图上找格子（图例图标干净、无遮挡，比在地图上点样例可靠）">' +
+            (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>'
         : '') +
       (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('item', st) + '</ul>' +
@@ -800,7 +801,21 @@
     const claimed = new Set();
     st.items.forEach(it => it.cells.forEach(k => claimed.add(k)));
     const report = [];
-    for (const it of list) {
+    let LAST_MS = 0;                                // 上一件耗时（显示在进度提示里，便于看慢在哪 ✓）
+    const yieldFrame = () => new Promise(r => setTimeout(r, 0));
+    MH.ui.locating = true;
+    MH.ui.locateCancel = false;
+    MH.render();
+    try {
+    for (let idx = 0; idx < list.length; idx++) {
+      const it = list[idx];
+      if (MH.ui.locateCancel) { MH.toast('已取消，剩下 ' + (list.length - idx) + ' 件没找', 'warn'); break; }
+      // **逐件提示 + 让出一帧**：匹配是纯 JS 循环、会把界面冻住 ✗；
+      // 让出一帧既能看到进度，也能点按钮取消 ✓
+      MH.toast('找第 ' + (idx + 1) + '/' + list.length + ' 件：' + it.name +
+        (idx ? '（上一件 ' + (LAST_MS >= 1000 ? Math.round(LAST_MS / 1000) + 's' : Math.round(LAST_MS) + 'ms') + '）' : '') + '…', 'ok');
+      await yieldFrame();
+      const tIt = Date.now();
       let res;
       try {
         res = I2.findSimilarFromTemplate(geo.raster, geo.geom, it.patch,
@@ -811,9 +826,10 @@
       // 把握不足就别乱填：宁可留空让用户手标，也不要给一堆错格子 ✗
       // （实测：大而高对比的物品峰值 ~0.64 且位置正确；找不准的物品峰值只有 ~0.5，
       //   勉强填出来的格子基本都是错的）
-      const peak = res.ok && res.stats ? res.stats.maxScore : 0;
+      const peak = res.stats ? res.stats.maxScore : 0;   // 早退（把握不足）时也带峰值 ✓
       if (res.ok && (peak < 0.55 || res.cells.length > 10)) {
-        report.push({ name: it.name, hits: 0, scale: res.stats.scale, peak,
+        LAST_MS = Date.now() - tIt;
+        report.push({ name: it.name, hits: 0, ms: LAST_MS, scale: res.stats.scale, peak,
           msg: peak < 0.55 ? '把握不足（峰值 ' + peak + '），建议手动点样例' : '匹配出 ' + res.cells.length + ' 格，太多了' });
         continue;
       }
@@ -828,8 +844,13 @@
           Core.claimCellsExclusively(s2, s2.items, t2.id, t2.cells);
         });
       }
-      report.push({ name: it.name, hits: cells.length, scale: res.ok ? res.stats.scale : null,
+      LAST_MS = Date.now() - tIt;
+      report.push({ name: it.name, hits: cells.length, ms: LAST_MS, scale: res.ok ? res.stats.scale : null,
         msg: res.ok ? '' : (res.reason || '没找到') });
+    }
+    } finally {
+      MH.ui.locating = false;
+      MH.ui.locateCancel = false;
     }
     MH.ui.lastLocate = { items: list.length, report, ms: Date.now() - t0 };
     const found = report.filter(r => r.hits > 0);
@@ -2035,7 +2056,10 @@
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
     'legend-auto'() { guard(runLegendAuto)(); },
-    'legend-locate'() { guard(locateLegendItems)(); },
+    'legend-locate'() {
+      if (MH.ui.locating) { MH.ui.locateCancel = true; MH.toast('已请求取消，等这一件找完就停', 'warn'); return; }
+      guard(locateLegendItems)();
+    },
     'item-sample'() {
       if (!MH.store.state.bg) { MH.toast('还没有底图', 'warn'); return; }
       if (!requireAligned(MH.store.state)) return;
