@@ -646,29 +646,63 @@
     //    只在这个尺度（以及相邻尺度）上继续精算。
     const K = Math.max(2, Math.round(opt.coarse));
     const cs = downscale(gray, W, H, K);
+    // **再粗一级**（K2 = 2K）：先在这个更小的图上整图滑一遍拿候选（像素少 4 倍 ✓，
+    // 实测粗定位占了单件耗时 ~92% ✗ —— 5 个尺度各滑一遍 K=4 的整图就是大头 ✓），
+    // 然后**只在候选附近**用 K=4 稀疏复筛 ✓（不再整图算 K=4 的图 ✓），
+    // 最后照旧回全分辨率精算 ✓（那一步实测只占 ~8% ✓）
+    const K2 = K * 2;
+    const cs2 = downscale(gray, W, H, K2);
     const stat = [];
     const perScale = [];
     for (const sc of opt.scales) {
-      const ct = resampleTmpl(base, sc / K);
-      if (ct.w < 3 || ct.h < 3 || ct.w >= cs.w || ct.h >= cs.h) continue;
-      let map = ct.mask ? maskedMap(cs.g, cs.w, cs.h, ct, 1) : nccMap(cs.g, cs.w, cs.h, ct, 1);
+      const ct2 = resampleTmpl(base, sc / K2);
+      if (ct2.w < 3 || ct2.h < 3 || ct2.w >= cs2.w || ct2.h >= cs2.h) continue;
+      const map2 = ct2.mask ? maskedMap(cs2.g, cs2.w, cs2.h, ct2, 1) : nccMap(cs2.g, cs2.w, cs2.h, ct2, 1);
       // 注意：得分图的"每行有多少个位置"是 `map.cols`（= 图宽 − 模板宽 + 1），
       // **不是图宽** ✗ 用图宽换算会把候选映射到错误的位置（精算就全找不着了，踩过）
-      const collect = mm => {
+      const collect = (mm) => {
         const out = [];
         for (let i = 0; i < mm.map.length; i++) {
-          if (mm.map[i] > 0) out.push({ x: i % mm.cols, y: Math.floor(i / mm.cols), v: mm.map[i], sc });
+          if (mm.map[i] > 0) out.push({ x: i % mm.cols, y: Math.floor(i / mm.cols), v: mm.map[i] });
         }
         return out;
       };
-      let local = collect(map);
-      // 遮罩版一条都没命中时退回"整块模板"再试一次（保底，别把路堵死）
-      if (local.length < 4 && ct.mask) {
-        map = nccMap(cs.g, cs.w, cs.h, { p: ct.p, w: ct.w, h: ct.h }, 1);
-        local = collect(map);
+      let stage1 = collect(map2);
+      // 遮罩版一条都没命中时退回"整块模板"在这个粗尺度上再滑一次（保底；只做这一级 ✓）
+      if (stage1.length < 4 && ct2.mask) {
+        const map2b = nccMap(cs2.g, cs2.w, cs2.h, { p: ct2.p, w: ct2.w, h: ct2.h }, 1);
+        stage1 = collect(map2b);
+      }
+      if (stage1.length < 4) continue;
+      stage1.sort((a, b) => b.v - a.v);
+      // **K=4 稀疏复筛**：只在粗候选附近（±(K2/K + 1) 个 K=4 格）逐点算，不整图 ✓
+      const ct = resampleTmpl(base, sc / K);
+      if (ct.w < 3 || ct.h < 3 || ct.w >= cs.w || ct.h >= cs.h) continue;
+      const rad = Math.max(2, Math.round(K2 / K) + 1);
+      const local = [];
+      const samples = [];                     // **阈值用的样本**（多）· 候选名单只用 top perScale（少）✓
+      const seenSpot = new Set();
+      const tryN = Math.max(16, Math.min(stage1.length, (opt.perScale || 60) * 4));
+      for (const c1 of stage1.slice(0, tryN)) {
+        const bx = Math.round(c1.x * K2 / K), by = Math.round(c1.y * K2 / K);
+        for (let dy = -rad; dy <= rad; dy++) {
+          for (let dx = -rad; dx <= rad; dx++) {
+            const x = bx + dx, y = by + dy;
+            if (x < 0 || y < 0 || x + ct.w > cs.w || y + ct.h > cs.h) continue;
+            const key = x + ',' + y;
+            if (seenSpot.has(key)) continue;
+            seenSpot.add(key);
+            let v = ct.mask ? maskedNccAt(cs.g, cs.w, x, y, ct) : -1;
+            if (v <= -1) v = nccAt(cs.g, cs.w, x, y, ct);        // 遮罩版这里算不出来 → 退回整块模板 ✓
+            if (v > 0) { local.push({ x, y, v, sc }); samples.push(v); }
+          }
+        }
       }
       if (local.length < 4) continue;
-      const vals = local.map(p => p.v).sort((a, b) => a - b);
+      // 阈值统计用**所有复筛过的点**（样本大，和"整图算一遍"的分布接近 ✓）；
+      // 候选名单仍只用最强的 perScale 个 ✓
+      // （上次半分辨率那版失败，就是样本变小 → 阈值跑偏 → 假阳性变多 ✗）
+      const vals = samples.slice().sort((a, b) => a - b);
       const med = vals[vals.length >> 1], pk = vals[vals.length - 1];
       stat.push({ sc, contrast: pk - med, pk, med });
       local.sort((a, b) => b.v - a.v);
