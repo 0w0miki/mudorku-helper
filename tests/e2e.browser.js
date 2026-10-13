@@ -1290,6 +1290,9 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const want = ['bed', 'boulder', 'crate', 'rope', 'shrub'].join(',');
   ok(got === want, '截图路径应读出这 5 个名字：' + JSON.stringify(lg.names));
   ok(lg.via === 'image-ocr', '走的是词级 OCR 路线：' + lg.via);
+  const dbg = await p.evaluate(() => window.MH.ui.lastLegendDebug);
+  ok(dbg && (dbg.heads || []).length >= 1 && (dbg.names || []).length >= 5,
+    '诊断口记录了说明行与名字的框：' + JSON.stringify((dbg && dbg.heads || []).map(h => h.text)));
   ok((lg.headings || []).join(' / ').indexOf('不可') >= 0,
     '说明行认出来了（合成图例只有一条 can\'t be occupied）：' + JSON.stringify(lg.headings));
 

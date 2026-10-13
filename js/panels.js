@@ -572,7 +572,10 @@
     for (const ln of lines) {
       const gs = groupsOf(ln);
       for (let i = 0; i < gs.length; i++) {
-        if (!/occup|占据|放人/i.test(gs[i].text)) continue;
+        // 允许「半个词」且不要求开头：整图 OCR 把 occupied 读成过 occ，
+        // 而且它常和前面的词并成一块（"be occ"）—— 只要含 occ 就交给下面的
+        // "抠一条放大重认"去读全 ✓
+        if (!/occ|ocup|0cc|占据|放人/i.test(gs[i].text)) continue;
         const near = [];
         for (let k = i - 1; k >= 0 && k >= i - 3; k--) {
           if (gs[k].x + gs[k].w < gs[i].x - Math.max(24, gs[i].h * 3.5)) break;   // 隔太远就不算
@@ -587,6 +590,24 @@
       }
     }
     if (!heads.length) return null;                      // 没有说明行就不是图例，别硬认
+    // ③b 说明行**单独抠一条放大再 OCR**（单行模式 psm 7 认得准 ✓）：
+    //     整图 OCR 会把 occupied 读残成 occ，极性也就无从判断 ✗
+    for (const h of heads) {
+      const hh = Math.max(8, h.h);
+      const sx = Math.max(0, h.x - hh * 6);
+      const strip = { x: sx, y: Math.max(0, h.y - hh * 0.8),
+        w: Math.min(raster.width - sx, h.w + hh * 12), h: Math.min(raster.height, hh * 2.6) };
+      try {
+        const got = await O.readWords(raster, strip, { zoom: 8, psm: 7, chars: O.WORDS, minConf: 55 });
+        const txt = (got || []).map(w2 => w2.text).join(' ').trim();
+        if (txt) {
+          h.text = txt;
+          const cls = Lg.classifyLabel(txt);
+          if (cls === 'yes') h.occupiable = true;
+          else if (cls === 'no') h.occupiable = false;
+        }
+      } catch (err) { /* 读不到就保持原判 */ }
+    }
     // ④ 每条说明行的**板底色**（它周围一圈的众数颜色）
     for (const h of heads) h.bg = Lg.ringColour(raster, h, 0.8);
     // ⑤ 名字 = 与某条说明行**同一块色板**上的词 ✓（比"切面板矩形"稳：真实截图底色有渐变，
@@ -601,11 +622,15 @@
       if (t2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(t2)) continue;
       if (STOP_WORDS.has(t2.toLowerCase())) continue;               // 句子里的虚词（"was"）
       const bg = Lg.ringColour(raster, w, 0.8);
-      const hit = heads.filter(h => Lg.colourGap(bg, h.bg) <= 30);
-      if (!hit.length) continue;
+      // 颜色对不上任何说明行时**先别丢**：可能只是那条说明没被认出来 ✓
+      // （contest 的绿面板整组就是这么消失的 —— 名字读出来了却因为没锚点被丢 ✗）
+      // 这类要更严的门槛才收：独立名字行 + 正上方有对齐图标（见下面 ⑥），挡掉版权/句子碎片 ✓
+      const matched = heads.some(h => Lg.colourGap(bg, h.bg) <= 30);
+      if (!matched) continue;      // 对不上任何说明行的色板 → 不是这组图例的名字
       if (heads.some(h => Math.abs(h.y - w.y) < Math.max(8, w.h))) continue;   // 说明行自己不算
       const ln = lines.find(l => l.words.includes(w));
-      const merged = { text: t2, x: w.x, y: w.y, w: w.w, h: w.h, head: hit[0] };
+      const merged = { text: t2, x: w.x, y: w.y, w: w.w, h: w.h, bg, matched,
+        lineWords: ln ? ln.words.length : 1 };
       if (ln) {
         const gs = groupsOf(ln).find(g => Math.abs(g.x - w.x) < 2);
         if (gs) Object.assign(merged, { text: gs.text, w: gs.w, h: gs.h });
@@ -628,9 +653,36 @@
         if (Math.abs(icx - ncx) > Math.max(icon.w * 0.55, nameH * 2)) icon = null;
         else if (icon.h < nameH * 1.3) icon = null;
       }
-      items.push({ name: nm.text, occupiable: nm.head ? nm.head.occupiable : null, icon: icon || null });
+      // 归属分两步：
+      // ① 先取"名字上方最近的一**行**说明"（把 y 相近的说明合成一行 —— car-repair 两个面板
+      //    的说明就在同一行 ✓）；
+      // ② 这一行里有两条说明时，按 **x** 选（名字横向落在哪条说明下面 ✓）。
+      // 只按颜色相近选会判反（两块图例面板颜色几乎一样 ✗），只看 y 也不行（同一行两条 ✗）
+      const dyOf = h => (h.y + h.h <= nm.y + 4 ? (nm.y - h.y) : 1e5 + Math.abs(nm.y - h.y));
+      const rows = [];
+      for (const h of heads) {
+        const row = rows.find(r => Math.abs(r.y - h.y) <= Math.max(12, h.h));
+        if (row) { row.list.push(h); row.y = Math.min(row.y, h.y); row.h = Math.max(row.h, h.h); }
+        else rows.push({ y: h.y, h: h.h, list: [h] });
+      }
+      let row = null;
+      for (const r of rows) {
+        const d = dyOf({ y: r.y, h: r.h });
+        if (!row || d < dyOf({ y: row.y, h: row.h })) row = r;
+      }
+      let head = null;
+      if (row) {
+        for (const h of row.list) {
+          const dx = (nm.x + nm.w < h.x ? h.x - (nm.x + nm.w) : (nm.x > h.x + h.w ? nm.x - (h.x + h.w) : 0));
+          if (!head || dx < head.__dx) { head = h; head.__dx = dx; }
+        }
+      }
+      items.push({ name: nm.text, occupiable: head ? head.occupiable : null, icon: icon || null });
     }
     if (items.length < 2) return null;
+    // 诊断用（e2e/探针也会读）：说明行与名字的框
+    MH.ui.lastLegendDebug = { heads: heads.map(h => ({ text: h.text, x: h.x, y: h.y, w: h.w, h: h.h, occupiable: h.occupiable })),
+      names: names.map(n => ({ text: n.text, x: n.x, y: n.y, w: n.w })) };
     return { items, headings: heads };
   }
 
@@ -651,6 +703,9 @@
   /** 用"说明行"给每件物品定可占据：优先它**上方**那条，否则取最近的 ✓ */
   function occupiableByHeads(items, heads) {
     items.forEach(it => {
+      // 已经有明确结论的（词级 OCR 那条路会按"行 + x"仔细判过）不要覆盖 ✗
+      // —— 这里只给"还没定"的兜底（以前无条件覆盖，把 car-repair 两面板的极性判反过）
+      if (it.occupiable === true || it.occupiable === false) return;
       const ic = it.icon || it.box || { x: 0, y: 0, w: 1, h: 1 };
       let best = null, bestD = Infinity;
       (heads || []).forEach(h => {
