@@ -1296,6 +1296,30 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok((lg.headings || []).join(' / ').indexOf('不可') >= 0,
     '说明行认出来了（合成图例只有一条 can\'t be occupied）：' + JSON.stringify(lg.headings));
 
+  // 35) 全大写风格的图例：用户框定了图例 → **不该**再拿"像不像地图区域名"去挡 ✗
+  await p.evaluate((b64) => { window.__legendPng = b64; },
+    fs.readFileSync(path.join(__dirname, 'fixtures/legend-caps.png')).toString('base64'));
+  await p.evaluate(() => {
+    const url = 'data:image/png;base64,' + window.__legendPng;
+    return new Promise(res => {
+      const im = new Image();
+      im.onload = () => {
+        window.MurdokuSnipper.state.file = { name: 'caps.png', type: 'image/png' };
+        window.MurdokuSnipper.state.pins = [{ id: 'caps', page: 1, w: im.naturalWidth, h: im.naturalHeight, url,
+          srcX: 0, srcY: 0, srcW: im.naturalWidth, srcH: im.naturalHeight, srcPageW: im.naturalWidth, srcPageH: im.naturalHeight }];
+        window.MurdokuSnipper.render();
+        window.MH.ui.lastLegend = null;
+        res();
+      };
+      im.src = url;
+    });
+  });
+  await p.evaluate(() => window.MH.panels.legendAuto());
+  await p.waitForFunction(() => window.MH.ui.lastLegend, null, { timeout: 120000 });
+  const lgCaps = await p.evaluate(() => window.MH.ui.lastLegend);
+  const caps = (lgCaps.names || []).slice().sort().join(',');
+  ok(caps === 'CARPET,LAMP,SHELF,TV', '全大写图例也要认出来：' + JSON.stringify(lgCaps.names));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

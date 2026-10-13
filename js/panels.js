@@ -617,10 +617,11 @@
       const t2 = String(w.text || '').trim();
       const letters = t2.replace(/[^A-Za-z]/g, '');
       if (letters.length < 2) continue;
-      // 全大写通常是区域名（STORAGE / RECEPTION…），但**短的可能是真物品名**（TV）✗→✓
-      // 短全大写要额外把关：必须正上方有对齐图标（见 ⑥），否则多半是版面上的碎片（"NS" ✗）
+      // **这里不再"排除全大写"** ✓：截图路径的输入就是用户框定的图例（卡片），
+      // 图例可能整块用大写风格（SHELF / CARPET…）；把它当"地图区域名"挡掉是错的 ✗
+      // （那个启发式只留给"整页文字层解析"那条路，见 legend.js）
+      // 短全大写（TV / NS 这种）另外把关：必须正上方有对齐图标（见 ⑥），挡掉版面碎片 ✓
       const shortCaps = letters === letters.toUpperCase() && letters.length < 4;
-      if (letters === letters.toUpperCase() && letters.length >= 4) continue;
       if (/^[A-Za-z]{0,2}\d+$/.test(t2)) continue;                 // C9 这种坐标
       if (t2.split(/\s+/).length > 3 || /[.,;:!?…]/.test(t2)) continue;
       if (STOP_WORDS.has(t2.toLowerCase())) continue;               // 句子里的虚词（"was"）

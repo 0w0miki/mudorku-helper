@@ -868,8 +868,11 @@
       if (letters.length < 2) return true;
       // 坐标标签（C9 / C24 / R1）那种"短、带数字"的串不是物品名 ✓（contest 页面底部就有 C1~C24）
       if (/^[A-Za-z]{0,2}\d+$/.test(t2)) return true;
-      // 全大写 = 区域名（RECEPTION / WAITING AREA / TEACHER'S AREA…）不是物品名 ✗
-      if (letters.length >= 4 && letters === letters.toUpperCase()) return true;
+      // 全大写 = 地图上的**区域名**（RECEPTION / WAITING AREA…）✗
+      // —— 但**只在没有卡片框**（整页解析）时才这么判 ✓：
+      // 用户框了卡片就说明"这一块是图例"，图例完全可能用大写风格（SHELF / CARPET / TV…），
+      // 这时不该拿"像不像地图区域名"去挡 ✗
+      if (!(opt.rects && opt.rects.length) && letters.length >= 4 && letters === letters.toUpperCase()) return true;
       return false;
     };
     const isStacked = (piece) => lines.some(ln => {
