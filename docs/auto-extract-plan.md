@@ -1215,6 +1215,46 @@ Oil Slick / TV / Plant：没找到（峰值不够，明确提示手动）
 **下一步（P2 未完）**：候选缩略图预览、
 按 legend 两栏自动分"可占据/不可占据"、被遮挡/旋转物品的容错。
 
+
+## P3 线索与人物关联（进行中）
+
+**第一步已完成：纯解析器 `js/clues.js` + 13 条单测 ✓**（`pnpm test` 258 ✓）
+
+```
+输入：一段线索文本 + 当前物品/区域名清单
+输出：{ kind: 'in' | 'beside' | 'not-beside' | 'none', target, polarity, text }
+```
+
+用**真实题目里出现过的句子**做单测（来自三份 PDF 的文字层 ✓）：
+```
+"He was in a car ."                        → in · Car          ✓
+"She was sitting in a chair ."             → in · Chair        ✓
+"He was on an oil slick."                  → in · **Oil Slick**（长名字优先 ✓ 不是 "Slick"）
+"She was alone in the Waiting Area"        → in · WAITING AREA（区域 ✓）
+"He was beside a shelf ."                  → beside · Shelf · +1
+"They are not beside the table ."          → not-beside · Table · −1
+"Rule: One person per Row and Column"      → none（规则/说明文字一律不认 ✓）
+"The killer was alone with the murderer."  → none（"alone with" 不是位置关系 ✓）
+```
+
+途中修掉的真 bug（都是单测先抓到的 ✓）：
+1. `findTarget` 用"只留字母"比较 → `Oil Slick` 变成 `oilslick` ✗，文本里是 `oil slick` → 永远匹配不上
+   （结果只认出 `Slick` ✗）→ 改成保留空格 + 允许 `\s+` ✓
+2. 块归并只看"上一块" ✗ → 真实版面是**两列并排**，中间插进来的另一列会把一句线索打断 ✓
+   → 改成"在最近几个开放块里找横向最贴的那个" ✓
+3. 人名和它下面的线索被并成一块 ✗ → 人名单独成块 ✓
+4. 线索挂人物只看 y ✗ → 并排两个人时右边那位的线索会挂到左边 ✗ → 同一行再按 **x 距离** ✓
+5. 人名候选里混进图例物品名（Car/Chair/Shelf…）与标题 ✗ → 排除已知物品/区域名 + 只保留
+   "下面真的挂住了线索"的人名 ✓
+
+**还差的（读者部分）**：从 PDF 文字层/OCR 拿到带坐标的文字后，**切块质量还不够** ✗ ——
+在 car-repair 上目前只组装出 1/6 条线索（其余被跨列的行段打断 ✗）。
+下一步：读数时按"人物卡气泡"做二维聚类（而不是先按 y 归行再按 x 切段 ✗），
+并用卡片的 role（图例/线索/其他）限定范围 ✓。
+
+（解析器已完成且可独立验证 ✓；UI 接线（卡片上的「🔎 读人物线索」按钮 + 人物映射 + 应用链接）
+留到读者调准之后做 ✓。）
+
 ## 5. P0 详细设计
 
 ### 5.1 算法（纯 JS，无依赖，Node 可单测）
