@@ -433,6 +433,11 @@
    * 用户点一下样例即可，结果的格子还能在草稿里手工加减。
    */
   async function pickItemSample(k) {
+    // **重入保护**：按下和点击事件可能各触发一次 ✗ —— 第二次（异步慢一点）会在用户已经
+    // 输入名字之后才 render，把刚填的名字冲掉 ✓（e2e 里表现为偶发"名字没保存上" ✗）
+    if (MH.ui.sampling) return;
+    MH.ui.sampling = true;
+    try {
     const I2 = window.MurdokuItems;
     if (!I2) { MH.toast('物品模块没加载（js/items.js）', 'error'); return; }
     const st = MH.store.state;
@@ -467,6 +472,9 @@
     MH.toast('找到 ' + res.cells.length + ' 格同类（' + (Date.now() - t0) + 'ms · 阈值 ' + res.stats.threshold + '）· ' +
       (put.reused ? '已追加到当前物品：本次 +' + put.added + ' 格，共 ' + put.total + ' 格' : '草稿里已圈好') +
       '：可在棋盘上加减，改完点「保存」', 'ok');
+    } finally {
+      MH.ui.sampling = false;
+    }
   }
 
   /** 取第一张图例卡片的像素（画到 canvas 上再读） */
