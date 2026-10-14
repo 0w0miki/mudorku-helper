@@ -48,6 +48,31 @@
   const letters = s => String(s || '').replace(/[^A-Za-z]/g, '');
 
   /**
+   * 把"带字体标注的文字块"整理成纯文本 + **加粗片段**（题目里物品名/关系词是加粗的 ✓）
+   * PDF 文字层里加粗是**独立的文字块、字体与正文不同** ✓ —— 实测：
+   *   "He was on an"(f1) + "oil slick."(f2) + "beside"(f2) + "a"(f1) + "shelf"(f2)
+   * 字体名是 g_d0_f2 这种子集名，所以判据是"与这一块的正文字体不同" ✓
+   * @param {Array<{text:string, font?:string, bold?:boolean}>} runs
+   * @returns {{text:string, bolds:string[]}}
+   */
+  function readRuns(runs) {
+    const list = (runs || []).filter(r => r && norm(r.text));
+    if (!list.length) return { text: '', groups: [], bold: false };
+    const text = list.map(r => norm(r.text)).join(' ').replace(/\s+/g, ' ').trim();
+    // 按字体分组（字体名是 g_d0_f2 这种子集名，不能靠名字判"Bold" ✗）
+    const byFont = new Map();
+    for (const r of list) {
+      const f = r.font == null ? '' : String(r.font);
+      byFont.set(f, (((byFont.get(f) || '') + ' ' + norm(r.text)).replace(/\s+/g, ' ').trim()));
+    }
+    return {
+      text,
+      groups: [...byFont].map(([font, t]) => ({ font, text: t })),
+      bold: list.some(r => r.bold === true),
+    };
+  }
+
+  /**
    * 在文本里找"被提到的物品/区域名"。
    * **长的优先** ✓（"Oil Slick" 要胜过 "Slick" ✗ —— 这是实际踩过的坑）
    * @param {string} text
@@ -76,9 +101,10 @@
    * 解析一段线索 ✓
    * @returns {{kind:string, target:object|null, polarity:number|null, text:string, reason:string}}
    */
-  function parse(text, names) {
+  function parse(text, names, opts) {
+    const opt = opts || {};
     const t = norm(text);
-    const out = { kind: 'none', target: null, polarity: null, text: t, reason: '' };
+    const out = { kind: 'none', target: null, polarity: null, text: t, reason: '', bold: null };
     if (!t || letters(t).length < 4) { out.reason = '太短'; return out; }
     for (const bad of NOT_CLUE) {
       if (bad.test(t)) { out.reason = '规则/说明文字，不是线索'; return out; }
@@ -86,7 +112,15 @@
     let kind = null;
     for (const r of REL_WORDS) { if (r.re.test(t)) { kind = r.kind; break; } }
     if (!kind) { out.reason = '没看到"在/在…旁边"这类关系词'; return out; }
-    const target = findTarget(t, names);
+    // **字体组优先** ✓：题目把物品名/关系词加粗（PDF 里是独立字体块 ✓），
+    // 而"哪一组才是加粗"不用猜 ✗ —— **哪一组能匹配上已知物品/区域名就用哪一组** ✓
+    // （实测：短句里加粗词可能比正文还多，靠"多数派 = 正文"会翻车 ✗）
+    let target = null;
+    for (const g of (opt.groups || [])) {
+      const hit = findTarget(g.text, names);
+      if (hit) { target = hit; out.bold = g.text; break; }
+    }
+    if (!target) target = findTarget(t, names);
     if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
     out.kind = kind;
     out.target = target;
@@ -105,9 +139,18 @@
   function mergeBlocks(lines, opts) {
     const opt = opts || {};
     const list = (lines || [])
-      .filter(l => l && norm(l.text))
-      .map(l => ({ text: norm(l.text), x: l.x == null ? 0 : l.x, y: l.y == null ? 0 : l.y,
-        h: l.h == null ? 12 : l.h }))
+      .map(l => {
+        if (!l) return null;
+        // 行可以只给 runs（带字体 ✓）：文本从 runs 拼 ✓，加粗信息留着 ✓
+        if (!norm(l.text) && Array.isArray(l.runs)) {
+          const rr = readRuns(l.runs);
+          return { text: rr.text, runs: l.runs, x: l.x == null ? 0 : l.x, y: l.y == null ? 0 : l.y,
+            h: l.h == null ? 12 : l.h, w: l.w };
+        }
+        return { text: norm(l.text), runs: l.runs, x: l.x == null ? 0 : l.x, y: l.y == null ? 0 : l.y,
+          h: l.h == null ? 12 : l.h, w: l.w };
+      })
+      .filter(l => l && l.text)
       .sort((a, b) => (a.y - b.y) || (a.x - b.x));
     const blocks = [];
     const xGap = (bx, ln) => Math.max(0, Math.max(bx.x0 - (ln.x + (ln.w || 0)), ln.x - bx.x1));
@@ -167,9 +210,17 @@
     const blocks = mergeBlocks(lines, opts);
     const clues = [], personNames = [], skipped = [];
     for (const b of blocks) {
-      const p = parse(b.text, names);
+      // 块的加粗片段 = 各行的加粗合起来 ✓（PDF 文字层才有的信息；OCR 没有就为空 ✓）
+      const byFont = new Map();
+      for (const ln of b.lines) {
+        if (!Array.isArray(ln.runs)) continue;
+        for (const g of readRuns(ln.runs).groups) {
+          byFont.set(g.font, (((byFont.get(g.font) || '') + ' ' + g.text).replace(/\s+/g, ' ').trim()));
+        }
+      }
+      const p = parse(b.text, names, { groups: [...byFont].map(([font, text]) => ({ font, text })) });
       if (p.kind !== 'none' && p.target) {
-        clues.push({ text: p.text, kind: p.kind, polarity: p.polarity,
+        clues.push({ text: p.text, kind: p.kind, polarity: p.polarity, bold: p.bold,
           target: p.target.name, targetKind: p.target.kind, targetId: p.target.id,
           x: Math.round(b.x0), y: Math.round(b.y0), block: b });
       } else if (looksLikePersonName(b.text)) {
@@ -206,7 +257,7 @@
     return { clues, names: keep, skipped, blocks };
   }
 
-  const api = { parse, findTarget, mergeBlocks, looksLikePersonName, extract, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, mergeBlocks, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

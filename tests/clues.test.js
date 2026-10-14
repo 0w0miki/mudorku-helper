@@ -120,3 +120,46 @@ test('端到端（纯部分）：行 → 线索候选 + 人名，并把线索挂
   assert.equal(byChair.person, 'Crystal');
   assert.ok(out.skipped.some(s => /Rule:/.test(s.text)), '规则文字被跳过');
 });
+
+test('加粗信号：题目把物品名/关系词加粗 ✓ —— 加粗片段优先于模糊匹配', () => {
+  const names = [{ name: 'Slick', kind: 'item' }, { name: 'Oil Slick', kind: 'item' }, { name: 'Shelf', kind: 'item' }];
+  // 只有 "Slick" 在清单里，但加粗的是 "oil slick." → 用加粗去找（找不到就退回全文 ✓）
+  const r = C.parse('He was on an oil slick .', names, { groups: [{ font: 'f2', text: 'oil slick.' }] });
+  assert.equal(r.target.name, 'Oil Slick');
+  assert.equal(r.bold, 'oil slick.');
+  // 没有加粗（例如截图 OCR）→ 退回全文匹配，长名字优先 ✓
+  const r2 = C.parse('He was on an oil slick .', names);
+  assert.equal(r2.target.name, 'Oil Slick');
+  assert.equal(r2.bold, null);
+});
+
+test('加粗片段优先：清单里同时有 Slick 与 Oil Slick 时也稳 ✓', () => {
+  const names = [{ name: 'Slick', kind: 'item' }, { name: 'Oil Slick', kind: 'item' }];
+  const r = C.parse('He was on an oil slick .', names, { groups: [{ font: 'f2', text: 'oil slick.' }] });
+  assert.equal(r.target.name, 'Oil Slick');
+});
+
+test('readRuns：按字体分组 ✓（PDF 文字层里加粗是独立字体块）', () => {
+  const got = C.readRuns([
+    { text: 'He was on an', font: 'g_d0_f1' },
+    { text: 'oil slick.', font: 'g_d0_f2' },
+    { text: 'beside', font: 'g_d0_f2' },
+    { text: 'a', font: 'g_d0_f1' },
+    { text: 'shelf', font: 'g_d0_f2' },
+  ]);
+  assert.equal(got.text, 'He was on an oil slick. beside a shelf');
+  assert.deepEqual(got.groups.map(g => g.font), ['g_d0_f1', 'g_d0_f2']);
+  assert.equal(got.groups.find(g => g.font === 'g_d0_f2').text, 'oil slick. beside shelf');
+});
+
+test('extract：行里带 runs（含字体）时，加粗片段会一路传到解析结果 ✓', () => {
+  const out = C.extract([
+    { text: 'Anthony', x: 100, y: 400, h: 14, w: 50 },
+    { text: '', x: 100, y: 430, h: 12, w: 0, runs: [
+      { text: 'He was in a', font: 'f1' }, { text: 'car', font: 'f2' }, { text: '.', font: 'f1' }] },
+  ], [{ name: 'Car', kind: 'item' }, { name: 'Chair', kind: 'item' }]);
+  assert.equal(out.clues.length, 1);
+  assert.equal(out.clues[0].target, 'Car');
+  assert.equal(out.clues[0].person, 'Anthony');
+  assert.equal(out.clues[0].bold, 'car');
+});
