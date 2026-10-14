@@ -163,3 +163,35 @@ test('extract：行里带 runs（含字体）时，加粗片段会一路传到�
   assert.equal(out.clues[0].person, 'Anthony');
   assert.equal(out.clues[0].bold, 'car');
 });
+
+test('二维聚类：**两列并排**的卡片不能连成一块 ✗（上次就是被这个搞挂的）', () => {
+  const blocks = C.cluster([
+    // 左列：Brock 的卡（名字 + 两行线索）
+    { text: 'Brock', x: 300, y: 400, w: 40, h: 14 },
+    { text: 'He was on an', x: 280, y: 430, w: 70, h: 12 },
+    { text: 'oil slick.', x: 280, y: 446, w: 50, h: 12 },
+    // 右列：Crystal 的卡（同一 y ✓）
+    { text: 'Crystal', x: 480, y: 400, w: 50, h: 14 },
+    { text: 'She was sitting', x: 460, y: 430, w: 80, h: 12 },
+    { text: 'in a chair .', x: 460, y: 446, w: 60, h: 12 },
+  ]);
+  const texts = blocks.map(b => b.text).sort();
+  assert.ok(texts.includes('Brock'), '人名单独成块：' + JSON.stringify(texts));
+  assert.ok(texts.includes('Crystal'));
+  assert.ok(texts.includes('He was on an oil slick.'), '左列合成一句：' + JSON.stringify(texts));
+  assert.ok(texts.includes('She was sitting in a chair .'), '右列合成一句：' + JSON.stringify(texts));
+  assert.equal(blocks.length, 4, JSON.stringify(texts));
+});
+
+test('取字到解析（readItems）：字体分组一路传到目标 ✓', () => {
+  const out = C.readItems([
+    { text: 'Anthony', x: 100, y: 400, w: 55, h: 14, font: 'f9' },
+    { text: 'He was in a', x: 90, y: 430, w: 70, h: 12, font: 'f1' },
+    { text: 'car', x: 162, y: 430, w: 22, h: 12, font: 'f2' },
+    { text: '.', x: 185, y: 430, w: 4, h: 12, font: 'f1' },
+  ], [{ name: 'Car', kind: 'item' }, { name: 'Chair', kind: 'item' }]);
+  assert.equal(out.clues.length, 1);
+  assert.equal(out.clues[0].target, 'Car');
+  assert.equal(out.clues[0].person, 'Anthony');
+  assert.equal(out.clues[0].bold, 'car');
+});

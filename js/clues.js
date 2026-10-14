@@ -40,6 +40,11 @@
     /murdoku/i, /^art by/i, /puzzle and concept/i, /^playtesters/i,
   ];
 
+  const blockWidth = b => (b && b.w != null ? b.w : 40);
+
+  // 人名不可能是这些词开头（He was / The Caricature / What happened / She was… ✗）
+  const NAME_STOP = /^(he|she|it|they|the|a|an|what|who|where|when|there|this|that|and|or|but|if|as|in|on|at|for|with|by|to|of|is|are|was|were|can|could|do|does|did|no|not|one|two|three|read|find|rule|can)\b/i;
+
   const norm = s => String(s == null ? '' : s)
     .replace(/[\u2018\u2019\u02bc\u2032]/g, "'")
     .replace(/\s+/g, ' ')
@@ -130,6 +135,81 @@
   }
 
   /**
+   * 把**散点文字块**聚成"线索块"（②取字的核心 ✓）。
+   * 为什么不做"先按 y 归行、再按 x 空隙切段" ✗：真实版面是**两列并排**的卡片 ✓，
+   * 同一 y 上会横跨两张卡 ✗ —— 那样切出来的"行"跨列，一句话被撕成两半 ✗（实测 car-repair 只出 1/6 条）。
+   * 改成**二维近邻聚类** ✓：只在"竖向接得上下"或"横向接得左右"时才连边 ✓，
+   * 于是气泡里的话连成一块 ✓，不同卡片因为离得远而分开 ✓。
+   * @param {Array<{text:string,x:number,y:number,w?:number,h?:number,font?:string,bold?:boolean}>} items
+   */
+  function cluster(items, opts) {
+    const opt = opts || {};
+    const list = (items || []).filter(it => it && norm(it.text))
+      .map((it, i) => ({ i, text: norm(it.text), x: it.x, y: it.y,
+        w: it.w == null ? Math.max(6, letters(it.text).length * 6) : it.w,
+        h: it.h == null ? 12 : it.h, font: it.font, bold: it.bold }));
+    // **人名单独进自己的块** ✓：并查集有传递性 —— 就算禁止"名字直接连线索"，
+    // 名字-A-B-线索 这样的链也会把它们连成一块 ✗（实测 "Diane She was Waiting Area…"）。
+    // 所以聚类时先把"像人名"的块拆出去 ✓，它们各自成块 ✓。
+    const isName = it => looksLikePersonName(it.text);
+    const parent = list.map((_, i) => i);
+    const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };
+    const gapX = (a, b) => Math.max(0, Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w)));
+    const gapY = (a, b) => Math.max(0, Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h)));
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (isName(a) || isName(b)) continue;          // 人名不参与合并 ✓
+        const sameLine = Math.abs(a.y - b.y) <= Math.max(3, Math.min(a.h, b.h) * 0.5);
+        const lineGapX = gapX(a, b);
+        // 竖向容差收紧到 0.6 字高 ✓：同一个气泡里的两行只隔 0.3~0.5 字高 ✓，
+        // 而不同卡片/区域标签往往隔 1 个字高以上 → 不能连 ✗（1.2 就是把好几张卡连成一片的元凶）
+        const stacked = gapY(a, b) <= Math.max(4, Math.min(a.h, b.h) * (opt.gapY == null ? 0.6 : opt.gapY));
+        const colNear = lineGapX <= Math.max(12, Math.min(a.h, b.h) * (opt.gapX == null ? 1.2 : opt.gapX));
+        // 同一行：横向要挨着 ✓（隔很远的两张卡不能连 ✗）
+        // 上下相邻：横向大致同列 ✓ 且**人名不跟线索连**（名字要单独成块 ✓）
+        if (sameLine && lineGapX <= Math.max(8, Math.min(a.h, b.h) * 0.8)) { union(a.i, b.i); continue; }
+        if (stacked && colNear) { union(a.i, b.i); continue; }
+      }
+    }
+    const groups = new Map();
+    for (const it of list) {
+      const r = find(it.i);
+      if (!groups.has(r)) groups.set(r, []);
+      groups.get(r).push(it);
+    }
+    const blocks = [];
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      const x0 = Math.min.apply(null, arr.map(z => z.x));
+      const x1 = Math.max.apply(null, arr.map(z => z.x + z.w));
+      const y0 = Math.min.apply(null, arr.map(z => z.y));
+      const y1 = Math.max.apply(null, arr.map(z => z.y + z.h));
+      const text = arr.map(z => z.text).join(' ').replace(/\s+/g, ' ').trim();
+      const byFont = new Map();
+      for (const z of arr) {
+        const f = z.font == null ? '' : String(z.font);
+        byFont.set(f, (((byFont.get(f) || '') + ' ' + z.text).replace(/\s+/g, ' ').trim()));
+      }
+      blocks.push({ text, x: x0, y: y0, w: x1 - x0, h: y1 - y0, runs: arr.map(z => ({ text: z.text, font: z.font, bold: z.bold })),
+        groups: [...byFont].map(([font, t]) => ({ font, text: t })) });
+    }
+    blocks.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    return blocks;
+  }
+
+  /**
+   * 端到端（纯部分 · 取字到解析）：散点文字 → 线索块 → 解析 → 线索候选 + 人名
+   * @param {Array} items 带坐标的文字块（PDF 文字层或 OCR 词框 ✓）
+   * @param {Array} names 已知物品/区域名
+   */
+  function readItems(items, names, opts) {
+    const o = Object.assign({}, opts || {}, { blocks: true });
+    return extract(cluster(items, o), names, o);
+  }
+
+  /**
    * 把"一行行文字"归并成线索块（每块 = 一个人物卡上的那段话）。
    * 真实 PDF 的文字是流式的，同一张卡的句子可能被拆成好几行 ✓ 相邻一行合并 ✓；
    * 卡与卡之间通常有明显间距或换人 ✓。
@@ -197,6 +277,8 @@
     if (NOT_CLUE.some(re => re.test(t))) return false;
     const L = letters(t);
     if (L.length < 3) return false;
+    if (t.length > 20) return false;                         // 人名不会是一长串 ✓
+    if (NAME_STOP.test(t)) return false;                     // He was / The Caricature / What happened ✗
     if (L === L.toUpperCase()) return false;                 // 全大写 = 区域名 ✓
     if (!/^[A-Z]/.test(t)) return false;                     // 名字首字母大写 ✓
     return true;
@@ -207,24 +289,33 @@
    * @returns {{clues:Array, names:Array, skipped:Array}}
    */
   function extract(lines, names, opts) {
-    const blocks = mergeBlocks(lines, opts);
+    // 已经聚好的块别再合并一次 ✗（`cluster` 内部已经把容差收紧到 0.6 字高 ✓；
+    // 这里再按 2.2 字高合并一次，会把相邻两张卡又粘起来 —— 实测踩过 ✓）
+    const already = opts && opts.blocks === true;
+    const blocks = already ? (lines || []).filter(b => b && norm(b.text)) : mergeBlocks(lines, opts);
     const clues = [], personNames = [], skipped = [];
     for (const b of blocks) {
       // 块的加粗片段 = 各行的加粗合起来 ✓（PDF 文字层才有的信息；OCR 没有就为空 ✓）
       const byFont = new Map();
-      for (const ln of b.lines) {
-        if (!Array.isArray(ln.runs)) continue;
-        for (const g of readRuns(ln.runs).groups) {
-          byFont.set(g.font, (((byFont.get(g.font) || '') + ' ' + g.text).replace(/\s+/g, ' ').trim()));
+      const fold = (g) => byFont.set(g.font, (((byFont.get(g.font) || '') + ' ' + g.text).replace(/\s+/g, ' ').trim()));
+      if (Array.isArray(b.groups)) {
+        b.groups.forEach(fold);                     // cluster() 已经按字体分好组了 ✓
+      } else {
+        for (const ln of (b.lines || [])) {
+          if (Array.isArray(ln.runs)) readRuns(ln.runs).groups.forEach(fold);
         }
       }
       const p = parse(b.text, names, { groups: [...byFont].map(([font, text]) => ({ font, text })) });
+      // 坐标两种来源都要认：`cluster()` 给的是 x/y ✓，`mergeBlocks()` 给的是 x0/y0 ✓
+      // （写成 b.x0 时 cluster 的块会变成 NaN ✗ → 人名配对准失败 ✓ —— 单测先抓到的）
+      const bx = Math.round(b.x != null ? b.x : b.x0);
+      const by = Math.round(b.y != null ? b.y : b.y0);
       if (p.kind !== 'none' && p.target) {
         clues.push({ text: p.text, kind: p.kind, polarity: p.polarity, bold: p.bold,
           target: p.target.name, targetKind: p.target.kind, targetId: p.target.id,
-          x: Math.round(b.x0), y: Math.round(b.y0), block: b });
+          x: bx, y: by, block: b });
       } else if (looksLikePersonName(b.text)) {
-        personNames.push({ name: b.text, x: Math.round(b.x0), y: Math.round(b.y0) });
+        personNames.push({ name: b.text, x: bx, y: by, w: b.w });
       } else {
         skipped.push({ text: b.text, reason: p.reason || '不是线索也不是人名' });
       }
@@ -237,19 +328,23 @@
       if (known.has(t)) personNames.splice(i, 1);
       else if (/\d/.test(personNames[i].name)) personNames.splice(i, 1);
     }
-    // 线索 → 就近的**上方**人名（头像名在气泡上方 ✓；没有就按 y 最近的 ✓）
-    // 人名 → 线索：先看"上方的行"，同一行的人名再按 **x 距离**选 ✓
-    // （只看 y 会把并排两个人的线索都挂到左边那位 ✗ —— 单测里 Brock/Crystal 就是这种情况）
+    // 人名 → 线索：**先要求横向有交叠**（名字在气泡正上方 ✓），再看竖向距离 ✓
+    // （只看"谁在上方、更近"太弱 ✗ —— 实测线索会挂到页面另一头的标题上 ✓，
+    //  和图例那套"heading 归属"是同一个教训 ✓）
     for (const c of clues) {
-      let best = null, bestRow = Infinity, bestX = Infinity;
+      const cw = Math.max(10, c.block ? blockWidth(c.block) : 40);
+      let best = null, bestScore = Infinity;
       for (const n of personNames) {
+        const nw = n.w != null ? n.w : 40;
+        const ox = Math.min(n.x + nw, c.x + cw) - Math.max(n.x, c.x);
+        const dx = ox > 0 ? 0 : Math.max(0, Math.max(n.x - (c.x + cw), c.x - (n.x + nw)));
         const above = n.y <= c.y + 4;
-        const row = above ? (c.y - n.y) : 1e5 + Math.abs(c.y - n.y);
-        const dx = Math.abs(c.x - n.x);
-        const better = row < bestRow - 1 || (Math.abs(row - bestRow) <= 1 && dx < bestX);
-        if (!best || better) { best = n; bestRow = row; bestX = dx; }
+        const dy = above ? (c.y - n.y) : 1e5 + Math.abs(c.y - n.y);
+        const score = (ox > 0 ? 0 : 1000 + dx) + dy;
+        if (score < bestScore) { bestScore = score; best = n; }
       }
       c.person = best ? best.name : null;
+      c.personX = best ? best.x : null;
     }
     // 只留下"真的挂住了线索"的人名 ✓：标题、页眉、说明里的名词都不是人名 ✗
     const usedNames = new Set(clues.map(c => c.person).filter(Boolean));
@@ -257,7 +352,7 @@
     return { clues, names: keep, skipped, blocks };
   }
 
-  const api = { parse, findTarget, mergeBlocks, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);
