@@ -1248,6 +1248,26 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(savedItems.length === 1 && /^椅子:\d+:true$/.test(savedItems[0]) && Number(savedItems[0].split(':')[1]) >= 3,
     '保存成物品（名字 + 格子数 + 可占据）：' + savedItems.join(' / '));
 
+  // 36) 「按样例添加」**没找到同类**时 → 至少把点的那一格加进草稿 ✓
+  //     （把匹配器换成"故意找不到"的桩，稳定复现这条分支 ✓）
+  await p.evaluate(() => {
+    window.__origFindSimilar = window.MurdokuItems.findSimilar;
+    window.MurdokuItems.findSimilar = () => ({ ok: false, reason: '测试桩：故意找不到' });
+    window.MH.ui.itemPicking = false; window.MH.ui.lastItemMatch = null;
+  });
+  await p.click('[data-act="new-item"]');
+  await p.waitForSelector('.draft #draftName');
+  await p.click('.draft [data-act="item-sample"]');
+  await p.locator('.cell[data-k="7,9"]').click();
+  await p.waitForFunction(() => window.MH.ui.lastItemMatch, null, { timeout: 30000 });
+  const fb = await p.evaluate(() => window.MH.ui.lastItemMatch);
+  ok(fb.fallback === true && fb.cells.length === 1 && fb.cells[0] === '7,9',
+    '没找到同类也把点的那一格算进去：' + JSON.stringify(fb.cells));
+  const fbDraft = await p.evaluate(() => [...((window.MH.ui.draft && window.MH.ui.draft.cells) || [])]);
+  ok(fbDraft.length === 1 && fbDraft[0] === '7,9', '草稿里有这一格：' + JSON.stringify(fbDraft));
+  await p.click('[data-act="draft-cancel"]');
+  await p.evaluate(() => { window.MurdokuItems.findSimilar = window.__origFindSimilar; });
+
   // 33) 编辑已有物品时点「从样例找同类」→ 结果要**追加到当前物品**，不能新建一件 ✗
   const beforeItems = await p.evaluate(() => window.MH.store.state.items.length);
   await p.evaluate(() => window.MH.store.commit('清空格子', s => { s.items[0].cells = []; }));

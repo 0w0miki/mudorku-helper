@@ -447,7 +447,19 @@
       MH.toast('找同类出错：' + (err && err.message ? err.message : err), 'error');
       return;
     }
-    if (!res.ok || !res.cells.length) { MH.toast('没找到同类：' + (res.reason || '未知原因'), 'warn'); return; }
+    // **没找到同类也把点的那一格加进去** ✓：用户点这一格的意思就是"这件物品在这里"，
+    // 找不到别的同类不该白点一下 ✗（再手工点一次很烦 ✓）
+    if (!res.ok || !res.cells.length) {
+      const put = applySampleToDraft([k]);
+      MH.ui.draft.sample = { r, c };
+      MH.ui.lastItemMatch = { sample: { r, c }, cells: [k], stats: res.stats || null,
+        template: res.template || null, fallback: true };
+      MH.render();
+      MH.toast('没找到同类（' + (res.reason || '未知原因') + '）· 已把点的这一格加进去' +
+        (put.reused ? '：本次 +' + put.added + ' 格，共 ' + put.total + ' 格' : '') +
+        ' —— 可继续在棋盘上点/拖动加格子，再点「保存」', 'warn');
+      return;
+    }
     const put = applySampleToDraft(res.cells);
     MH.ui.draft.sample = { r, c };
     MH.ui.lastItemMatch = { sample: { r, c }, cells: res.cells, stats: res.stats, template: res.template };
