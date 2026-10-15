@@ -1345,8 +1345,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     const st = window.MH.store.state, C = window.MurdokuCore;
     C.createItem(st, 'Car', [], true);
     C.createItem(st, 'Shelf', [], true);
-    st.people[0].label = 'Anthony';
-    st.people[1].label = 'Breck';
+    // **保持默认编号 A/B** ✓ —— 验证"按首字母对应"（Anthony→A、Breck→B）
     // 直接注入"解析结果"（读卡片那一步的产物 ✓），覆盖面板与应用逻辑
     window.MH.panels.setClueCandidates({ clues: [
       { text: 'He was in a car .', kind: 'in', polarity: 1, person: 'Anthony', target: 'Car', targetKind: 'item' },
@@ -1357,15 +1356,17 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const rowsN = await p.locator('.clue-panel .clue-row').count();
   ok(rowsN === 2, '候选面板列出 2 条线索：' + rowsN);
   const mapped = await p.evaluate(() => [...document.querySelectorAll('.clue-panel select[data-act="clue-map"]')].map(s => s.value));
-  ok(mapped[0] && mapped[1] && mapped[0] !== mapped[1], '人名自动对应到不同的人：' + JSON.stringify(mapped));
+  const labels = await p.evaluate(ids => ids.map(id => (window.MH.store.state.people.find(x => x.id === id) || {}).label), mapped);
+  ok(labels[0] === 'A' && labels[1] === 'B',
+    '按首字母对应人物（Anthony→A、Breck→B）：' + JSON.stringify(labels));
   await p.click('[data-act="clue-apply"]');
   const applied = await p.evaluate(() => {
     const st = window.MH.store.state;
     return st.people.map(x => ({ l: x.label, clue: x.clue, links: x.links.length }));
   });
-  const an = applied.find(x => x.l === 'Anthony'), br = applied.find(x => x.l === 'Breck');
-  ok(an && /car/i.test(an.clue) && an.links === 1, 'Anthony 的线索与关联都写上了：' + JSON.stringify(an));
-  ok(br && br.clue && br.links === 0, 'Breck 的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
+  const an = applied.find(x => x.l === 'A'), br = applied.find(x => x.l === 'B');
+  ok(an && /car/i.test(an.clue) && an.links === 1, 'A（Anthony）的线索与关联都写上了：' + JSON.stringify(an));
+  ok(br && br.clue && br.links === 0, 'B（Breck）的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
   ok(await p.evaluate(() => !window.MH.ui.clueCands), '应用后候选面板收起');
 
   console.log(A.join('\n'));

@@ -352,7 +352,38 @@
     return { clues, names: keep, skipped, blocks };
   }
 
-  const api = { parse, findTarget, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  /**
+   * 把线索上的"卡片人名"对应到应用里的人物（A–Z ✓）。
+   * 规则（按用户要求 ✓）：
+   *   ① 编号同名（用户把 A–Z 改成了题目里的名字 ✓）→ 直接对上
+   *   ② 否则按**首字母** ✓：Anthony → A、Crystal → C…（这些人物的编号本来就是 A–Z 跳 X ✓）
+   *   ③ 还对应不上的**留空**，由界面上手动选 （首字母不在编号里的，例如 V ✗ —— 不猜 ✓）
+   * 同一个人不会被两条线索占用 ✓（按线索顺序先到先得 ✓）。
+   * @param {Array<{person?:string, personId?:string}>} clues
+   * @param {Array<{id:string, label:string}>} people
+   */
+  function mapByInitial(clues, people) {
+    const used = new Set();
+    const byLabel = new Map();
+    for (const p of (people || [])) byLabel.set(String(p.label || '').toUpperCase(), p);
+    // ① 编号同名先占位 ✓
+    const out = (clues || []).map(c => Object.assign({ personId: '' }, c, { personId: '' }));
+    for (const c of out) {
+      if (!c.person) continue;
+      const p = byLabel.get(norm(c.person).toUpperCase());
+      if (p && !used.has(p.id)) { c.personId = p.id; c.mappedBy = 'label'; used.add(p.id); }
+    }
+    // ② 再按首字母 ✓
+    for (const c of out) {
+      if (c.personId || !c.person) continue;
+      const first = (letters(c.person)[0] || '').toUpperCase();
+      const p = first ? byLabel.get(first) : null;
+      if (p && !used.has(p.id)) { c.personId = p.id; c.mappedBy = 'initial'; used.add(p.id); }
+    }
+    return out;
+  }
+
+  const api = { parse, findTarget, mapByInitial, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

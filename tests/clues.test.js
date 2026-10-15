@@ -195,3 +195,37 @@ test('取字到解析（readItems）：字体分组一路传到目标 ✓', () =
   assert.equal(out.clues[0].person, 'Anthony');
   assert.equal(out.clues[0].bold, 'car');
 });
+
+test('人物对应：① 编号同名 ② **按首字母** ✓ ③ 对不上的留空（不猜 ✗）', () => {
+  const people = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' },
+    { id: 'p4', label: 'D' }, { id: 'p5', label: 'E' }, { id: 'p6', label: 'F' }];
+  const got = C.mapByInitial([
+    { person: 'Anthony', text: 'He was in a car .' },
+    { person: 'Crystal', text: 'She was sitting in a chair .' },
+    { person: 'Breck', text: 'He was on an oil slick.' },
+    { person: 'Vaughn', text: 'The Victim.' },          // V 不在 A–F 里 → 留空 ✓
+    { person: null, text: '（卡片上没名字）' },
+  ], people);
+  assert.equal(got[0].personId, 'p1', 'Anthony → A');
+  assert.equal(got[0].mappedBy, 'initial');
+  assert.equal(got[1].personId, 'p3', 'Crystal → C');
+  assert.equal(got[2].personId, 'p2', 'Breck → B');
+  assert.equal(got[3].personId, '', 'Vaughn 首字母不在编号里 → 留空，交给手动 ✓');
+  assert.equal(got[4].personId, '', '没名字 → 留空 ✓');
+});
+
+test('人物对应：编号已被改成题目里的名字时，优先按同名对应 ✓', () => {
+  const people = [{ id: 'p1', label: 'Anthony' }, { id: 'p2', label: 'B' }];
+  const got = C.mapByInitial([{ person: 'Anthony', text: 'x' }], people);
+  assert.equal(got[0].personId, 'p1');
+  assert.equal(got[0].mappedBy, 'label');
+});
+
+test('人物对应：同一个人不会被两条线索占用 ✓（先到先得）', () => {
+  const people = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }];
+  const got = C.mapByInitial([
+    { person: 'Anthony', text: 'x' }, { person: 'Andrew', text: 'y' },
+  ], people);
+  assert.equal(got[0].personId, 'p1');
+  assert.equal(got[1].personId, '', '第二个人不能再占 A ✓');
+});

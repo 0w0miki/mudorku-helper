@@ -1223,7 +1223,10 @@ Oil Slick / TV / Plant：没找到（峰值不够，明确提示手动）
   没有 PDF 就用卡片 OCR（没有字体 ✓ → 解析自动退回按名字匹配 ✓）；框了卡片就只取卡片里的文字 ✓
 - 读到之后先给**候选面板** ✓：每条显示"卡片上写的人名 → 解析出的关系与目标 → 原文"✓，
   每行一个下拉框指定它对应应用里的哪个人（A–Z ✓）、一个「忽略」按钮 ✓
-- 人物自动对应**只按同名的编号**（用户把 A–Z 改成题目里的名字 ✓）—— 不猜顺序 ✗
+- 人物对应（按用户要求 ✓）：① 编号同名（用户把 A–Z 改成题目里的名字 ✓）
+  ② 否则**按首字母** ✓ —— Anthony→A、Crystal→C…（人物编号本来就是 A–Z 跳 X ✓）
+  ③ 还对应不上的**留空**，面板上给下拉手动指定 ✓（首字母不在编号里的，例如 Vaughn 的 V ✗ —— 不猜 ✓）
+  同一个人不会被两条线索占用 ✓（先到先得 ✓）；面板里会显示"（首字母 A）"让人知道依据 ✓
 - 应用：写 `person.clue`（线索原文 ✓，游玩时显示在人物卡片上 ✓）；
   只有 **"在…里/在…上"** 这类位置关系建关联 ✓；
   **beside / not beside 只记录原文、不建关联** ✓（应用里没有"相邻"这个模型 ✗，
@@ -1237,8 +1240,11 @@ Oil Slick / TV / Plant：没找到（峰值不够，明确提示手动）
    Anthony → in Car        ｜ He was in a car .
    Brock   → in Oil Slick  ｜ He was on an oil slick.
    Emilio  → beside Shelf  ｜ He was beside a shelf .
-应用后：Anthony/Crystal/Brock 各自 +1 条关联（Car/Chair/Oil Slick ✓ 正相关 ✓）
-        Emilio 记住原文、关联为 0 ✓
+应用后（**保持默认编号 A–F**，靠首字母对应）：
+   A（Anthony）→ 线索 "He was in a car ." + 关联 Car ✓
+   B（Brock）  → 线索 "He was on an oil slick." + 关联 Oil Slick ✓
+   C（Crystal）→ 线索 "She was sitting in a chair ." + 关联 Chair ✓
+   E（Emilio） → 记住原文、关联为 0 ✓（beside 不建关联 ✓）
 ```
 e2e 新增 5 条断言（注入解析结果 → 面板 → 指定人 → 应用 → 收起 ✓）；
 `MH.panels.setClueCandidates/clueRead/clueApply` 暴露给测试 ✓。

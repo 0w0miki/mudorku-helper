@@ -40,11 +40,16 @@
     const kindText = k => (k === 'in' ? '在' : k === 'beside' ? '在旁边' : k === 'not-beside' ? '不在旁边' : '');
     return '<div class="clue-panel">' +
       '<div class="link-title">读到 ' + cc.clues.length + ' 条线索（候选 · ' +
-      (cc.via === 'pdf' ? 'PDF 文字层' : '卡片 OCR') + '）—— 逐条核对，再点应用</div>' +
+      (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') + '）—— 逐条核对，再点应用</div>' +
+      (cc.clues.some(c => !c.personId)
+        ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
+          ' 条没能按名字/首字母对上人物（首字母不在编号里，或卡片上没写名字）—— 用左边的下拉框指定一下 ✓</p>'
+        : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow"><div>' + esc(c.text) + '</div>' +
-        '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」· ' : '') +
+        '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」' +
+          (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' : '') + ' · ' : '') +
         kindText(c.kind) + ' <b>' + esc(c.target) + '</b>' +
         (c.kind !== 'in' ? '（只记录原文，不建关联）' : '') + '</div></div>' +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
@@ -830,13 +835,17 @@
   function setClueCandidates(out, via, names) {
     const st = MH.store.state;
     const key = t => String(t || '').replace(/[^a-z]/gi, '').toLowerCase();
-    const clues = (out.clues || []).map(c => {
-      const hit = c.person ? st.people.find(p => key(p.label) === key(c.person)) : null;
+    // 人物对应：① 编号同名 ✓ ② **按首字母**（Anthony→A、Crystal→C… ✓）
+    // ③ 对应不上的留空让用户手动选（首字母不在编号里的，例如 V ✗ —— 不猜 ✓）
+    const mapped = (window.MurdokuClues && window.MurdokuClues.mapByInitial)
+      ? window.MurdokuClues.mapByInitial(out.clues || [], st.people)
+      : (out.clues || []);
+    const clues = mapped.map(c => {
       const target = c.targetId ? { kind: c.targetKind, id: c.targetId }
         : (c.targetKind === 'item'
           ? (st.items.find(i => key(i.name) === key(c.target)) || {})
           : (st.regions.find(r => key(r.name) === key(c.target)) || {}));
-      return { ...c, personId: hit ? hit.id : '', targetId2: target.id || '', skip: false };
+      return { ...c, personId: c.personId || '', targetId2: target.id || '', skip: false };
     });
     MH.ui.clueCands = { clues, via: via || 'json', names: names || [] };
     MH.render();
