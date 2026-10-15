@@ -51,7 +51,9 @@
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow"><div>' + esc(c.text) + '</div>' +
         '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」' +
-          (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' : '') + ' · ' : '') +
+          (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' :
+            c.mappedBy === 'order' ? '（按位置推定）' : '') + ' · ' : '') +
+        (c.mappedBy === 'order' ? '<span class="muted">按页面位置推定</span> · ' : '') +
         kindText(c.kind) + ' <b>' + esc(c.target) + '</b>' +
         (c.kind !== 'in' ? '（只记录原文，不建关联）' : '') + '</div></div>' +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +

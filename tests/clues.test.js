@@ -210,8 +210,9 @@ test('人物对应：① 编号同名 ② **按首字母** ✓ ③ 对不上的�
   assert.equal(got[0].mappedBy, 'initial');
   assert.equal(got[1].personId, 'p3', 'Crystal → C');
   assert.equal(got[2].personId, 'p2', 'Breck → B');
-  assert.equal(got[3].personId, '', 'Vaughn 首字母不在编号里 → 留空，交给手动 ✓');
-  assert.equal(got[4].personId, '', '没名字 → 留空 ✓');
+  assert.equal(got[3].personId, 'p4', 'Vaughn 首字母不在编号里 → 按位置默认补上（D ✓）');
+  assert.equal(got[3].mappedBy, 'order', '并标注"按位置推定" ✓');
+  assert.equal(got[4].personId, 'p5', '下一条接着排 ✓');
 });
 
 test('人物对应：编号已被改成题目里的名字时，优先按同名对应 ✓', () => {
@@ -226,8 +227,9 @@ test('人物对应：同一个人不会被两条线索占用 ✓（先到先得�
   const got = C.mapByInitial([
     { person: 'Anthony', text: 'x' }, { person: 'Andrew', text: 'y' },
   ], people);
-  assert.equal(got[0].personId, 'p1');
-  assert.equal(got[1].personId, '', '第二个人不能再占 A ✓');
+  assert.equal(got[0].personId, 'p1', '第一个人占 A ✓');
+  assert.notEqual(got[1].personId, got[0].personId, 'A 不会被两条线索占用 ✓');
+  assert.equal(got[1].mappedBy, 'order', '落空的那条按位置补上（面板标注"按位置推定"✓）');
 });
 
 test('页脚署名：混进线索里要去掉 ✓（"…in a chair in puzzle by Manuel Garand …" → 只留线索部分）', () => {
@@ -253,4 +255,29 @@ test('剧情/规则文字不认 ✗（这一版的 "Someone drew a mean caricatu
   ]) {
     assert.equal(C.parse(t, [{ name: 'Chair', kind: 'item' }]).kind, 'none', '不该认：' + t);
   }
+});
+
+test('没有人名的题：按**位置顺序**默认对应剩下的人物 ✓（不让用户一条条选 ✗）', () => {
+  const people = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }];
+  const got = C.mapByInitial([
+    { person: null, text: '下面的那条', x: 500, y: 900 },      // 位置在下 ✓
+    { person: null, text: '上面的那条', x: 100, y: 400 },      // 位置在上 ✓
+    { person: null, text: '右上那条', x: 700, y: 400 },
+  ], people);
+  const byText = Object.fromEntries(got.map(c => [c.text, c.personId]));
+  assert.equal(byText['上面的那条'], 'p1', '最上面 → A');
+  assert.equal(byText['右上那条'], 'p2', '同一行按 x → B');
+  assert.equal(byText['下面的那条'], 'p3', '最下面 → C');
+  assert.equal(got.every(c => c.mappedBy === 'order'), true);
+});
+
+test('名字对不上的线索也参与位置默认 ✓（family 那版假人名靠这条兜住）', () => {
+  const people = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }];
+  const got = C.mapByInitial([
+    { person: 'Vaughn', text: '首字母不在编号里' },
+    { person: null, text: '没名字' },
+  ], people);
+  assert.equal(got[0].personId, 'p1', '名字没对上 → 也按位置补上 ✓（面板会标"按位置推定"，一下就能改 ✓）');
+  assert.equal(got[0].mappedBy, 'order');
+  assert.equal(got[1].personId, 'p2', '第二条接着排 ✓');
 });

@@ -42,6 +42,9 @@
     /as soon as you/i, /block their entire/i, /exactly one/i, /rule:/i,
     /murdoku/i, /^art by/i, /puzzle and concept/i, /^playtesters/i,
     /puzzle by/i, /graphic design by/i,
+    // 线索陈述是平铺直叙的 ✓；带括号/感叹/问号的通常是版面上的说明或语气文字 ✗
+    // （family 那版混进来的 "the book (for teens and adults!) chair in the bottom row." ✗）
+    /[()\[\]{}]/, /[!?]/,
   ];
 
   const blockWidth = b => (b && b.w != null ? b.w : 40);
@@ -390,6 +393,22 @@
       const p = first ? byLabel.get(first) : null;
       if (p && !used.has(p.id)) { c.personId = p.id; c.mappedBy = 'initial'; used.add(p.id); }
     }
+    // ③ **卡片上没有名字的题**（例如 familymurdoku 那版用人像 ✓）：
+    //    按线索在页面上的**位置顺序**（上→下、左→右）对应剩下的人物（A、B、C…✓）
+    //    为什么要默认填：让用户一条条选太慢 ✗ —— 这类题他本来就得决定"哪个人像算 A"，
+    //    按页面顺序给个默认，不对的地方一眼看得出、点一下就改 ✓
+    //    凡是**没对上**的都补 ✓（包括"名字对不上"的：family 那版的假人名 Discover/
+    //    The Caricature 就是这种情况 ✗ —— 留着空反而逼用户一条条选 ✗）
+    const free = (people || []).filter(p => !used.has(p.id))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+    const rest = out.map((c, i) => ({ c, i }))
+      .filter(x => !x.c.personId)
+      .sort((a, b) => ((a.c.y || 0) - (b.c.y || 0)) || ((a.c.x || 0) - (b.c.x || 0)));
+    rest.forEach((x, k) => {
+      if (!free[k]) return;
+      out[x.i].personId = free[k].id;
+      out[x.i].mappedBy = 'order';
+    });
     return out;
   }
 
