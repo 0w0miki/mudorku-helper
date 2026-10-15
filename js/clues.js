@@ -49,6 +49,12 @@
 
   const blockWidth = b => (b && b.w != null ? b.w : 40);
 
+  // 线索都是"**某个人**在做/在某处" ✓ —— 句首要有人称主语
+  // （实测真线索全是 "He was…" / "She was…" ✓；版面碎片的句首是 "chair in the bottom row." ✗
+  //   "WHO WAS IN THE TOP ROW?" ✗。先量过"上方有没有头像" ✗ —— 整页都是插画，
+  //   伪线索的密度 0.41~0.63 与真线索重叠 ✓，只有这条主语判据分得开 ✓）
+  const SUBJECT = /^(?:he|she|they|it|i|the victim|the person|the culprit|the murderer|someone|somebody|there|the\s+[a-z]+)\b/i;
+
   // 人名不可能是这些词开头（He was / The Caricature / What happened / She was… ✗）
   const NAME_STOP = /^(he|she|it|they|the|a|an|what|who|where|when|there|this|that|and|or|but|if|as|in|on|at|for|with|by|to|of|is|are|was|were|can|could|do|does|did|no|not|one|two|three|read|find|rule|can)\b/i;
 
@@ -121,8 +127,13 @@
     // 先把署名截掉 ✓（切块时偶尔会把页脚署名并进线索 ✗）—— **要在"规则文字"判断之前** ✗→✓，
     // 否则"真线索 + 署名"会整块被当成说明文字丢掉 ✗（实测踩过）
     const cut = t.search(CREDIT);
-    const body = cut > 0 ? t.slice(0, cut).trim() : t;
+    const body = cut >= 0 ? t.slice(0, cut).trim() : t;   // 开头就是署名（cut===0）也要切 ✓
     if (letters(body).length < 4) { out.reason = '只有署名/说明文字'; return out; }
+    // **句子必须有人称主语** ✓：真线索都是"He was… / She was…" ✓，
+    // 而版面碎片的句首是 "chair in the bottom row." ✗、"WHO WAS IN THE TOP ROW?" ✗
+    // （先量过"上方有没有头像" ✗ —— 整页都是插画，伪线索密度 0.41~0.63 与真线索重叠 ✓，
+    //   这条主语判据才是真正分得开的 ✓）
+    if (!SUBJECT.test(t)) { out.reason = '句首没有人称主语（像版面碎片）'; return out; }
     for (const bad of NOT_CLUE) {
       if (bad.test(body)) { out.reason = '规则/说明文字，不是线索'; return out; }
     }
@@ -159,7 +170,7 @@
   function splitClauses(text) {
     let t = norm(text);
     const cut = t.search(CREDIT);
-    if (cut > 0) t = t.slice(0, cut).trim();      // 页脚标注（clue:/puzzle by…）连尾巴一起去掉 ✓
+    if (cut >= 0) t = t.slice(0, cut).trim();      // 页脚标注（clue:/puzzle by…）连尾巴一起去掉 ✓
     if (!t) return [];
     return t.split(/(?<=[.!?;])\s+/).map(x => x.trim()).filter(Boolean);
   }
