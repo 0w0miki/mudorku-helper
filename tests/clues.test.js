@@ -303,3 +303,31 @@ test('分句：一块里两句线索要**各算一条** ✓，且关系与目标
   assert.equal(out.clues[1].target, 'Chair', '不能配成 beside+Chair ✗');
   assert.equal(out.clues[1].polarity, -1);
 });
+
+test('OCR 逐词框：来源不同、阈值不同 ✓（词距小、y 有抖动，也要连成一句）', () => {
+  // 模拟 OCR 的词框：y 抖动 ±5px、词间距 ~6px ✓
+  const words = [
+    { text: 'She', x: 300, y: 630, w: 28, h: 18 },
+    { text: 'was', x: 332, y: 635, w: 28, h: 18 },
+    { text: 'sitting', x: 364, y: 629, w: 52, h: 18 },
+    { text: 'in', x: 300, y: 660, w: 18, h: 18 },
+    { text: 'a', x: 322, y: 663, w: 10, h: 18 },
+    { text: 'chair', x: 336, y: 658, w: 44, h: 18 },
+  ];
+  const names = [{ name: 'Chair', kind: 'item' }];
+  const out = C.readOcrItems(words, names);
+  assert.equal(out.clues.length, 1, JSON.stringify(out.blocks.map(b => b.text)));
+  assert.equal(out.clues[0].target, 'Chair');
+  assert.equal(out.clues[0].kind, 'in');
+  assert.match(out.clues[0].text, /^She was sitting in a chair/, '词序要按"行内 x"还原 ✓：' + out.clues[0].text);
+});
+
+test('阅读顺序：同一行里 y 抖动不会打乱词序 ✓', () => {
+  const blocks = C.cluster([
+    { text: 'killer', x: 300, y: 158, w: 40, h: 16 },
+    { text: 'was', x: 344, y: 163, w: 30, h: 16 },
+    { text: 'alone', x: 378, y: 155, w: 40, h: 16 },
+  ], { wordLevel: true });
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].text, 'killer was alone', '按行内 x 排序 ✓');
+});

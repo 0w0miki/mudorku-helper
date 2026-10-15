@@ -202,11 +202,14 @@
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i], b = list[j];
         if (isName(a) || isName(b)) continue;          // 人名不参与合并 ✓
-        const sameLine = Math.abs(a.y - b.y) <= Math.max(3, Math.min(a.h, b.h) * 0.5);
+        // 同行的 y 容差：OCR 的词框 y 抖动更大（实测能到 10px ✗）→ 放宽到 0.95 字高 ✓
+        const sameLine = Math.abs(a.y - b.y) <= Math.max(opt.wordLevel ? 5 : 3,
+          Math.min(a.h, b.h) * (opt.wordLevel ? 0.95 : 0.5));
         const lineGapX = gapX(a, b);
         // 竖向容差收紧到 0.6 字高 ✓：同一个气泡里的两行只隔 0.3~0.5 字高 ✓，
         // 而不同卡片/区域标签往往隔 1 个字高以上 → 不能连 ✗（1.2 就是把好几张卡连成一片的元凶）
-        const stacked = gapY(a, b) <= Math.max(4, Math.min(a.h, b.h) * (opt.gapY == null ? 0.6 : opt.gapY));
+        const stacked = gapY(a, b) <= Math.max(opt.wordLevel ? 6 : 4,
+          Math.min(a.h, b.h) * (opt.gapY == null ? (opt.wordLevel ? 1.0 : 0.6) : opt.gapY));
         // 上下相邻：**必须真正同列** ✓ —— 要求横向重叠 ≥ 较窄那个的一半 ✓
         // （用"横向空隙小"会被斜着错开的碎片链式粘起来 ✗：实测把线索气泡和页脚粘成 664px 宽的一块 ✓）
         const oxSpan = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
@@ -214,9 +217,13 @@
         const colNear = oxSpan >= narrow * (opt.colOverlap == null ? 0.5 : opt.colOverlap);
         // 同一行：横向要挨着 ✓（隔很远的两张卡不能连 ✗）
         // 上下相邻：横向大致同列 ✓ 且**人名不跟线索连**（名字要单独成块 ✓）
-        // 同行合并的空隙收紧到 0.45 字高 ✓：真实气泡之间不会只差那么点 ✓，
-        // 而放太松会把"线索气泡"和旁边的页脚/说明**链式粘起来** ✗（实测 664px 宽的一块 ✓）
-        if (sameLine && lineGapX <= Math.max(5, Math.min(a.h, b.h) * 0.45)) { union(a.i, b.i); continue; }
+        // 同行合并的空隙：**分来源** ✓
+        //   · 文字层（PDF）：一个块往往就是一整段 ✓ → 收紧到 0.45 字高 ✓
+        //     （放太松会把线索气泡和页脚链式粘起来 ✗，实测 664px 宽的一块 ✓）
+        //   · OCR：给的是**逐词框** ✗ —— 词间距只有几个像素 ✓，用 0.45 字高会把每句都切碎 ✓
+        //     （实测 142 个词被切成 75 块 ✗ → 一条线索都认不出 ✗）→ 放宽到 1.1 字高 ✓
+        const sameLineRatio = opt.wordLevel ? 1.1 : 0.45;
+        if (sameLine && lineGapX <= Math.max(opt.wordLevel ? 8 : 5, Math.min(a.h, b.h) * sameLineRatio)) { union(a.i, b.i); continue; }
         if (stacked && colNear) { union(a.i, b.i); continue; }
       }
     }
@@ -228,7 +235,21 @@
     }
     const blocks = [];
     for (const arr of groups.values()) {
+      // **阅读顺序**：先按"行"归并（y 容差 ±0.6 字高 ✓），行内再按 x ✓
+      // （OCR 每个词的 y 有几个像素的抖动 ✗ —— 直接按 y 排序会把同一行打乱：
+      //   实测出现 "killer alone The with the was victim the in same ar" ✗）
       arr.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      const lines = [];
+      for (const it of arr) {
+        const ln = lines.find(l => Math.abs(l.y - it.y) <= Math.max(3, Math.min(l.h, it.h) * 0.6));
+        if (ln) { ln.items.push(it); ln.y = Math.min(ln.y, it.y); }
+        else lines.push({ y: it.y, h: it.h, items: [it] });
+      }
+      lines.sort((a, b) => a.y - b.y);
+      const ordered = [];
+      for (const ln of lines) ordered.push(...ln.items.slice().sort((a, b) => a.x - b.x));
+      arr.length = 0;
+      arr.push(...ordered);
       const x0 = Math.min.apply(null, arr.map(z => z.x));
       const x1 = Math.max.apply(null, arr.map(z => z.x + z.w));
       const y0 = Math.min.apply(null, arr.map(z => z.y));
@@ -253,6 +274,12 @@
    */
   function readItems(items, names, opts) {
     const o = Object.assign({}, opts || {}, { blocks: true });
+    return extract(cluster(items, o), names, o);
+  }
+
+  /** OCR 来源的入口：逐词框要更松的合并阈值 ✓ */
+  function readOcrItems(items, names, opts) {
+    const o = Object.assign({}, opts || {}, { blocks: true, wordLevel: true });
     return extract(cluster(items, o), names, o);
   }
 
@@ -472,7 +499,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

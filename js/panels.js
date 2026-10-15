@@ -831,7 +831,7 @@
     catch (err) { MH.toast('读不到卡片文字：' + err.message, 'error'); return; }
     if (!src || !src.items.length) { MH.toast('这张卡片上没有文字（PDF 文字层或截图都试过了）', 'warn'); return; }
     let out;
-    try { out = C.readItems(src.items, names); }
+    try { out = (src.via === 'ocr' ? C.readOcrItems : C.readItems)(src.items, names); }
     catch (err) { MH.toast('线索解析出错：' + err.message, 'error'); return; }
     if (!out.clues.length) { MH.toast('没读出线索（卡片里可能没有人物说明，或目标物品还没建）', 'warn'); return; }
     const clues = setClueCandidates(out, src.via, out.names);
