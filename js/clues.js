@@ -34,7 +34,7 @@
   ];
 
   // 页脚署名：真线索偶尔会和它被切并成一块 ✗ —— 从"puzzle by/art by…"起截掉 ✓
-  const CREDIT = /\b(?:puzzle (?:and concept )?by|art by|graphic design by|playtesters?|more at|murdoku\.com)\b/i;
+  const CREDIT = /\b(?:puzzle (?:and concept )?by|art by|graphic design by|playtesters?|more at|murdoku\.com|clue:)\b/i;
 
   // 非线索：规则/说明/页眉页脚那种 ✓（宁可不认，也不要写错 ✗）
   const NOT_CLUE = [
@@ -42,9 +42,9 @@
     /as soon as you/i, /block their entire/i, /exactly one/i, /rule:/i,
     /murdoku/i, /^art by/i, /puzzle and concept/i, /^playtesters/i,
     /puzzle by/i, /graphic design by/i,
-    // 线索陈述是平铺直叙的 ✓；带括号/感叹/问号的通常是版面上的说明或语气文字 ✗
+    // 线索陈述是平铺直叙的 ✓；带括号的通常是版面上的说明文字 ✗
     // （family 那版混进来的 "the book (for teens and adults!) chair in the bottom row." ✗）
-    /[()\[\]{}]/, /[!?]/,
+    /[()\[\]{}]/,
   ];
 
   const blockWidth = b => (b && b.w != null ? b.w : 40);
@@ -142,9 +142,26 @@
     out.kind = kind;
     out.text = body;                       // 线索原文按"去掉署名"的版本返回 ✓
     out.target = target;
-    // 极性：'in' / 'beside' 为正 ✓；'not-beside' 为负 ✗
-    out.polarity = kind === 'not-beside' ? -1 : 1;
+    // 极性："不/没有"就是负相关 ✗→✓
+    // （"He was **not** sitting in a chair." 以前判成正相关 ✗ —— 这是会误导游玩的错 ✓）
+    const neg = /\b(?:not|never|n't)\b/i.test(body);
+    out.polarity = (kind === 'not-beside' || neg) ? -1 : 1;
+    if (out.polarity === -1) out.negated = true;
     return out;
+  }
+
+  /**
+   * 把一段文字**按句子切开** ✓。
+   * 为什么必须切：切块时相邻两个气泡会粘在一起 ✗ —— 一句里"关系词"和"目标"可能来自
+   * 不同的句子（"He was beside a desk. He was not sitting in a chair." 会配成 beside+Chair ✗）。
+   * 逐句解析才能保证关系与目标同源 ✓，也才能把两句线索各算一条 ✓。
+   */
+  function splitClauses(text) {
+    let t = norm(text);
+    const cut = t.search(CREDIT);
+    if (cut > 0) t = t.slice(0, cut).trim();      // 页脚标注（clue:/puzzle by…）连尾巴一起去掉 ✓
+    if (!t) return [];
+    return t.split(/(?<=[.!?;])\s+/).map(x => x.trim()).filter(Boolean);
   }
 
   /**
@@ -179,10 +196,16 @@
         // 竖向容差收紧到 0.6 字高 ✓：同一个气泡里的两行只隔 0.3~0.5 字高 ✓，
         // 而不同卡片/区域标签往往隔 1 个字高以上 → 不能连 ✗（1.2 就是把好几张卡连成一片的元凶）
         const stacked = gapY(a, b) <= Math.max(4, Math.min(a.h, b.h) * (opt.gapY == null ? 0.6 : opt.gapY));
-        const colNear = lineGapX <= Math.max(12, Math.min(a.h, b.h) * (opt.gapX == null ? 1.2 : opt.gapX));
+        // 上下相邻：**必须真正同列** ✓ —— 要求横向重叠 ≥ 较窄那个的一半 ✓
+        // （用"横向空隙小"会被斜着错开的碎片链式粘起来 ✗：实测把线索气泡和页脚粘成 664px 宽的一块 ✓）
+        const oxSpan = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const narrow = Math.min(a.w, b.w);
+        const colNear = oxSpan >= narrow * (opt.colOverlap == null ? 0.5 : opt.colOverlap);
         // 同一行：横向要挨着 ✓（隔很远的两张卡不能连 ✗）
         // 上下相邻：横向大致同列 ✓ 且**人名不跟线索连**（名字要单独成块 ✓）
-        if (sameLine && lineGapX <= Math.max(8, Math.min(a.h, b.h) * 0.8)) { union(a.i, b.i); continue; }
+        // 同行合并的空隙收紧到 0.45 字高 ✓：真实气泡之间不会只差那么点 ✓，
+        // 而放太松会把"线索气泡"和旁边的页脚/说明**链式粘起来** ✗（实测 664px 宽的一块 ✓）
+        if (sameLine && lineGapX <= Math.max(5, Math.min(a.h, b.h) * 0.45)) { union(a.i, b.i); continue; }
         if (stacked && colNear) { union(a.i, b.i); continue; }
       }
     }
@@ -318,15 +341,26 @@
           if (Array.isArray(ln.runs)) readRuns(ln.runs).groups.forEach(fold);
         }
       }
-      const p = parse(b.text, names, { groups: [...byFont].map(([font, text]) => ({ font, text })) });
+      const groupsAll = [...byFont].map(([font, text]) => ({ font, text }));
+      // **逐句解析** ✓：关系与目标必须同源；一块里有两句线索就各算一条 ✓
+      const clauses = splitClauses(b.text);
+      const parsedList = (clauses.length ? clauses : [b.text]).map(cl => {
+        // 字体组只在**这一句范围内**生效 ✓（否则会拿别句的加粗词当目标 ✗）
+        const key = norm(cl).replace(/\s+/g, ' ').toLowerCase();
+        const gs = groupsAll.map(g => {
+          const gt = norm(g.text).toLowerCase();
+          return key.includes(gt) ? g : null;
+        }).filter(Boolean);
+        return parse(cl, names, { groups: gs.length ? gs : groupsAll });
+      }).filter(r2 => r2.kind !== 'none' && r2.target);
+      const p = parsedList[0] || parse(b.text, names, { groups: groupsAll });
       // 坐标两种来源都要认：`cluster()` 给的是 x/y ✓，`mergeBlocks()` 给的是 x0/y0 ✓
       // （写成 b.x0 时 cluster 的块会变成 NaN ✗ → 人名配对准失败 ✓ —— 单测先抓到的）
       const bx = Math.round(b.x != null ? b.x : b.x0);
       const by = Math.round(b.y != null ? b.y : b.y0);
-      if (p.kind !== 'none' && p.target) {
-        clues.push({ text: p.text, kind: p.kind, polarity: p.polarity, bold: p.bold,
-          target: p.target.name, targetKind: p.target.kind, targetId: p.target.id,
-          x: bx, y: by, block: b });
+      if (parsedList.length) {
+        parsedList.forEach(r2 => clues.push({ text: r2.text, kind: r2.kind, polarity: r2.polarity, bold: r2.bold,
+          target: r2.target.name, targetKind: r2.target.kind, targetId: r2.target.id, x: bx, y: by, block: b }));
       } else if (looksLikePersonName(b.text)) {
         personNames.push({ name: b.text, x: bx, y: by, w: b.w });
       } else {
@@ -401,18 +435,33 @@
     //    The Caricature 就是这种情况 ✗ —— 留着空反而逼用户一条条选 ✗）
     const free = (people || []).filter(p => !used.has(p.id))
       .sort((a, b) => String(a.label).localeCompare(String(b.label)));
-    const rest = out.map((c, i) => ({ c, i }))
-      .filter(x => !x.c.personId)
-      .sort((a, b) => ((a.c.y || 0) - (b.c.y || 0)) || ((a.c.x || 0) - (b.c.x || 0)));
-    rest.forEach((x, k) => {
-      if (!free[k]) return;
-      out[x.i].personId = free[k].id;
-      out[x.i].mappedBy = 'order';
+    // **以"块"为单位**分配 ✓：一个气泡里的多句属于同一个人 ✓
+    // （以前按"条"分配 → 同一人两句就白占两个人物名额 ✗ → 后面全部错位 ✗）
+    const groups = new Map();
+    out.forEach((c, i) => {
+      const key = c.block || ('solo' + i);
+      if (!groups.has(key)) groups.set(key, { y: c.y || 0, x: c.x || 0, items: [] });
+      groups.get(key).items.push({ c, i });
     });
+    const ordered = [...groups.values()].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    let k = 0;
+    for (const g of ordered) {
+      const done = g.items.filter(x => x.c.personId);
+      if (done.length === g.items.length) continue;               // 全对上了 ✓
+      // 块里已经有人对上 → 剩下的跟着同一个人 ✓
+      let person = done.length ? (people || []).find(p => p.id === done[0].c.personId) : null;
+      if (!person) person = free[k++];
+      if (!person) break;
+      for (const x of g.items) {
+        if (x.c.personId) continue;
+        out[x.i].personId = person.id;
+        out[x.i].mappedBy = 'order';
+      }
+    }
     return out;
   }
 
-  const api = { parse, findTarget, mapByInitial, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);
