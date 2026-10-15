@@ -281,3 +281,25 @@ test('名字对不上的线索也参与位置默认 ✓（family 那版假人名
   assert.equal(got[0].mappedBy, 'order');
   assert.equal(got[1].personId, 'p2', '第二条接着排 ✓');
 });
+
+test('极性：否定句是**负**相关 ✗→✓（以前判成正的，会误导游玩）', () => {
+  const names = [{ name: 'Chair', kind: 'item' }, { name: 'Shelf', kind: 'item' }];
+  const a = C.parse('He was not sitting in a chair.', names);
+  assert.equal(a.kind, 'in');
+  assert.equal(a.target.name, 'Chair');
+  assert.equal(a.polarity, -1, '"不是在…里" → 负相关');
+  const b2 = C.parse('She was never beside the shelf.', names);
+  assert.equal(b2.polarity, -1);
+  const c = C.parse('He was sitting in a chair.', names);
+  assert.equal(c.polarity, 1, '肯定句仍是正相关 ✓');
+});
+
+test('分句：一块里两句线索要**各算一条** ✓，且关系与目标同源 ✓', () => {
+  const names = [{ name: 'Chair', kind: 'item' }, { name: 'Desk', kind: 'item' }];
+  const out = C.extract([{ text: 'He was beside a desk. He was not sitting in a chair.', x: 0, y: 500, h: 12, w: 300 }], names);
+  assert.equal(out.clues.length, 2, JSON.stringify(out.clues.map(x => x.text)));
+  assert.equal(out.clues[0].target, 'Desk');
+  assert.equal(out.clues[0].polarity, 1);
+  assert.equal(out.clues[1].target, 'Chair', '不能配成 beside+Chair ✗');
+  assert.equal(out.clues[1].polarity, -1);
+});

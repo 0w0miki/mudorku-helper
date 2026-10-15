@@ -37,7 +37,9 @@
     if (!cc) return '';
     const opts = sel => '<option value="">（未指定人）</option>' + st.people.map(x =>
       '<option value="' + esc(x.id) + '"' + (x.id === sel ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('');
-    const kindText = k => (k === 'in' ? '在' : k === 'beside' ? '在旁边' : k === 'not-beside' ? '不在旁边' : '');
+    // 极性也标出来 ✓："不是在…里"这种负线索很关键（判错会误导游玩 ✗）
+    const kindText = (k, pol) => (k === 'in' ? (pol === -1 ? '不在' : '在')
+      : k === 'beside' || k === 'not-beside' ? ((pol === -1) ? '不在旁边' : '在旁边') : '');
     return '<div class="clue-panel">' +
       '<div class="link-title">读到 ' + cc.clues.length + ' 条线索（候选 · ' +
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') + '）—— 逐条核对，再点应用</div>' +
@@ -54,8 +56,9 @@
           (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' :
             c.mappedBy === 'order' ? '（按位置推定）' : '') + ' · ' : '') +
         (c.mappedBy === 'order' ? '<span class="muted">按页面位置推定</span> · ' : '') +
-        kindText(c.kind) + ' <b>' + esc(c.target) + '</b>' +
-        (c.kind !== 'in' ? '（只记录原文，不建关联）' : '') + '</div></div>' +
+        kindText(c.kind, c.polarity) + ' <b>' + esc(c.target) + '</b>' +
+        (c.kind !== 'in' ? '（只记录原文，不建关联）'
+          : c.polarity === -1 ? '（负相关 ✓）' : '') + '</div></div>' +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
         '</div>').join('') +
       '<div class="row"><button class="ghost sm" data-act="clue-apply">应用选中的线索</button>' +
