@@ -229,3 +229,28 @@ test('人物对应：同一个人不会被两条线索占用 ✓（先到先得�
   assert.equal(got[0].personId, 'p1');
   assert.equal(got[1].personId, '', '第二个人不能再占 A ✓');
 });
+
+test('页脚署名：混进线索里要去掉 ✓（"…in a chair in puzzle by Manuel Garand …" → 只留线索部分）', () => {
+  const r = C.parse('She was sitting in a chair in puzzle by Manuel Garand the front area. art by Eli Voisin graphic design by Katarzyna Kosobucka & MG',
+    [{ name: 'Chair', kind: 'item' }]);
+  assert.equal(r.kind, 'in');
+  assert.equal(r.target.name, 'Chair');
+  assert.equal(r.text, 'She was sitting in a chair in', '署名被截掉 ✓');
+});
+
+test('只有署名的块不认 ✗', () => {
+  const r = C.parse('puzzle by Manuel Garand', [{ name: 'Chair', kind: 'item' }]);
+  assert.equal(r.kind, 'none');
+  assert.match(r.reason, /署名|说明/);
+});
+
+test('剧情/规则文字不认 ✗（这一版的 "Someone drew a mean caricature…" 就不是线索）', () => {
+  for (const t of [
+    'Someone drew a mean caricature of the teacher on the chalkboard!',
+    'I would’ve made the',
+    'Oh rest assured, there will be extra homework for someone.',
+    'clue: Crystal is the only person who can be with Anabella.',
+  ]) {
+    assert.equal(C.parse(t, [{ name: 'Chair', kind: 'item' }]).kind, 'none', '不该认：' + t);
+  }
+});

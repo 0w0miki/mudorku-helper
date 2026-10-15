@@ -33,11 +33,15 @@
     { re: /\bin\s+(?:the\s+)?(?:top|bottom|first|second|third|fourth|fifth|last)\s+(?:row|column)\b/i, kind: 'in' },
   ];
 
+  // 页脚署名：真线索偶尔会和它被切并成一块 ✗ —— 从"puzzle by/art by…"起截掉 ✓
+  const CREDIT = /\b(?:puzzle (?:and concept )?by|art by|graphic design by|playtesters?|more at|murdoku\.com)\b/i;
+
   // 非线索：规则/说明/页眉页脚那种 ✓（宁可不认，也不要写错 ✗）
   const NOT_CLUE = [
     /one person per row/i, /what does .?beside.? mean/i, /to the left, right/i,
     /as soon as you/i, /block their entire/i, /exactly one/i, /rule:/i,
     /murdoku/i, /^art by/i, /puzzle and concept/i, /^playtesters/i,
+    /puzzle by/i, /graphic design by/i,
   ];
 
   const blockWidth = b => (b && b.w != null ? b.w : 40);
@@ -111,11 +115,16 @@
     const t = norm(text);
     const out = { kind: 'none', target: null, polarity: null, text: t, reason: '', bold: null };
     if (!t || letters(t).length < 4) { out.reason = '太短'; return out; }
+    // 先把署名截掉 ✓（切块时偶尔会把页脚署名并进线索 ✗）—— **要在"规则文字"判断之前** ✗→✓，
+    // 否则"真线索 + 署名"会整块被当成说明文字丢掉 ✗（实测踩过）
+    const cut = t.search(CREDIT);
+    const body = cut > 0 ? t.slice(0, cut).trim() : t;
+    if (letters(body).length < 4) { out.reason = '只有署名/说明文字'; return out; }
     for (const bad of NOT_CLUE) {
-      if (bad.test(t)) { out.reason = '规则/说明文字，不是线索'; return out; }
+      if (bad.test(body)) { out.reason = '规则/说明文字，不是线索'; return out; }
     }
     let kind = null;
-    for (const r of REL_WORDS) { if (r.re.test(t)) { kind = r.kind; break; } }
+    for (const r of REL_WORDS) { if (r.re.test(body)) { kind = r.kind; break; } }
     if (!kind) { out.reason = '没看到"在/在…旁边"这类关系词'; return out; }
     // **字体组优先** ✓：题目把物品名/关系词加粗（PDF 里是独立字体块 ✓），
     // 而"哪一组才是加粗"不用猜 ✗ —— **哪一组能匹配上已知物品/区域名就用哪一组** ✓
@@ -125,9 +134,10 @@
       const hit = findTarget(g.text, names);
       if (hit) { target = hit; out.bold = g.text; break; }
     }
-    if (!target) target = findTarget(t, names);
+    if (!target) target = findTarget(body, names);
     if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
     out.kind = kind;
+    out.text = body;                       // 线索原文按"去掉署名"的版本返回 ✓
     out.target = target;
     // 极性：'in' / 'beside' 为正 ✓；'not-beside' 为负 ✗
     out.polarity = kind === 'not-beside' ? -1 : 1;

@@ -43,7 +43,9 @@
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') + '）—— 逐条核对，再点应用</div>' +
       (cc.clues.some(c => !c.personId)
         ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
-          ' 条没能按名字/首字母对上人物（首字母不在编号里，或卡片上没写名字）—— 用左边的下拉框指定一下 ✓</p>'
+          ' 条没能按名字/首字母对上人物' +
+          ((cc.names || []).length ? '（首字母不在编号里）' : '（**这张卡片上没有人名** —— 这版题目用人像区分，请对照题面的人像用下拉框指定 ✓）') +
+          ' —— 用左边的下拉框指定一下 ✓</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
