@@ -1641,7 +1641,7 @@ test('游玩模式：人物旁边不会再出现凭空的「未命名」', async
   clickSel(dom, '#tabPlay');
 
   // 人物对象本身就没有 name 字段，身份是编号
-  assert.deepEqual(Object.keys(st.people[0]).sort(), ['color', 'id', 'label', 'links'], '人物没有 name 字段');
+  assert.deepEqual(Object.keys(st.people[0]).sort(), ['clue', 'color', 'id', 'label', 'links'], '人物没有 name 字段（clue 是线索原文 ✓）');
   assert.equal(st.people[0].name, undefined);
 
   assert.equal(q(doc, '.pnow').textContent.includes('未命名'), false,

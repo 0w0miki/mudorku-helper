@@ -1216,7 +1216,34 @@ Oil Slick / TV / Plant：没找到（峰值不够，明确提示手动）
 按 legend 两栏自动分"可占据/不可占据"、被遮挡/旋转物品的容错。
 
 
-## P3 线索与人物关联（进行中）
+## P3 线索与人物关联（①②③ 已完成 ✓）
+
+**③ 应用：已接线 ✓**（2026-10-15）
+- 人物卡片多了「🔎 读人物线索（从卡片）」按钮 ✓：PDF 优先读文字层（带字体 ✓，最准），
+  没有 PDF 就用卡片 OCR（没有字体 ✓ → 解析自动退回按名字匹配 ✓）；框了卡片就只取卡片里的文字 ✓
+- 读到之后先给**候选面板** ✓：每条显示"卡片上写的人名 → 解析出的关系与目标 → 原文"✓，
+  每行一个下拉框指定它对应应用里的哪个人（A–Z ✓）、一个「忽略」按钮 ✓
+- 人物自动对应**只按同名的编号**（用户把 A–Z 改成题目里的名字 ✓）—— 不猜顺序 ✗
+- 应用：写 `person.clue`（线索原文 ✓，游玩时显示在人物卡片上 ✓）；
+  只有 **"在…里/在…上"** 这类位置关系建关联 ✓；
+  **beside / not beside 只记录原文、不建关联** ✓（应用里没有"相邻"这个模型 ✗，
+  硬套成"在里面"会给出错误的提示 ✗）
+- `person.clue` 进状态（存档/导出自动带上 ✓，单测里的字段集合断言同步更新 ✓）
+
+**实测（car-repair 真实 PDF，端到端）**
+```
+读到 4 条候选（PDF 文字层）：
+   Crystal → in Chair      ｜ She was sitting in a chair .
+   Anthony → in Car        ｜ He was in a car .
+   Brock   → in Oil Slick  ｜ He was on an oil slick.
+   Emilio  → beside Shelf  ｜ He was beside a shelf .
+应用后：Anthony/Crystal/Brock 各自 +1 条关联（Car/Chair/Oil Slick ✓ 正相关 ✓）
+        Emilio 记住原文、关联为 0 ✓
+```
+e2e 新增 5 条断言（注入解析结果 → 面板 → 指定人 → 应用 → 收起 ✓）；
+`MH.panels.setClueCandidates/clueRead/clueApply` 暴露给测试 ✓。
+
+## P3 线索与人物关联（细节记录）
 
 术语澄清（我一开始乱用了"读者" ✗）：这条链路分三步，我按这三步来说 ——
 ```

@@ -31,6 +31,29 @@
       '</div>';
   }
 
+  /** 人物线索候选面板（读到之后逐条核对再应用 ✓） */
+  function cluePanel(st) {
+    const cc = MH.ui.clueCands;
+    if (!cc) return '';
+    const opts = sel => '<option value="">（未指定人）</option>' + st.people.map(x =>
+      '<option value="' + esc(x.id) + '"' + (x.id === sel ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('');
+    const kindText = k => (k === 'in' ? '在' : k === 'beside' ? '在旁边' : k === 'not-beside' ? '不在旁边' : '');
+    return '<div class="clue-panel">' +
+      '<div class="link-title">读到 ' + cc.clues.length + ' 条线索（候选 · ' +
+      (cc.via === 'pdf' ? 'PDF 文字层' : '卡片 OCR') + '）—— 逐条核对，再点应用</div>' +
+      cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
+        '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
+        '<div class="grow"><div>' + esc(c.text) + '</div>' +
+        '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」· ' : '') +
+        kindText(c.kind) + ' <b>' + esc(c.target) + '</b>' +
+        (c.kind !== 'in' ? '（只记录原文，不建关联）' : '') + '</div></div>' +
+        '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
+        '</div>').join('') +
+      '<div class="row"><button class="ghost sm" data-act="clue-apply">应用选中的线索</button>' +
+      '<button class="ghost sm" data-act="clue-cancel">取消</button></div>' +
+      '</div>';
+  }
+
   function personDetail(st, p) {
     const rows = [];
     for (const link of p.links) {
@@ -49,12 +72,14 @@
     collect('item', st.items, '物品');
 
     return '<div class="person-detail">' +
+      (p.clue ? '<p class="hint clue-text" title="从卡片读到的线索原文">📝 ' + esc(p.clue) + '</p>' : '') +
       '<div class="row center"><span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span><b>的相关性</b>' +
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button></div>' +
       (rows.length
         ? '<div class="link-group"><div class="link-title">已关联 ' + rows.length + ' 项</div>' + rows.join('') + '</div>'
         : '<p class="hint">还没有关联。用下面的下拉框选一个区域或物品。</p>') +
+      cluePanel(st) +
       (groups.length
         ? '<label class="field">添加关联 <select id="linkPicker"><option value="">选择区域或物品…</option>' + groups.join('') + '</select></label>'
         : '<p class="hint">' + (st.regions.length + st.items.length ? '所有区域和物品都已关联。' : '还没有区域或物品，先在下面新建。') + '</p>') +
@@ -227,6 +252,9 @@
 
       '<section class="card">' +
       '<h2>人物 <span class="muted">点击选择后可设置关联</span></h2>' +
+      '<button class="ghost block" data-act="clue-read" ' +
+        ' title="从右侧卡片读每个人物的说明（PDF 优先读文字层，最准），解析出&quot;在哪个物品/区域、在不在旁边&quot;，先给候选让你核对，再一键写进人物（在旁边这类线索只记录原文，不建关联）">' +
+        '🔎 读人物线索（从卡片）</button>' +
       '<div class="chips">' +
       st.people.map(p => '<button class="chip' + (sel && p.id === sel.id ? ' active' : '') + '" data-act="select-person" data-id="' + esc(p.id) + '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</button>').join('') +
       '</div>' +
@@ -721,6 +749,129 @@
     MH.ui.lastLegendDebug = { heads: heads.map(h => ({ text: h.text, x: h.x, y: h.y, w: h.w, h: h.h, occupiable: h.occupiable })),
       names: names.map(n => ({ text: n.text, x: n.x, y: n.y, w: n.w })) };
     return { items, headings: heads };
+  }
+
+  /**
+   * 读"人物线索"的原料：带坐标（PDF 还带字体 ✓）的文字块。
+   * 优先 PDF 文字层（100% 准确 ✓）；没有 PDF 就用卡片 OCR（没有字体 ✓ 解析时自动退回模糊匹配 ✓）。
+   * 框了卡片就只取卡片里的文字 ✓（和"卡片定义范围"的原则一致 ✓）。
+   * @returns {{items:Array, via:string}|null}
+   */
+  async function readClueItems() {
+    const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
+    const pins = (Sn && Sn.pins) || [];
+    const isPdf = !!(Sn && Sn.file && /pdf/i.test(Sn.file.type || Sn.file.name || ''));
+    if (isPdf) {
+      await MH.ensurePdfLib();
+      const data = new Uint8Array(await Sn.file.arrayBuffer());
+      const doc = await window.pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
+      try {
+        const page = await doc.getPage(Math.min(Math.max(1, Sn.page || 1), doc.numPages));
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.min(3, Math.max(0.3, 1600 / Math.max(base.width, base.height)));
+        const vp = page.getViewport({ scale });
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const raster = { data: ctx.getImageData(0, 0, cv.width, cv.height).data, width: cv.width, height: cv.height };
+        const rs = cardRectsForPage(raster);
+        const inCard = (x, y) => !rs.length || rs.some(r => x >= r.x - 6 && x <= r.x + r.w + 6 && y >= r.y - 6 && y <= r.y + r.h + 6);
+        const tc = await page.getTextContent();
+        const items = [];
+        for (const it of tc.items) {
+          const str = String(it.str || '').trim();
+          if (!str) continue;
+          const pt = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+          const x = pt[0], y = pt[1] - Math.abs((it.height || 10) * scale);
+          if (!inCard(x + 2, y + 4)) continue;
+          items.push({ text: str, x, y, w: (it.width || 0) * scale || str.length * 6,
+            h: Math.abs(it.height || 0) * scale || 10, font: it.fontName || null });
+        }
+        return { items, via: 'pdf' };
+      } finally { try { doc.destroy(); } catch (err) { /* 忽略 */ } }
+    }
+    if (pins.length) {
+      // 截图来源：用卡片栅格做 OCR（没有字体信息 ✓ → 解析时自动退回按名字匹配 ✓）
+      const raster = await legendCardRaster();
+      if (!raster) return null;
+      const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },
+        { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') });
+      return words && words.length
+        ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr' }
+        : null;
+    }
+    return null;
+  }
+
+  /** 把线索候选算出来（纯计算 + 存进 MH.ui.clueCands ✓） */
+  async function runClueRead() {
+    const C = window.MurdokuClues;
+    if (!C) { MH.toast('线索模块没加载（js/clues.js）', 'error'); return; }
+    const st = MH.store.state;
+    const names = st.regions.map(r => ({ name: r.name, kind: 'region', id: r.id }))
+      .concat(st.items.map(i => ({ name: i.name, kind: 'item', id: i.id })));
+    if (!names.length) { MH.toast('先把物品/区域建出来（或用「从图例自动列出物品」），线索才能对上目标', 'warn'); return; }
+    MH.toast('正在读卡片上的文字…', 'ok');
+    let src;
+    try { src = await readClueItems(); }
+    catch (err) { MH.toast('读不到卡片文字：' + err.message, 'error'); return; }
+    if (!src || !src.items.length) { MH.toast('这张卡片上没有文字（PDF 文字层或截图都试过了）', 'warn'); return; }
+    let out;
+    try { out = C.readItems(src.items, names); }
+    catch (err) { MH.toast('线索解析出错：' + err.message, 'error'); return; }
+    if (!out.clues.length) { MH.toast('没读出线索（卡片里可能没有人物说明，或目标物品还没建）', 'warn'); return; }
+    const clues = setClueCandidates(out, src.via, out.names);
+    MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
+  }
+
+  /** 把"解析结果"变成候选（读卡片那一步的产物 ✓；单独抽出来便于 e2e 注入合成结果 ✓） */
+  function setClueCandidates(out, via, names) {
+    const st = MH.store.state;
+    const key = t => String(t || '').replace(/[^a-z]/gi, '').toLowerCase();
+    const clues = (out.clues || []).map(c => {
+      const hit = c.person ? st.people.find(p => key(p.label) === key(c.person)) : null;
+      const target = c.targetId ? { kind: c.targetKind, id: c.targetId }
+        : (c.targetKind === 'item'
+          ? (st.items.find(i => key(i.name) === key(c.target)) || {})
+          : (st.regions.find(r => key(r.name) === key(c.target)) || {}));
+      return { ...c, personId: hit ? hit.id : '', targetId2: target.id || '', skip: false };
+    });
+    MH.ui.clueCands = { clues, via: via || 'json', names: names || [] };
+    MH.render();
+    return clues.length;
+  }
+
+  /** 把候选应用到人物上：写线索原文 ✓ + 只在"在…里"这类关系上建关联 ✓ */
+  function applyClueCands() {
+    const cc = MH.ui.clueCands;
+    if (!cc) return;
+    const C = window.MurdokuClues;
+    let wrote = 0, linked = 0, skipped = 0;
+    MH.store.commit('应用人物线索', st => {
+      for (const c of cc.clues) {
+        if (c.skip || !c.personId) { skipped++; continue; }
+        const p = Core.person(st, c.personId);
+        if (!p) { skipped++; continue; }
+        p.clue = String(c.text || '').slice(0, 300);
+        wrote++;
+        // 只有"在…里/在…上"这种位置关系才建关联 ✓
+        // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
+        const tid = c.targetId2 || (C && c.targetKind === 'item'
+          ? (st.items.find(i => i.name === c.target) || {}).id
+          : (st.regions.find(r => r.name === c.target) || {}).id);
+        if (c.kind === 'in' && tid) {
+          Core.setLink(st, p.id, c.targetKind, tid, c.polarity === -1 ? -1 : 1);
+          linked++;
+        }
+      }
+    });
+    MH.ui.clueCands = null;
+    MH.render();
+    MH.toast('已应用：' + wrote + ' 人的线索' + (linked ? ' · ' + linked + ' 条关联' : '') +
+      (skipped ? ' · ' + skipped + ' 条跳过（未指定人或被忽略）' : '') +
+      '（"在旁边"这类线索只记录原文，不建关联）', 'ok');
   }
 
   /** 批量 OCR 一批框（失败就返回空串，不抛） */
@@ -2076,6 +2227,14 @@
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
     'legend-auto'() { guard(runLegendAuto)(); },
+    'clue-read'() { guard(runClueRead)(); },
+    'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },
+    'clue-apply'() { applyClueCands(); },
+    'clue-skip'(el) {
+      const cc = MH.ui.clueCands;
+      const i = Number(el.dataset.i);
+      if (cc && cc.clues[i]) { cc.clues[i].skip = !cc.clues[i].skip; MH.render(); }
+    },
     'legend-locate'() {
       if (MH.ui.locating) { MH.ui.locateCancel = true; MH.toast('已请求取消，等这一件找完就停', 'warn'); return; }
       guard(locateLegendItems)();
@@ -2345,6 +2504,10 @@
     }
     if (t.name === 'draftOcc') {
       if (MH.ui.draft) { MH.ui.draft.occupiable = t.value === '1'; MH.render(); }
+    } else if (t.dataset && t.dataset.act === 'clue-map') {
+      const cc = MH.ui.clueCands;
+      const i = Number(t.dataset.i);
+      if (cc && cc.clues[i]) { cc.clues[i].personId = t.value; MH.render(); }
     } else if (t.id === 'linkPicker') {
       const v = t.value;
       t.value = '';
@@ -2573,6 +2736,9 @@
     itemSample(k) { guard(pickItemSample)(k); },
     /** 从图例自动列出物品（也供 e2e 直接调） */
     legendAuto: () => guard(runLegendAuto)(),
+    clueRead: () => guard(runClueRead)(),
+    clueApply: () => applyClueCands(),
+    setClueCandidates: (out, via, names) => setClueCandidates(out, via, names),
     /** 用图例图标逐件到地图上找地点 */
     legendLocate: () => guard(locateLegendItems)(),
   };

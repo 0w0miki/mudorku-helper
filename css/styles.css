@@ -877,3 +877,13 @@ body.picking #board { cursor: crosshair; }
   border-radius: 6px;
   padding: 6px;
 }
+
+/* 人物线索：候选面板与线索原文（P3） */
+.clue-text { margin: 2px 0 6px; }
+.clue-panel { margin: 6px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdff; }
+.clue-row { display: flex; gap: 6px; align-items: flex-start; padding: 6px 0; border-top: 1px dashed var(--line); }
+.clue-row:first-of-type { border-top: 0; }
+.clue-row.skipped { opacity: .45; }
+.clue-row select { max-width: 92px; }
+.clue-row .grow { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.35; word-break: break-word; }
+.clue-row .hint { font-size: 11px; }

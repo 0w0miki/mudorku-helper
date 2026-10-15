@@ -1340,6 +1340,34 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const caps = (lgCaps.names || []).slice().sort().join(',');
   ok(caps === 'CARPET,LAMP,SHELF,TV', '全大写图例也要认出来：' + JSON.stringify(lgCaps.names));
 
+  // 37) 人物线索：候选面板 → 指定人 → 应用（写线索原文 + 只为"在…里"建关联 ✓）
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    C.createItem(st, 'Car', [], true);
+    C.createItem(st, 'Shelf', [], true);
+    st.people[0].label = 'Anthony';
+    st.people[1].label = 'Breck';
+    // 直接注入"解析结果"（读卡片那一步的产物 ✓），覆盖面板与应用逻辑
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'He was in a car .', kind: 'in', polarity: 1, person: 'Anthony', target: 'Car', targetKind: 'item' },
+      { text: 'He was beside a shelf .', kind: 'beside', polarity: 1, person: 'Breck', target: 'Shelf', targetKind: 'item' },
+    ] }, 'json', [{ name: 'Anthony' }, { name: 'Breck' }]);
+  });
+  await p.waitForSelector('.clue-panel .clue-row');
+  const rowsN = await p.locator('.clue-panel .clue-row').count();
+  ok(rowsN === 2, '候选面板列出 2 条线索：' + rowsN);
+  const mapped = await p.evaluate(() => [...document.querySelectorAll('.clue-panel select[data-act="clue-map"]')].map(s => s.value));
+  ok(mapped[0] && mapped[1] && mapped[0] !== mapped[1], '人名自动对应到不同的人：' + JSON.stringify(mapped));
+  await p.click('[data-act="clue-apply"]');
+  const applied = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    return st.people.map(x => ({ l: x.label, clue: x.clue, links: x.links.length }));
+  });
+  const an = applied.find(x => x.l === 'Anthony'), br = applied.find(x => x.l === 'Breck');
+  ok(an && /car/i.test(an.clue) && an.links === 1, 'Anthony 的线索与关联都写上了：' + JSON.stringify(an));
+  ok(br && br.clue && br.links === 0, 'Breck 的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
+  ok(await p.evaluate(() => !window.MH.ui.clueCands), '应用后候选面板收起');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
