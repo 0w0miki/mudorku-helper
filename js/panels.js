@@ -296,7 +296,7 @@
     const Sn = window.MurdokuSnipper;
     const img = Sn && Sn.state && Sn.state.img;
     if (!img || !img.naturalWidth) {
-      MH.toast('右侧还没有导入页面 —— 先在第 1 步导入 PDF 或图片 ✓', 'warn');
+      MH.toast('还没有可用的页面 —— 先在准备阶段导入 PDF/图片当底图 ✓（会自动带到右侧卡片 ✓）', 'warn');
       return;
     }
     const area = document.querySelector('.board-area');
@@ -415,7 +415,7 @@
             '<button class="ghost block" data-act="legend-locate" title="用图例图标当模板，逐件到地图上找格子">' +
             (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>' +
             '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
-          : '<p class="hint">还没有可用的页面 —— 用上面「✂️ 在主界面上框选」，或在右侧卡片面板里导入图片/PDF ✓（两处用的是同一份 ✓）。</p>') +
+          : '<p class="hint">还没有可用的页面 —— 回第 1 步导入底图 ✓（导入的那份会**自动**带到右侧卡片 ✓，不用再导一次 ✓）。</p>') +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
@@ -1728,6 +1728,20 @@
     });
     // PDF 的原始文件留在内存里，方便翻页
     if (res.pages > 1) MH.ui.pdfFile = { file, res };
+    // **同一份文件直接给右侧卡片用** ✓ —— 用户不必再去右边重新导入一次 ✓
+    // （只在右侧还没有文件时自动带过去 ✓；用户已经导过别的（例如线索在另一页）就不动它 ✓）
+    const Sn = window.MurdokuSnipper;
+    if (Sn && Sn.loadFile) {
+      const hasOwn = !!(Sn.state && (Sn.state.file || (Sn.state.pins || []).length));
+      if (!hasOwn) {
+        try {
+          Sn.loadFile(file);
+          MH.toast('右侧卡片也用这份文件了 ✓ 不用再导入一次', 'ok');
+        } catch (err) { void err; }
+      } else {
+        MH.toast('右侧卡片仍是你之前导入的那份（要换的话点它右上角的导入按钮）', 'warn');
+      }
+    }
     if (save && save.ok === false) MH.toast(save.message, 'warn');
     else MH.toast('底图已导入，打开「对齐底图」把它和网格对上', 'ok');
   }

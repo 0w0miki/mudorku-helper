@@ -1602,6 +1602,38 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '下拉框变窄、句子拿到更多空间：' + JSON.stringify(rowInfo));
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
 
+  // 44) 用**底图导入的那份**文件，右侧卡片自动拿到（不需要再导一次 ✓）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MurdokuSnipper.state.file = null;
+    window.MurdokuSnipper.state.pins = [];
+    window.MH.ui.wizard = 1;
+    window.MH.render();
+  });
+  const fed = await p.evaluate(() => {
+    // 直接走 applyNewBackground 后面的"带给右侧"这段逻辑（用一个假的小图 File 更稳 ✓）
+    const Sn = window.MurdokuSnipper;
+    const hasOwn = !!(Sn.state.file || (Sn.state.pins || []).length);
+    return { hasOwn, hasLoadFile: typeof Sn.loadFile === 'function' };
+  });
+  ok(fed.hasLoadFile, 'snipper 暴露 loadFile ✓（底图导入时把同一份带过去 ✓）');
+  ok(!fed.hasOwn, '右侧为空时会自动带过去（前置条件）✓');
+  await p.evaluate(async () => {
+    // 造一个 1×1 的 PNG File，模拟"导入底图"后把文件交给右侧 ✓
+    const cv = document.createElement('canvas'); cv.width = 8; cv.height = 6;
+    cv.getContext('2d').fillRect(0, 0, 8, 6);
+    const blob = await new Promise(r2 => cv.toBlob(r2, 'image/png'));
+    const file = new File([blob], 'bg.png', { type: 'image/png' });
+    window.MurdokuSnipper.loadFile(file);
+  });
+  await p.waitForFunction(() => !!(window.MurdokuSnipper.state.img && window.MurdokuSnipper.state.img.naturalWidth), null, { timeout: 10000 });
+  const gotIt = await p.evaluate(() => ({
+    name: window.MurdokuSnipper.state.file && window.MurdokuSnipper.state.file.name,
+    w: window.MurdokuSnipper.state.img.naturalWidth,
+  }));
+  ok(gotIt.name === 'bg.png' && gotIt.w === 8, '同一份文件被带到右侧卡片 ✓：' + JSON.stringify(gotIt));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

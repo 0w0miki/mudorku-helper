@@ -624,7 +624,7 @@
     return el;
   }
 
-  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, state: S };
+  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, loadFile, state: S };
 
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', mount);
   else mount();
