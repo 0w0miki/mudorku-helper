@@ -1167,11 +1167,9 @@
       ? window.MurdokuClues.mapByInitial(out.clues || [], st.people)
       : (out.clues || []);
     const clues = mapped.map(c => {
-      const target = c.targetId ? { kind: c.targetKind, id: c.targetId }
-        : (c.targetKind === 'item'
-          ? (st.items.find(i => key(i.name) === key(c.target)) || {})
-          : (st.regions.find(r => key(r.name) === key(c.target)) || {}));
-      return { ...c, personId: c.personId || '', targetId2: target.id || '', skip: false };
+      // 识别阶段**只保留名字** ✓：具体关联（人物 / 物品区域）在点"应用"时才解析 ✓
+      // （这样识别之后再新建或改名也能对上 ✓）
+      return { ...c, personId: c.personId || '', skip: false };
     });
     MH.ui.clueCands = { clues, via: via || 'json', names: names || [] };
     MH.render();
@@ -1184,7 +1182,7 @@
   function applyClueCands() {
     const cc = MH.ui.clueCands;
     if (!cc) return;
-    let wrote = 0, linked = 0, skipped = 0;
+    let wrote = 0, linked = 0, skipped = 0, missing = 0;
     MH.store.commit('应用人物线索', st => {
       for (const c of cc.clues) {
         if (c.skip || !c.personId) { skipped++; continue; }
@@ -1196,11 +1194,14 @@
           // 只有"在…里/在…上"这种位置关系才建关联 ✓
           // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
           if (l.kind !== 'in') continue;
-          const tid = l.targetId || (l.targetKind === 'item'
-            ? (st.items.find(i => i.name === l.target) || {}).id
-            : (st.regions.find(r => r.name === l.target) || {}).id);
-          if (!tid) continue;
-          Core.setLink(st, p.id, l.targetKind, tid, l.polarity === -1 ? -1 : 1);
+          // **在这里（点应用时）才按名字查目标** ✓ —— 识别阶段只留名字 ✓
+          // 好处：识别之后你又新建/改名了物品或区域，也能对上 ✓（用识别那一刻的 id 会失效 ✗）
+          const t = Core.findEntityByName
+            ? Core.findEntityByName(st, l.target)
+            : ((st.items || []).find(i => i.name === l.target) || (st.regions || []).find(r => r.name === l.target));
+          if (!t) { missing++; continue; }
+          const kind = (st.regions || []).some(r => r.id === t.id) ? 'region' : 'item';
+          Core.setLink(st, p.id, l.targetKind || kind, t.id, l.polarity === -1 ? -1 : 1);
           linked++;
         }
       }
@@ -1208,6 +1209,7 @@
     MH.ui.clueCands = null;
     MH.render();
     MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
+      (missing ? ' · ' + missing + ' 条关联没找到对应物品/区域（可能名字变了，先建好再应用 ✓）' : '') +
       (skipped ? ' · ' + skipped + ' 段跳过（未指定人或被忽略）' : '') +
       '（"在旁边"这类只记录原文，不建关联 ✓）', 'ok');
   }
@@ -2775,10 +2777,26 @@
     import() { if (MH.els.fileInput) MH.els.fileInput.click(); },
     'reset-all'() {
       const st = MH.store.state;
-      if (!confirm('重置整张地图（区域、物品、关联、标记全部清空）？')) return;
+      if (!confirm('重置整张地图（区域、物品、关联、标记全部清空），并清掉右侧卡片与导入的 PDF/图片？')) return;
       MH.ui.draft = null;
+      MH.ui.aligning = false;
+      MH.ui.hoverRegionId = MH.ui.hoverItemId = MH.ui.hoverPersonId = null;
+      // 框选层开着的话也收掉 ✓（注意别走 closeBoardCrop ✗ —— 那会自动触发识别 ✓）
+      const layer = document.getElementById('boardCrop');
+      if (layer) layer.remove();
+      MH.ui.crop = null;
+      // **右侧卡片 + 导入的 PDF/图片一起清掉** ✓（用户要求 ✓）
+      const Sn = window.MurdokuSnipper;
+      if (Sn && Sn.clearAll) {
+        try { Sn.clearAll(); } catch (err) { void err; }
+      }
+      MH.bgPdfFile = null;
+      MH.ui.pdfFile = null;
+      MH.ui.legendItems = null;
+      MH.ui.lastLegend = null;
+      MH.ui.clueCands = null;
       MH.store.replace(Core.createState(st.rows, st.cols), '重置地图');
-      MH.toast('已重置', 'ok');
+      MH.toast('已重置：地图 + 右侧卡片 + 导入的页面 ✓', 'ok');
     },
     help() { MH.openModal('helpModal'); },
     'close-modal'(el) { MH.closeModal(el.dataset.modal); },

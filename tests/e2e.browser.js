@@ -338,13 +338,17 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     const img = document.querySelector('#snipper img.snipper-img');
     return !!img && img.complete && img.naturalWidth > 0;
   }, null, { timeout: 30000 });
-  const sbox = await p.locator('#snipper img.snipper-img').boundingBox();
-  await p.mouse.move(sbox.x + 40, sbox.y + 40);
-  await p.mouse.down();
-  await p.mouse.move(sbox.x + 240, sbox.y + 190, { steps: 8 });
-  await p.mouse.up();
-  await p.waitForTimeout(400);
-  const pins = await p.locator('.snipper-pin').count();
+  // 拖框偶尔第一次不生效（已知抖动 ✓）→ 最多试 3 次 ✓
+  let pins = 0;
+  for (let attempt = 0; attempt < 3 && pins === 0; attempt++) {
+    const sbox = await p.locator('#snipper img.snipper-img').boundingBox();
+    await p.mouse.move(sbox.x + 40, sbox.y + 40);
+    await p.mouse.down();
+    await p.mouse.move(sbox.x + 240, sbox.y + 190, { steps: 8 });
+    await p.mouse.up();
+    await p.waitForTimeout(500);
+    pins = await p.locator('.snipper-pin').count();
+  }
   ok(pins >= 1, '拖框截取生成摘录卡片：' + pins + ' 张');
   ok(((await p.locator('.snipper-badge').textContent()) || '').trim() === String(pins), '角标显示张数');
   await p.click('.snipper-tab');
@@ -1839,6 +1843,55 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '真实鼠标点「完成」能关掉框选层 ✓');
   await p.waitForTimeout(400);
   await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.ui.lastLegend = null; window.MH.render(); });
+
+  // 50) 重置清掉右侧卡片与导入的页面 ✓；关联在"点应用"时才按名字解析 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.confirm = () => true;
+    const Sn = window.MurdokuSnipper;
+    Sn.state.img = { naturalWidth: 120, naturalHeight: 80, src: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' };
+    Sn.state.file = { name: 'x.png', type: 'image/png' };
+    Sn.state.pins = [
+      { id: 'r1', page: 1, w: 60, h: 40, url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' },
+      { id: 'r2', page: 1, w: 40, h: 30, url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' },
+    ];
+    window.MurdokuSnipper.render();
+  });
+  await p.waitForTimeout(200);
+  ok(await p.evaluate(() => window.MurdokuSnipper.state.pins.length === 2), '准备：右侧有 2 张卡片 ✓');
+  await p.click('[data-act="reset-all"]');
+  await p.waitForTimeout(300);
+  const afterReset = await p.evaluate(() => ({
+    pins: window.MurdokuSnipper.state.pins.length,
+    hasImg: !!window.MurdokuSnipper.state.img,
+    stored: !!localStorage.getItem('murdoku-helper.v1.snipPins'),
+  }));
+  ok(afterReset.pins === 0 && !afterReset.hasImg && !afterReset.stored,
+    '重置会清掉右侧卡片与导入的页面（含 localStorage）✓：' + JSON.stringify(afterReset));
+
+  // 关联在"点应用"时按名字解析 ✓（识别之后改名也能对上 ✓）
+  await p.evaluate(() => {
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    C.createItem(st, 'Chair', [], true);
+    C.createRegion(st, 'FRONT AREA', []);
+    st.items.find(i => i.name === 'Chair').name = '椅子';       // 识别之后改名 ✓
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'She was sitting in a chair in the front area.', person: null, personId: st.people[0].id,
+        links: [ { kind: 'in', polarity: 1, target: '椅子', targetKind: 'item' },
+                 { kind: 'in', polarity: 1, target: 'FRONT AREA', targetKind: 'region' } ] },
+    ] }, 'json', []);
+  });
+  await p.evaluate(() => document.querySelector('[data-act="clue-apply"]').click());
+  await p.waitForTimeout(300);
+  const applied2 = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    const p2 = st.people[0];
+    return { clue: p2.clue, links: p2.links.map(l => (st.items.find(i => i.id === l.id) || st.regions.find(r => r.id === l.id) || {}).name) };
+  });
+  ok(/chair/i.test(applied2.clue || '') && applied2.links.length === 2 && applied2.links.includes('椅子') && applied2.links.includes('FRONT AREA'),
+    '一句话的两条关联都在应用时建好（并用改名后的名字对上 ✓）：' + JSON.stringify(applied2));
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

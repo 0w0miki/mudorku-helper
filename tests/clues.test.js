@@ -251,14 +251,17 @@ test('只有署名的块不认 ✗', () => {
   assert.match(r.reason, /署名|说明/);
 });
 
-test('剧情/规则文字不认 ✗（这一版的 "Someone drew a mean caricature…" 就不是线索）', () => {
+test('剧情/规则文字不产生可用线索 ✓（这一版的 "Someone drew a mean caricature…" 不是线索）', () => {
   for (const t of [
     'Someone drew a mean caricature of the teacher on the chalkboard!',
     'I would’ve made the',
     'Oh rest assured, there will be extra homework for someone.',
     'clue: Crystal is the only person who can be with Anabella.',
   ]) {
-    assert.equal(C.parse(t, [{ name: 'Chair', kind: 'item' }]).kind, 'none', '不该认：' + t);
+    const r = C.parse(t, [{ name: 'Chair', kind: 'item' }]);
+    // 这些句子**没有可用的目标** ✓ —— 所以不会建任何关联 ✓（整句仍会被记录 ✓，见下一条 ✓）
+    assert.ok(!r.target, '不该给出目标：' + t + ' → ' + JSON.stringify(r.target));
+    assert.equal(C.clauseLinks(t, [{ name: 'Chair', kind: 'item' }]).length, 0, '不该产生关联：' + t);
   }
 });
 
@@ -378,4 +381,38 @@ test('golf 那类句式：occupy / within 也算"在…里" ✓', () => {
   assert.equal(C.parse('She occupied the flag in an even-numbered hole.', names).target.name, 'flag');
   assert.equal(C.parse('He was the only man to occupy a golf tee.', names).target.name, 'tee');
   assert.equal(C.parse('She was within a sand pit.', names).target.name, 'sand pit');
+});
+
+test('一句话里的**多个目标**都要出关联 ✓（以前只出一条 ✗）', () => {
+  const names = [{ name: 'Chair', kind: 'item' }, { name: 'FRONT AREA', kind: 'region' }];
+  const one = C.clauseLinks('She was sitting in a chair in the front area.', names);
+  assert.equal(one.length, 2, JSON.stringify(one.map(x => x.kind + '→' + x.target)));
+  assert.deepEqual(one.map(x => x.target), ['Chair', 'FRONT AREA'], '按出现顺序 ✓');
+  assert.ok(one.every(x => x.kind === 'in' && x.polarity === 1));
+
+  const two = C.extract([{ text: 'She was sitting in a chair in the front area.', x: 0, y: 100, h: 12, w: 300 }], names);
+  assert.equal(two.clues.length, 1, '一个气泡 = 一段 ✓');
+  assert.equal(two.clues[0].links.length, 2, '段内两条关联 ✓');
+
+  // 两句各有自己的关联，且否定只作用在自己那句上 ✓
+  const desk = [{ name: 'Desk', kind: 'item' }, { name: 'Chair', kind: 'item' }];
+  const three = C.extract([{ text: 'He was beside a desk. He was not sitting in a chair.', x: 0, y: 200, h: 12, w: 300 }], desk);
+  assert.equal(three.clues[0].links.length, 2);
+  assert.equal(three.clues[0].links[0].target, 'Desk');
+  assert.equal(three.clues[0].links[0].polarity, 1);
+  assert.equal(three.clues[0].links[1].target, 'Chair');
+  assert.equal(three.clues[0].links[1].polarity, -1);
+});
+
+test('已经指定过人物的候选不会被"位置推定"改派 ✓', () => {
+  const people = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }];
+  const got = C.mapByInitial([
+    { text: '手动指定给 B', person: null, personId: 'p2', links: [] },
+    { text: '没指定 → 应该给 A', person: null, links: [] },
+  ], people);
+  assert.equal(got[0].personId, 'p2', '指定的不能被改 ✗');
+  assert.equal(got[1].personId, 'p1', '剩下的按位置补 ✓');
+  // 指向不存在的人 → 视为未指定 ✓
+  const gone = C.mapByInitial([{ text: 'x', personId: 'nope', links: [] }], people);
+  assert.equal(gone[0].personId, 'p1', '指向不存在的人时，按位置补 ✓');
 });

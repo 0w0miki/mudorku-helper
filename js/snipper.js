@@ -434,6 +434,22 @@
     return pin;
   }
 
+  /**
+   * 清空右侧卡片与当前导入的页面 ✓（"重置"时用 ✓ —— 用户要求 ✓）
+   * 卡片存在单独的 localStorage key 里 ✓，所以这里要显式删掉 ✓
+   */
+  function clearAll(opts) {
+    const o = opts || {};
+    S.pins = [];
+    if (o.file !== false) { S.file = null; S.img = null; S.pages = 1; S.page = 1; S.doc = null; }
+    try { root.localStorage.removeItem(PINS_KEY); } catch (e) { /* 隐私模式忽略 ✓ */ }
+    savePins();
+    S.collapsed = true;
+    saveUi();
+    render();
+    refresh();
+  }
+
   function removePin(id) {
     S.pins = S.pins.filter(p => p.id !== id);
     savePins();
@@ -624,7 +640,7 @@
     return el;
   }
 
-  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, loadFile, state: S };
+  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, loadFile, clearAll, state: S };
 
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', mount);
   else mount();

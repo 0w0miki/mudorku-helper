@@ -35,6 +35,12 @@
     { re: /\b(?:are|is|was|were)\s+within\b/i, kind: 'in' },
     { re: /\bwithin\b/i, kind: 'in' },
     { re: /\b(?:are|is|was|were)\s+inside\b/i, kind: 'in' },
+    // **裸介词兜底** ✓：一句话里第二个地点常常没有动词短语
+    // （"…in a chair **in the front area**" ✗ → 只靠动词短语会漏掉后半句 ✓）
+    // 这些放在最后 ✓：具体句式先匹配 ✓，同一条关联按 (kind,目标) 去重 ✓
+    { re: /\b(?:beside|next to|near)\b/i, kind: 'beside' },
+    { re: /\b(?:inside|within|in)\b/i, kind: 'in' },
+    { re: /\b(?:on|at|under|above|below)\b/i, kind: 'in' },
     { re: /\bin\s+(?:the\s+)?(?:top|bottom|first|second|third|fourth|fifth|last)\s+(?:row|column)\b/i, kind: 'in' },
   ];
 
@@ -203,6 +209,7 @@
         (Math.abs(a.at - relEnd) - Math.abs(b.at - relEnd)) || (b.len - a.len));
       target = { name: near[0].name, kind: near[0].kind, id: near[0].id };
     }
+    // 有关系但没匹配到目标：**保留 kind** ✓（调用方据此提示"先补物品" ✓），但不给 target ✓
     if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
     out.kind = kind;
     out.text = body;                       // 线索原文按"去掉署名"的版本返回 ✓
@@ -521,6 +528,56 @@
   }
 
   /**
+   * 一句里可能提到**多个**目标 ✓：每个关系词配它后面最近的那个名字 ✓
+   * 例："She was sitting in a chair in the front area." → `in Chair` + `in FRONT AREA` ✓（以前只出一条 ✗）
+   *     "He was beside a desk. He was not sitting in a chair." → 两句各一条 ✓
+   * @returns {Array<{kind,polarity,target,targetKind,targetId,bold,at}>}
+   */
+  function clauseLinks(clause, names, opts) {
+    const opt = opts || {};
+    let body = norm(clause);
+    if (!body) return [];
+    const cut = body.search(CREDIT);
+    if (cut >= 0) body = body.slice(0, cut).trim();
+    if (!body || letters(body).length < 4) return [];
+    for (const bad of NOT_CLUE) if (bad.test(body)) return [];
+    if (!SUBJECT.test(body)) return [];
+    if (/\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body)) return [];
+    const neg = /\b(?:not|never|n't)\b/i.test(body);
+    // 所有关系词的结束位置（按出现顺序 ✓）
+    const rels = [];
+    for (const r of REL_WORDS) {
+      const re = new RegExp(r.re.source, r.re.flags.includes('g') ? r.re.flags : r.re.flags + 'g');
+      let m;
+      while ((m = re.exec(body))) {
+        rels.push({ kind: r.kind, end: m.index + m[0].length, at: m.index });
+        if (m.index === re.lastIndex) re.lastIndex++;
+      }
+    }
+    rels.sort((a, b) => a.at - b.at);
+    const namesRef = findTargets(body, names);
+    if (!rels.length || !namesRef.length) return [];
+    const used = new Set();
+    const out = [];
+    for (const r of rels) {
+      // 该关系词后面最近、且还没被用掉的名字 ✓
+      const after = namesRef
+        .map((n, i) => ({ n, i, d: n.at - r.end }))
+        .filter(x => x.d >= -2 && !used.has(x.i))
+        .sort((a, b) => (Math.abs(a.d) - Math.abs(b.d)) || (b.n.len - a.n.len));
+      if (!after.length) continue;
+      const pick = after[0];
+      used.add(pick.i);
+      out.push({
+        kind: r.kind, polarity: (r.kind === 'not-beside' || neg) ? -1 : 1,
+        target: pick.n.name, targetKind: pick.n.kind, targetId: pick.n.id,
+        bold: null, at: pick.n.at, text: body,
+      });
+    }
+    return out;
+  }
+
+  /**
    * 端到端（纯部分）：给定文字行 + 名称清单 → **按"气泡"分组**的线索候选 ✓
    * 一个气泡 = 一个人的整段话 ✓ → 一行候选 ✓（内容整句记下来 ✓，里面能解析出的关联单独列出 ✓）
    * 为什么按气泡而不是按句子：用户要"整句都记录下来，不管有没有发现物品/区域的关联" ✓
@@ -550,11 +607,15 @@
       for (const cl of clauses) {
         const key = norm(cl).replace(/\s+/g, ' ').toLowerCase();
         const gs = groupsAll.filter(g => key.includes(norm(g.text).toLowerCase()));
-        const p2 = parse(cl, names, { groups: gs.length ? gs : groupsAll });
-        if (p2.kind === 'none' || !p2.target) continue;
-        if (links.some(x => x.target === p2.target.name && x.kind === p2.kind && x.polarity === p2.polarity)) continue;
-        links.push({ kind: p2.kind, polarity: p2.polarity, bold: p2.bold,
-          target: p2.target.name, targetKind: p2.target.kind, targetId: p2.target.id, text: p2.text });
+        // **一句里可能有多条关联** ✓（"…in a chair in the front area." → Chair + FRONT AREA ✓）
+        const got = clauseLinks(cl, names, { groups: gs.length ? gs : groupsAll });
+        for (const l of got) {
+          // 先试加粗/字体组（PDF 里最准 ✓），否则用正文里就近的那个 ✓
+          const g2 = (gs.length ? gs : groupsAll).map(g => findTarget(g.text, names)).find(Boolean);
+          if (g2 && (g2.name === l.target || gs.length)) { l.bold = (gs.length ? gs[0].text : null); }
+          if (links.some(x => x.target === l.target && x.kind === l.kind)) continue;
+          links.push(l);
+        }
       }
       // 人名块（很短、没有陈述）→ 只作为"归属用的名字" ✓
       if (!links.length && looksLikePersonName(b.text) && !looksLikeClueStatement(b.text)) {
@@ -602,8 +663,12 @@
     const used = new Set();
     const byLabel = new Map();
     for (const p of (people || [])) byLabel.set(String(p.label || '').toUpperCase(), p);
+    // **已经指定过人物的候选先占位** ✓ —— 不要被后面的"位置推定"改派 ✗
+    // （外部注入的候选、或用户手动指定的 ✓ 都靠这条保住 ✓）
+    const known = new Set((people || []).map(p => p.id));
+    const out = (clues || []).map(c => Object.assign({}, c, { personId: (c.personId && known.has(c.personId)) ? c.personId : '' }));
+    for (const c of out) if (c.personId) used.add(c.personId);
     // ① 编号同名先占位 ✓
-    const out = (clues || []).map(c => Object.assign({ personId: '' }, c, { personId: '' }));
     for (const c of out) {
       if (!c.person) continue;
       const p = byLabel.get(norm(c.person).toUpperCase());
@@ -650,7 +715,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, clauseLinks, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

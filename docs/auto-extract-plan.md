@@ -1689,6 +1689,38 @@ zLayer 70 > zSnip 60 ✓
 **真实鼠标点击成功** ✓ → 框选层关闭 ✓
 ```
 e2e 新增 4 条断言 ✓（让位 ✓、层级 ✓、命中 ✓、真实点击 ✓）
+
+**三处修改（2026-10-16，用户三点）✓**
+
+1. **重置要清掉右侧卡片与导入的 PDF/图片** ✓
+   `reset-all` 里调用新增的 `Sn.clearAll()` ✓（清 `pins`/`file`/`img` + 删掉卡片的
+   localStorage key ✓ + 收起浮窗 ✓）；顺带清掉 `bgPdfFile`/`pdfFile`/`legendItems`/
+   `lastLegend`/`clueCands` 与框选层 ✓。确认框也改成说清会清什么 ✓
+   实测：重置前 卡片1/有页面/有存储 → 重置后 0 / 无 / 无 ✓
+2. **关联改到"点应用时"才解析** ✓（识别阶段只保留名字 ✓）
+   · `setClueCandidates` 不再预解析 targetId ✓
+   · `applyClueCands` 时**按名字现查**物品/区域 ✓（识别之后新建/改名也能对上 ✓）
+   · 查不到的会单独计数并在提示里说明 ✓
+   实测：识别后把 Chair 改名成"椅子" → 应用时关联仍然建上 ✓（links: ["椅子"] ✓）
+3. **一句话里的多个关联** ✗→✓（真 bug ✓）
+   根因两层：
+   · `parse` 只取"离关系词最近的一个目标" ✗ → 新增 `clauseLinks()` ✓：
+     一句里**每个关系词配它后面最近的、还没用过的名字** ✓，可产出多条 ✓
+   · 关系词表原来只有**动词短语**（`was sitting in` ✓）✗ → "…in a chair **in the front area**"
+     第二个 `in` 前面没有动词短语 ✓ 就漏了 ✓ → 补一组**裸介词兜底** ✓（`in/on/at/beside/within/…` ✓），
+     同一条关联按 (kind, 目标) 去重 ✓
+   实测：
+   ```
+   "She was sitting in a chair in the front area."          → in→Chair + in→FRONT AREA ✓
+   "She was in the back area, with someone sitting in a chair." → in→BACK AREA + in→Chair ✓
+   "He was beside a desk. He was not sitting in a chair."    → beside→Desk + in→Chair(−) ✓
+   ```
+
+**顺带修**：`mapByInitial` 原来会**无条件清掉**候选里已带的 `personId` ✗ →
+外部注入的候选（或用户手动指定的）会被"位置推定"改派给别人 ✓；
+现在已指定且存在的人先占位 ✓（实测关联因此落到了正确的人身上 ✓）。
+
+**测试加固**：snipper 那条"拖框截取"的老断言有时第一次不生效 ✓（历史抖动 ✓）→ 最多重试 3 次 ✓
 ## P3 线索与人物关联（①②③ 已完成 ✓）
 
 **③ 应用：已接线 ✓**（2026-10-15）
