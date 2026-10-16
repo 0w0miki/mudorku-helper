@@ -443,6 +443,9 @@
           : '<p class="hint">还没有底图 —— 回上一步导入。</p>') +
         (!d ? '<button class="ghost block" data-act="new-region">＋ 手动新建区域</button>' : '') +
         (st.regions.length ? '<div class="link-title">已识别 ' + st.regions.length + ' 个区域</div>' : '<p class="hint">还没有区域。</p>') +
+        // **草稿编辑界面** ✓ —— 普通面板里有 ✓，引导分支漏了 ✗：
+        // 以前点了"手动新建区域"只会让按钮消失 ✓，编辑界面却不出现 ✓
+        (d && d.kind === 'region' ? draftHTML(st, d) : '') +
         '</section>');
       body.push('<ul class="list">' + entityList('region', st) + '</ul>');
     } else if (step === 3) {
@@ -460,6 +463,7 @@
             '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
           : '<p class="hint">还没有可用的页面 —— 回第 1 步导入底图 ✓（导入的那份会<b>自动</b>带到右侧卡片 ✓，不用再导一次 ✓）。</p>') +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
+        (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +   // 编辑界面 ✓（同上 ✓）
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
     } else {

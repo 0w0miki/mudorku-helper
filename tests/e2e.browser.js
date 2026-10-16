@@ -1950,6 +1950,34 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(nanPin.made === 0 && nanPin.added === 0, '坐标异常时不生成卡片（不再产生 NaN 卡片）✓：' + JSON.stringify(nanPin));
   await p.evaluate(() => { window.MurdokuSnipper.state.pins = []; window.MurdokuSnipper.render(); });
 
+  // 53) 引导第 2/3 步点"手动新建"必须出现编辑界面 ✓（以前按钮消失、界面不出现 ✗）
+  for (const [stepNo, act] of [[2, 'new-region'], [3, 'new-item']]) {
+    await p.evaluate((st) => {
+      const tab = document.getElementById('tabPrep');
+      if (tab) tab.click();
+      window.MH.ui.draft = null;
+      window.MH.ui.wizard = st;
+      window.MH.render();
+    }, stepNo);
+    await p.evaluate((a) => document.querySelector('[data-act="' + a + '"]').click(), act);
+    await p.waitForTimeout(150);
+    const st2 = await p.evaluate(() => ({
+      draft: !!document.querySelector('#sidebar .draft'),
+      save: !!document.querySelector('[data-act="draft-save"]'),
+      cancel: !!document.querySelector('[data-act="draft-cancel"]'),
+      kind: window.MH.ui.draft && window.MH.ui.draft.kind,
+      wizard: window.MH.ui.wizard,
+    }));
+    ok(st2.draft && st2.save && st2.cancel && st2.kind && st2.wizard === stepNo,
+      '引导第 ' + stepNo + ' 步：手动新建后出现编辑界面（' + act + '）✓：' + JSON.stringify(st2));
+    await p.evaluate(() => { window.MH.ui.draft = null; window.MH.ui.wizard = 2; window.MH.render(); });
+  }
+  // 取消后按钮应回来 ✓
+  await p.evaluate(() => { window.MH.ui.draft = null; window.MH.ui.wizard = 2; window.MH.render(); });
+  const backBtn = await p.evaluate(() => !!document.querySelector('[data-act="new-region"]'));
+  ok(backBtn, '取消草稿后「手动新建区域」按钮回来 ✓');
+  await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
