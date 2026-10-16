@@ -622,7 +622,11 @@
   }
 
   /** 游玩时显示"当前选中人物"的线索 ✓（用户要求：点到人物就显示对应线索 ✓） */
-  function playClueCard(st, sel) {
+  /**
+   * 当前选中人物的线索块 ✓ —— **直接放在「人物」面板里** ✓（用户要求 ✓，不再单开一张卡片 ✗）
+   * 内容：线索原文（整句 ✓）+ 已建关联的正/负标签 ✓；没有线索时给一句引导 ✓
+   */
+  function playClueBlock(st, sel) {
     if (!sel) return '';
     const links = (sel.links || []).map(l => {
       const t = l.kind === 'region' ? Core.region(st, l.id) : Core.item(st, l.id);
@@ -631,14 +635,13 @@
       return '<span class="tag ' + (neg ? 'neg' : 'pos') + '">' + (l.kind === 'region' ? '区域 ' : '') +
         esc(t.name) + (neg ? ' −' : ' +') + '</span>';
     }).filter(Boolean).join(' ');
-    return '<section class="card play-clue">' +
-      '<h2>线索 <span class="muted">「' + esc(sel.label) + '」</span></h2>' +
+    return '<div class="play-clue">' +
       (sel.clue
         ? '<p class="clue-text">' + esc(sel.clue) + '</p>'
-        : '<p class="hint">这个人的线索还是空的 —— 在「① 地图准备」里可以手打/粘贴，' +
-          '也可以用卡片上的「读人物线索」自动读 ✓</p>') +
+        : '<p class="hint">这个人的线索还是空的 —— 在「① 地图准备 → 添加人物线索」里可以手打/粘贴，' +
+          '也可以框选线索卡片让它自动读 ✓</p>') +
       (links ? '<div class="chips">' + links + '</div>' : '') +
-      '</section>';
+      '</div>';
   }
 
   function playHTML(st) {
@@ -646,8 +649,7 @@
     const placedCount = st.people.filter(p => st.play.placed[p.id]).length;
     const issues = st.settings.liveValidate ? Core.validate(st) : [];
     return '' +
-      // 点到谁就显示谁的线索 ✓（放在最上面 —— 游玩时这就是最常看的信息 ✓）
-      playClueCard(st, sel) +
+      // 线索不单开卡片 ✓ —— 直接挂在「人物」面板里选中的人下面 ✓（见 pnow ✓）
       '<section class="card">' +
       '<h2>人物 <span class="muted">' + placedCount + '/' + st.people.length + ' 已确定</span></h2>' +
       // 人多时一行一个太长了（24 人 ≈ 700px 以上），改成紧凑网格：
@@ -670,11 +672,15 @@
       // 只给当前人物显示详情与操作，避免每人两个按钮把列表撑成两倍高
       '<div class="pnow">' +
       (sel
-        ? '<span class="chip sm" style="--pc:' + esc(sel.color) + '">' + esc(sel.label) + '</span>' +
-          '<span class="muted">' + esc(stateOf(st, sel)) + '</span>' +
-          '<span class="grow"></span>' +
-          (st.play.placed[sel.id] ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(sel.id) + '">取消确定</button>' : '') +
-          '<button class="ghost sm" data-act="clear-person" data-id="' + esc(sel.id) + '">清除标记</button>'
+        ? '<div class="pnow-row">' +
+            '<span class="chip sm" style="--pc:' + esc(sel.color) + '">' + esc(sel.label) + '</span>' +
+            '<span class="muted">' + esc(stateOf(st, sel)) + '</span>' +
+            '<span class="grow"></span>' +
+            (st.play.placed[sel.id] ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(sel.id) + '">取消确定</button>' : '') +
+            '<button class="ghost sm" data-act="clear-person" data-id="' + esc(sel.id) + '">清除标记</button>' +
+          '</div>' +
+          // **线索就放在这里** ✓（人物面板内 ✓）
+          playClueBlock(st, sel)
         : '<span class="muted">还没有人物</span>') +
       '</div>' +
       (sel ? playPersonLinks(st, sel) : '') +

@@ -1680,11 +1680,18 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     document.querySelector('.plist li[data-id="' + st.people[1].id + '"]').click();
   });
   const playClue2 = await p.evaluate(() => {
+    // 线索现在挂在「人物」面板里 ✓ → 人物编号取 .pnow-row 里的 chip ✓（以前在 .play-clue 里 ✗）
     const c = document.querySelector('.play-clue');
-    return { who: (c.querySelector('.muted') || {}).textContent, text: (c.querySelector('.clue-text') || {}).textContent };
+    const row = document.querySelector('.pnow-row');
+    return {
+      who: (row && row.querySelector('.chip') || {}).textContent,
+      text: c ? (c.querySelector('.clue-text') || {}).textContent : null,
+      insidePersonCard: !!c && !!c.closest('.card') &&
+        /人物/.test(((c.closest('.card').querySelector('h2') || {}).textContent || '')),
+    };
   });
-  ok(/B/.test(playClue2.who || '') && /chair/i.test(playClue2.text || ''),
-    '换一个人物，线索跟着换 ✓：' + JSON.stringify(playClue2));
+  ok(/B/.test(playClue2.who || '') && /chair/i.test(playClue2.text || '') && playClue2.insidePersonCard,
+    '换一个人物，线索跟着换（且就在「人物」面板里 ✓）：' + JSON.stringify(playClue2));
   await p.evaluate(() => {
     const st = window.MH.store.state;
     document.querySelector('.plist li[data-id="' + st.people[2].id + '"]').click();
