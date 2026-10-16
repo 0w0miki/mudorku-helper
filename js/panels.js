@@ -308,8 +308,8 @@
     layer.className = 'board-crop';
     layer.innerHTML =
       '<div class="bc-head"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
-      '<span class="muted">在这个页面上拖一个框 → 自动变成右侧卡片 ✓（可以连着框好几张，' +
-      '识别时会把几张**拼在一起一起用** ✓）</span>' +
+      '<span class="muted">拖一个框 → 变右侧卡片 ✓（可连框多张，识别时拼在一起一起用 ✓）；' +
+      '点「完成」就**自动接着识别**' + (kind === 'item' ? '物品并找位置 ✓' : '人物线索 ✓') + '</span>' +
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="crop-close">完成</button></div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
@@ -318,7 +318,7 @@
     const im = layer.querySelector('.bc-img');
     const sel = layer.querySelector('.bc-sel');
     im.src = img.src || img.toDataURL && img.toDataURL('image/png') || '';
-    MH.ui.crop = { kind, layer };
+    MH.ui.crop = { kind, layer, added: 0 };
 
     const drag = { on: false, x0: 0, y0: 0 };
     const pt = (e) => {
@@ -357,15 +357,44 @@
       const shown = im.getBoundingClientRect().width || box.w;
       const k = img.naturalWidth / shown;
       Sn.addPinFromSource(box.x * k, box.y * k, box.w * k, box.h * k);
+      if (MH.ui.crop) MH.ui.crop.added = (MH.ui.crop.added || 0) + 1;
       MH.toast('已截取一张卡片 ✓ 看右侧卡片列表（' + (kind === 'item' ? '物品图标' : '人物线索') + '）', 'ok');
     });
     MH.toast('在棋盘区拖框截取 ✓ 截到的会出现在右侧卡片列表 ✓', 'ok');
   }
 
+  /**
+   * 框选完成后**自动接着识别** ✓（用户要求）：
+   * · 物品步：先"从图例列出物品" ✓，再"自动找地点" ✓
+   * · 人物步：直接"读人物线索" ✓
+   */
+  async function afterCropDone(kind, added) {
+    if (!added) { MH.toast('这次没有框到东西 —— 拖一个框再点「完成」 ✓', 'warn'); return; }
+    if (kind === 'item') {
+      MH.toast('开始按图例识别物品…（识别完会自动找位置 ✓）', 'ok');
+      try { await runLegendAuto(); }
+      catch (err) { MH.toast('识别出错：' + (err && err.message ? err.message : err), 'error'); return; }
+      const usable = (MH.ui.legendItems || []).filter(x => x.patch && x.mask).length;
+      if (!usable) {
+        MH.toast('没有可用的图标模板，先跳过"自动找地点" —— 可以用每件物品的「按样例添加」手动补 ✓', 'warn');
+        return;
+      }
+      try { await locateLegendItems(); }
+      catch (err) { MH.toast('找位置出错：' + (err && err.message ? err.message : err), 'error'); }
+    } else if (kind === 'person') {
+      try { await runClueRead(); }
+      catch (err) { MH.toast('读线索出错：' + (err && err.message ? err.message : err), 'error'); }
+    }
+  }
+
   function closeBoardCrop() {
+    const crop = MH.ui.crop;
+    const kind = crop && crop.kind;
+    const added = (crop && crop.added) || 0;
     const layer = document.getElementById('boardCrop');
     if (layer) layer.remove();
     MH.ui.crop = null;
+    if (kind) afterCropDone(kind, added);       // 不 await ✓（内部自己 try/catch ✓）
   }
 
   function wizardHTML(st) {
@@ -2547,6 +2576,12 @@
       // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
       //    同时要**记下这次对齐** ✓，否则第 2 步"自动识别区域"会报"底图未对齐" ✗（实测踩过）
       if (v !== 1) exitAligning();
+      // ② 离开区域识别步（第 2 步）时**收掉区域编辑态** ✓ —— 否则下一步还在刷格子的模式里 ✗
+      //    （和离开第 1 步退出"对齐底图"是同一类问题 ✓）
+      if (v !== 2 && MH.ui.draft) {
+        MH.ui.draft = null;
+        MH.toast('已退出区域编辑（没保存的草稿已放弃 ✓）', 'warn');
+      }
       MH.ui.wizard = leaving ? null : v;
       if (leaving) {
         // ② 最后一步完成时：如果框过地图外框，就**自动按网格裁切底图** ✓（引导里不放这个按钮 ✓）

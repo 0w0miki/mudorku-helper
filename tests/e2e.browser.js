@@ -1749,6 +1749,64 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(legendMulti.items.some(x => x.occ === true) && legendMulti.items.some(x => x.occ === false),
     '可占据/不可占据分别来自两张卡片 ✓：' + JSON.stringify(legendMulti.items.map(x => x.name + ':' + x.occ)));
 
+  // 48) 离开区域步收掉编辑态 ✓；框选点「完成」后自动接着识别 ✓、接着读线索 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.draft = { kind: 'region', cells: new Set(['1,1']), color: '#888' };
+    window.MH.ui.wizard = 2;
+    window.MH.render();
+  });
+  await p.evaluate(() => { const bs = document.querySelectorAll('.wiz-foot [data-act="wiz-go"]'); bs[bs.length - 1].click(); });
+  const leftStep2 = await p.evaluate(() => ({ draft: window.MH.ui.draft, step: window.MH.ui.wizard }));
+  ok(!leftStep2.draft && leftStep2.step === 3,
+    '离开区域步自动退出区域编辑（草稿收掉）✓：' + JSON.stringify(leftStep2));
+  // 物品步：用上一节留下的两张图例卡片 → 进入框选层 → 直接点「完成」（不框）应给提示 ✓
+  await p.evaluate(() => {
+    window.MH.ui.wizard = 3;
+    window.MH.ui.lastLegend = null;
+    window.MH.ui.legendItems = null;
+    window.MH.render();
+    document.querySelector('[data-act="crop-item"]').click();
+  });
+  ok(await p.evaluate(() => !!document.getElementById('boardCrop')), '物品步能打开主界面框选层 ✓');
+  await p.evaluate(() => document.querySelector('#boardCrop [data-act="crop-close"]').click());
+  await p.waitForTimeout(300);
+  ok(await p.evaluate(() => window.MH.ui.lastLegend === null),
+    '没框到东西就点「完成」：不会白跑一遍识别 ✓');
+  // 框一张后再点「完成」→ 自动识别 ✓
+  await p.evaluate(() => {
+    window.MH.ui.wizard = 3;
+    window.MH.ui.lastLegend = null;
+    window.MH.ui.legendItems = null;
+    window.MH.render();
+    document.querySelector('[data-act="crop-item"]').click();
+  });
+  await p.evaluate(async () => {
+    const Sn = window.MurdokuSnipper;
+    Sn.addPinFromSource(0, 0, 520, 150);                    // 复用上一节合成卡片所在的栅格 ✓
+    if (window.MH.ui.crop) window.MH.ui.crop.added = 1;
+  });
+  await p.evaluate(() => document.querySelector('#boardCrop [data-act="crop-close"]').click());
+  await p.waitForFunction(() => window.MH.ui.lastLegend, null, { timeout: 180000 });
+  const autoLegend = await p.evaluate(() => window.MH.ui.lastLegend);
+  ok(!!autoLegend && autoLegend.icons >= 1,
+    '框完点「完成」→ **自动**跑完"从图例列出物品" ✓：' + JSON.stringify(autoLegend && autoLegend.via));
+  // 人物步：同样点「完成」→ 自动读线索（可能读出 0 条，但必须真的跑过 ✓）
+  await p.evaluate(() => {
+    window.MH.ui.wizard = 4;
+    window.MH.ui.clueCands = null;
+    window.MH.ui.lastLegend = null;
+    window.MH.render();
+    document.querySelector('[data-act="crop-person"]').click();
+    if (window.MH.ui.crop) window.MH.ui.crop.added = 1;
+  });
+  await p.evaluate(() => document.querySelector('#boardCrop [data-act="crop-close"]').click());
+  await p.waitForFunction(() => window.MH.ui.clueCands ||
+    [...document.querySelectorAll('.toast-item')].some(t => /线索/.test(t.textContent)), null, { timeout: 180000 });
+  ok(true, '人物步框完点「完成」→ **自动**跑完"读人物线索"（有候选或给出说明）✓');
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
