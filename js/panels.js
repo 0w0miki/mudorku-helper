@@ -546,7 +546,7 @@
       '<section class="card">' +
       '<h2>人物 <span class="muted">点击选择后可设置关联</span></h2>' +
       '<button class="ghost block" data-act="clue-read" ' +
-        ' title="从右侧卡片读每个人物的说明（PDF 优先读文字层，最准），解析出&quot;在哪个物品/区域、在不在旁边&quot;，先给候选让你核对，再一键写进人物（在旁边这类线索只记录原文，不建关联）">' +
+        ' title="从右侧卡片读每个人物的说明（PDF 优先读文字层，最准），解析出&quot;在哪个物品/区域、在不在旁边&quot;，先给候选让你核对，再一键写进人物（"在…里"和"在旁边"都会建关联，只作高亮提示）">' +
         '🔎 读人物线索（从卡片）</button>' +
       '<div class="chips">' +
       st.people.map(p => '<button class="chip' + (sel && p.id === sel.id ? ' active' : '') + '" data-act="select-person" data-id="' + esc(p.id) + '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</button>').join('') +
@@ -1296,15 +1296,19 @@
           links = c.links || [];
         }
         for (const l of links) {
-          // 只有"在…里/在…上"这种位置关系才建关联 ✓
-          // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
-          if (l.kind !== 'in') continue;
+          // **"在…里"和"在旁边"都建关联** ✓（用户反馈："She was beside a water" 没关联到 water ✗）
+          // 应用的关联语义是"相关性提示"（悬停高亮该物品 ✓）✓ ——
+          // "在旁边"完全能表达 ✓，没有理由只记文字 ✗（那是早期的旧判断 ✓）
+          // 归一：not-beside → beside + 负极性 ✓
+          const relKind = (l.kind === 'in') ? 'in'
+            : (l.kind === 'beside' || l.kind === 'not-beside') ? 'beside' : null;
+          if (!relKind) continue;
           const t = l.targetId && ((st.items || []).some(i => i.id === l.targetId) || (st.regions || []).some(r => r.id === l.targetId))
             ? { id: l.targetId }
             : ((st.items || []).find(i => i.name === l.target) || (st.regions || []).find(r => r.name === l.target));
           if (!t) { missing++; continue; }
-          const kind = (st.regions || []).some(r => r.id === t.id) ? 'region' : 'item';
-          Core.setLink(st, p.id, kind, t.id, l.polarity === -1 ? -1 : 1);
+          const entKind = (st.regions || []).some(r => r.id === t.id) ? 'region' : 'item';
+          Core.setLink(st, p.id, entKind, t.id, l.polarity === -1 ? -1 : 1);
           linked++;
         }
       }
@@ -1315,7 +1319,7 @@
     MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓，关联按**当前文字**重新解析 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
       (missing ? ' · ' + missing + ' 条没找到对应物品/区域（先建好再应用 ✓）' : '') +
       (skipped ? ' · ' + skipped + ' 段跳过（未指定人或被忽略）' : '') +
-      '（"在旁边"这类只记录原文，不建关联 ✓）', 'ok');
+      '（"在…里"和"在旁边"都建关联，只作高亮提示 ✓）', 'ok');
   }
 
   /** 批量 OCR 一批框（失败就返回空串，不抛） */

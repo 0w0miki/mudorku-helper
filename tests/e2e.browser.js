@@ -1388,7 +1388,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const an = applied.find(x => x.l === 'A'), br = applied.find(x => x.l === 'B');
   ok(an && an.clue === 'He was in the car .' && an.links === 1,
     'A 的线索按**面板里改过的整句**存下来了，关联也建了：' + JSON.stringify(an));
-  ok(br && br.clue && br.links === 0, 'B（Breck）的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
+  // **改**：「在旁边」现在也建关联 ✓（用户反馈："She was beside a water" 没关联到 water ✗）
+  ok(br && br.clue && br.links === 1, 'B（Breck）的"在旁边"同样建了关联 ✓：' + JSON.stringify(br));
   const victim = applied.filter(x => /Victim/i.test(x.clue));
   ok(victim.length === 1 && victim[0].links === 0,
     '没解析出关联的整句也存下来了（仍按位置推定给了某个人 ✓）：' + JSON.stringify(victim));
@@ -2251,6 +2252,35 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForTimeout(200);
   ok(!(await p.evaluate(() => !!document.getElementById('cardHover'))), '鼠标移开大图就消失 ✓');
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
+
+  // 59) 「在旁边」也要建关联 ✓（用户反馈："She was beside a water" 没关联到 water ✗）
+  const besidePid = await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = false;
+    window.MH.ui.wizard = 4;
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    if (!st.items.some(i => i.name === 'water')) C.createItem(st, 'water', [], true);
+    if (!st.items.some(i => i.name === 'tree')) C.createItem(st, 'tree', [], true);
+    const pid = st.people[0].id;
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'She was beside a water .', person: null, personId: pid,
+        links: [{ kind: 'beside', polarity: 1, target: 'water', targetKind: 'item' }] },
+    ] }, 'ocr', []);
+    window.MH.render();
+    return pid;
+  });
+  await p.evaluate(() => document.querySelector('[data-act="clue-apply"]').click());
+  await p.waitForTimeout(250);
+  const besideRes = await p.evaluate((pid) => {
+    const st = window.MH.store.state;
+    const p2 = st.people.find(x => x.id === pid);
+    const nm = id => (st.items.find(i => i.id === id) || st.regions.find(r => r.id === id) || {}).name;
+    return { links: p2.links.map(l => l.kind + ':' + nm(l.id) + ':' + l.polarity) };
+  }, besidePid);
+  ok(besideRes.links.includes('item:water:1'),
+    '「在旁边」现在也会建关联 ✓（beside→water ✓）：' + JSON.stringify(besideRes));
+  await p.evaluate(() => { window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
