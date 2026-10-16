@@ -53,12 +53,6 @@
           ' —— 用左边的下拉框指定一下 ✓</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
-        // **来源卡片缩略图** ✓：OCR 读错名字无法避免 ✓ → 让人一眼知道"这条来自哪块" ✓
-        (c.cardIndex != null && c.cardUrl
-          ? '<span class="clue-card" title="来自你在主界面框的第 ' + (c.cardIndex + 1) + ' 张卡片（悬停可放大 ✓）">' +
-            '<img class="clue-thumb" src="' + esc(c.cardUrl) + '" alt="卡 ' + (c.cardIndex + 1) + '">' +
-            '<span class="clue-card-no">卡' + (c.cardIndex + 1) + '</span></span>'
-          : '') +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow">' +
         '<textarea class="clue-text-edit" data-act="clue-text" data-i="' + i + '" rows="2">' + esc(c.text) + '</textarea>' +
@@ -69,6 +63,15 @@
           : '<span class="muted">无关联</span>') +
         (c.mappedBy === 'initial' || c.mappedBy === 'order' ? ' · ' + (c.mappedBy === 'order' ? '按位置' : '按首字母') : '') +
         '</div></div>' +
+        // **来源卡片缩略图放右边** ✓（放左边会把提取出的线索文字挤掉/被放大图压住 ✗）✓
+        // 点一下放大看图 ✓（不再用"悬停放大" ✗ —— 那会盖住线索 ✓）
+        (c.cardIndex != null && c.cardUrl
+          ? '<span class="clue-card">' +
+            '<img class="clue-thumb" data-act="clue-peek" src="' + esc(c.cardUrl) + '"' +
+            ' title="来自你在主界面框的第 ' + (c.cardIndex + 1) + ' 张卡片 —— 点一下放大 ✓"' +
+            ' alt="卡 ' + (c.cardIndex + 1) + '">' +
+            '<span class="clue-card-no">卡' + (c.cardIndex + 1) + '</span></span>'
+          : '') +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
         '</div>').join('') +
       '<div class="row"><button class="ghost sm" data-act="clue-apply">应用（写线索' +
@@ -2814,6 +2817,19 @@
         const meta = layer.querySelector('.bc-actions .meta');
         if (meta) meta.textContent = '第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页';
       }).catch(() => {});
+    },
+    'clue-peek'(el) {
+      const src = el && el.src;
+      if (!src) return;
+      const old = document.getElementById('cardPeek');
+      if (old) old.remove();
+      const box = document.createElement('div');
+      box.id = 'cardPeek';
+      box.className = 'card-peek';
+      box.innerHTML = '<img src="' + esc(src) + '" alt="来源卡片">' +
+        '<div class="hint">这是这条线索来自的那张卡片（点任意处关闭 ✓）</div>';
+      document.body.appendChild(box);
+      box.addEventListener('click', () => box.remove());
     },
     'clue-read'() { guard(runClueRead)(); },
     'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },

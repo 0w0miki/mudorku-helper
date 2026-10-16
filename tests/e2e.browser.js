@@ -2223,6 +2223,22 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '每条候选都带来源卡片缩略图 ✓：' + JSON.stringify(thumbs));
   ok(thumbs.grouped && thumbs.seq[0] === '卡1' && thumbs.seq[3] === '卡2',
     '候选按"来源卡片"分组排列（同卡连续 ✓）：' + JSON.stringify(thumbs.seq));
+  // **缩略图必须在行尾右边** ✓ —— 放左边会把提取出的线索挤掉/被放大图压住 ✗（用户反馈 ✓）
+  const thumbPos = await p.evaluate(() => {
+    const row = document.querySelector('.clue-panel .clue-row');
+    const thumb = row.querySelector('.clue-thumb');
+    const grow = row.querySelector('.grow');
+    const tr = thumb.getBoundingClientRect(), gr = grow ? grow.getBoundingClientRect() : null;
+    return { rightOfText: !!gr && tr.left >= gr.right - 4, nearRowRight: Math.round(row.getBoundingClientRect().right - tr.right) < 120 };
+  });
+  ok(thumbPos.rightOfText && thumbPos.nearRowRight,
+    '来源卡片缩略图在行尾**右边** ✓：' + JSON.stringify(thumbPos));
+  // 点缩略图 → 放大浮层 ✓；点浮层关闭 ✓
+  await p.click('.clue-panel .clue-thumb');
+  const peeked = await p.evaluate(() => !!document.getElementById('cardPeek'));
+  ok(peeked, '点缩略图能放大查看来源卡片 ✓');
+  await p.evaluate(() => { const el = document.getElementById('cardPeek'); if (el) el.click(); });
+  ok(!(await p.evaluate(() => !!document.getElementById('cardPeek'))), '点一下关闭放大浮层 ✓');
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
   console.log(A.join('\n'));

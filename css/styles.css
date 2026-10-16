@@ -928,7 +928,7 @@ body.picking #board { cursor: crosshair; }
 .clue-row { display: flex; gap: 6px; align-items: flex-start; }
 .clue-row > select { flex: 0 0 auto; width: 52px; padding: 2px 2px; font-size: 12px; }
 .clue-row > .grow { flex: 1 1 auto; min-width: 0; }
-.clue-row > button { flex: 0 0 auto; }
+.clue-row > button { flex: 0 0 auto; white-space: nowrap; }   /* "忽略"别折成两行 ✓ */
 .rename-input { width: 90px; font: inherit; font-size: 13px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; }
 
 /* 游玩模式：当前选中人物的线索 ✓ */
@@ -940,10 +940,13 @@ body.picking #board { cursor: crosshair; }
   background: #f6f9ff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .play-clue .chips { margin-top: 2px; }
 
-/* 线索候选：来源卡片缩略图 ✓（悬停放大 ✓）+ 按卡分组 ✓ */
-.clue-card { position: relative; flex: 0 0 auto; width: 54px; display: block; }
-.clue-thumb { width: 54px; max-height: 44px; object-fit: cover; border: 1px solid var(--line); border-radius: 4px; display: block; }
+/* 线索候选：来源卡片缩略图（**放行尾右边** ✓）+ 按卡分组 ✓ */
+.clue-card { flex: 0 0 auto; width: 44px; display: block; text-align: center; }
+.clue-thumb { width: 44px; max-height: 36px; object-fit: cover; border: 1px solid var(--line); border-radius: 4px;
+  display: block; cursor: zoom-in; }
 .clue-card-no { font-size: 10px; color: #667; }
-.clue-card:hover .clue-thumb { position: absolute; left: 0; top: 0; z-index: 40; width: auto; max-width: 380px;
-  max-height: 260px; object-fit: contain; border: 2px solid var(--accent); background: #fff; border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+/* 点缩略图 → 浮层看大图 ✓（不用悬停放大 ✗ —— 那会盖住线索文字 ✓） */
+.card-peek { position: fixed; inset: 0; z-index: 90; background: rgba(20,25,35,.72); display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: zoom-out; padding: 24px; }
+.card-peek img { max-width: 86vw; max-height: 78vh; background: #fff; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.card-peek .hint { color: #fff; font-size: 12px; }
