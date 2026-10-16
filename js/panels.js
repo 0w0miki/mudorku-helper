@@ -88,12 +88,16 @@
     collect('item', st.items, '物品');
 
     return '<div class="person-detail">' +
-      '<label class="field">这个人的线索（可手工输入 / 粘贴 ✓ 识别出来的也能在这里改）' +
-      '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
-      'placeholder="例如：He was beside a shelf .">' + esc(p.clue || '') + '</textarea></label>' +
-      '<div class="row center"><span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span><b>的相关性</b>' +
+      // ① 人物行：编号 + 改名 ✓（不再写"的相关性" ✗ —— 线索不是相关性 ✓）
+      '<div class="row center"><span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span>' +
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button></div>' +
+      // ② **线索紧跟在改名下面** ✓（用户要求；它是这个人的属性 ✓）
+      '<label class="field">' + esc(p.label) + ' 的线索（可手工输入 / 粘贴 ✓ 识别出来的也能在这里改）' +
+      '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
+      'placeholder="例如：He was beside a shelf .">' + esc(p.clue || '') + '</textarea></label>' +
+      // ③ 关联单独一节 ✓（标题说明这是"相关性提示"✓）
+      '<div class="link-title">关联（相关性提示）</div>' +
       (rows.length
         ? '<div class="link-group"><div class="link-title">已关联 ' + rows.length + ' 项</div>' + rows.join('') + '</div>'
         : '<p class="hint">还没有关联。用下面的下拉框选一个区域或物品。</p>') +
