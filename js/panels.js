@@ -53,6 +53,12 @@
           ' —— 用左边的下拉框指定一下 ✓</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
+        // **来源卡片缩略图** ✓：OCR 读错名字无法避免 ✓ → 让人一眼知道"这条来自哪块" ✓
+        (c.cardIndex != null && c.cardUrl
+          ? '<span class="clue-card" title="来自你在主界面框的第 ' + (c.cardIndex + 1) + ' 张卡片（悬停可放大 ✓）">' +
+            '<img class="clue-thumb" src="' + esc(c.cardUrl) + '" alt="卡 ' + (c.cardIndex + 1) + '">' +
+            '<span class="clue-card-no">卡' + (c.cardIndex + 1) + '</span></span>'
+          : '') +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow">' +
         '<textarea class="clue-text-edit" data-act="clue-text" data-i="' + i + '" rows="2">' + esc(c.text) + '</textarea>' +
@@ -868,15 +874,17 @@
     ctx.fillRect(0, 0, W, H);
     let y = gap;
     const cuts = [];                        // 卡片之间的分割线（y ✓）→ 聚类时禁止跨线合块 ✓
+    const spans = [];                       // **每张卡在拼图里的 y 区间** ✓ → 线索"来自哪张卡" ✓
     for (let i = 0; i < imgs.length; i++) {
       ctx.drawImage(imgs[i].img, 0, y, imgs[i].w, imgs[i].h);
+      spans.push({ pin: pins[i] && pins[i].id, y0: y, y1: y + imgs[i].h, url: pins[i] && pins[i].url });
       y += imgs[i].h;
       cuts.push(Math.round(y + gap / 2));    // 分割线取间隔中点 ✓
       y += gap;
     }
     const d = ctx.getImageData(0, 0, W, H);
     MH.ui.cardsMerged = imgs.length;
-    return { data: d.data, width: W, height: H, cuts };
+    return { data: d.data, width: W, height: H, cuts, spans };
   }
 
   /**
@@ -1168,7 +1176,7 @@
         { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') });
       return words && words.length
         ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr',
-            cuts: raster.cuts || [] }                                   // **卡片分割线** ✓
+            cuts: raster.cuts || [], spans: raster.spans || [] }         // **卡片分割线 + 每张卡的范围** ✓
         : null;
     }
     return null;
@@ -1200,6 +1208,23 @@
     try { out = (src.via === 'ocr' ? C.readOcrItems : C.readItems)(src.items, names); }
     catch (err) { MH.toast('线索解析出错：' + err.message, 'error'); return; }
     if (!out.clues.length) { MH.toast('没读出线索（卡片里可能没有人物说明，或目标物品还没建）', 'warn'); return; }
+    // **给每条线索标来源卡片** ✓（用户要求：OCR 读错无法避免 ✓，但要能一眼知道"这条来自哪块" ✓）
+    const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
+    const allPins = (Sn && Sn.pins) || [];
+    (out.clues || []).forEach(c => {
+      const cy = (c.y || 0) + 6;
+      if (src.spans && src.spans.length) {                       // OCR：拼图里的 y 区间 ✓
+        const hit = src.spans.find(sp => cy >= sp.y0 - 4 && cy <= sp.y1 + 4);
+        if (hit) { c.cardIndex = src.spans.indexOf(hit); c.cardUrl = hit.url || ''; }
+      } else if (allPins.length) {                               // PDF：看落在哪张卡片的矩形里 ✓
+        const kx = 1, ky = 1;
+        const hit = allPins.find(pin => {
+          const x0 = pin.srcX * kx, y0 = pin.srcY * ky;
+          return c.x >= x0 - 20 && c.x <= x0 + pin.srcW * kx + 20 && cy >= y0 - 20 && cy <= y0 + pin.srcH * ky + 20;
+        });
+        if (hit) { c.cardIndex = allPins.indexOf(hit); c.cardUrl = hit.url || ''; }
+      }
+    });
     const clues = setClueCandidates(out, src.via, out.names);
     if (MH.ui.clueCands) MH.ui.clueCands.wholePage = !!src.wholePage;   // 面板上标明"整页" ✓
     MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
@@ -1208,6 +1233,11 @@
   /** 把"解析结果"变成候选（读卡片那一步的产物 ✓；单独抽出来便于 e2e 注入合成结果 ✓） */
   function setClueCandidates(out, via, names) {
     const st = MH.store.state;
+    // 同卡片的行排在一起 ✓（用户改一张卡的文字/人名时可以一次改完 ✓）
+    if (out && Array.isArray(out.clues)) {
+      out.clues = out.clues.map((c, i) => Object.assign({ _i: i }, c))
+        .sort((a, b) => ((a.cardIndex == null ? 99 : a.cardIndex) - (b.cardIndex == null ? 99 : b.cardIndex)) || (a._i - b._i));
+    }
     const key = t => String(t || '').replace(/[^a-z]/gi, '').toLowerCase();
     // 人物对应：① 编号同名 ✓ ② **按首字母**（Anthony→A、Crystal→C… ✓）
     // ③ 对应不上的留空让用户手动选（首字母不在编号里的，例如 V ✗ —— 不猜 ✓）

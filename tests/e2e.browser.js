@@ -2192,6 +2192,39 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     window.MH.render();
   });
 
+  // 58) 线索候选带"来源卡片"缩略图 ✓ 且按卡分组 ✓（OCR 读错名字无法避免 ✓ → 让人一眼知道来自哪块 ✓）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = false;
+    window.MH.ui.wizard = 4;
+    // 造两张"卡片"（带 url ✓ 才能显示缩略图 ✓）
+    const px = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    window.MurdokuSnipper.state.pins = [
+      { id: 'c1', page: 1, w: 60, h: 40, url: px, srcX: 0, srcY: 0, srcW: 60, srcH: 40, srcPageW: 200, srcPageH: 200 },
+      { id: 'c2', page: 1, w: 60, h: 40, url: px, srcX: 0, srcY: 100, srcW: 60, srcH: 40, srcPageW: 200, srcPageH: 200 },
+    ];
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: '第一条（卡1）', person: null, links: [], cardIndex: 0, cardUrl: px },
+      { text: '第二条（卡1）', person: null, links: [], cardIndex: 0, cardUrl: px },
+      { text: '第三条（卡2）', person: null, links: [], cardIndex: 1, cardUrl: px },
+      { text: '第四条（卡2）', person: null, links: [], cardIndex: 1, cardUrl: px },
+    ] }, 'ocr', []);
+    window.MH.render();
+  });
+  const thumbs = await p.evaluate(() => {
+    const rows = [...document.querySelectorAll('.clue-panel .clue-row')];
+    const seq = rows.map(r => (r.querySelector('.clue-card-no') || {}).textContent || '—');
+    const seen = new Set(); let prev = null, grouped = true;
+    for (const x of seq) { if (x !== prev) { if (seen.has(x)) grouped = false; seen.add(x); prev = x; } }
+    return { rows: rows.length, thumbs: rows.filter(r => r.querySelector('.clue-thumb')).length, seq, grouped };
+  });
+  ok(thumbs.rows === 4 && thumbs.thumbs === 4,
+    '每条候选都带来源卡片缩略图 ✓：' + JSON.stringify(thumbs));
+  ok(thumbs.grouped && thumbs.seq[0] === '卡1' && thumbs.seq[3] === '卡2',
+    '候选按"来源卡片"分组排列（同卡连续 ✓）：' + JSON.stringify(thumbs.seq));
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
