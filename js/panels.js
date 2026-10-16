@@ -251,11 +251,102 @@
 
   // ---------------------------------------------------------------- 准备阶段
 
+  /**
+   * 分步引导（用户要求 ✓）：导入/对齐 → 区域 → 物品 → 线索
+   * 每一步**只显示这一步需要的东西** ✓，其余卡片隐藏 ✓；可以跳过某步 ✓、随时退出 ✓。
+   */
+  const WIZ_STEPS = [
+    { id: 1, name: '网格地图对齐', tip: '导入 PDF 或截图，把地图区域框出来，确认行列数' },
+    { id: 2, name: '区域识别', tip: '在已对位的底图上逐格取色，自动分出区域（结果可撤销、可改名）' },
+    { id: 3, name: '物品识别', tip: '从图例卡片读出物品清单，再按样例补格子（都可以手动加减）' },
+    { id: 4, name: '人物线索识别', tip: '读每个人物的说明；解析出的关联先给候选，确认后再写进人物' },
+  ];
+
+  function wizardHTML(st) {
+    const step = MH.ui.wizard || 1;
+    const info = WIZ_STEPS[step - 1] || WIZ_STEPS[0];
+    const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
+    const d = MH.ui.draft;
+    const bgOk = !!(st.bg && st.bg.bound);
+    const body = [];
+
+    if (step === 1) {
+      body.push(bgCard(st));
+      body.push('<section class="card"><h2>行列数</h2>' +
+        '<div class="grid2">' +
+        '<label class="field">行 <input id="rowsInput" type="number" min="1" max="40" value="' + st.rows + '"></label>' +
+        '<label class="field">列 <input id="colsInput" type="number" min="1" max="40" value="' + st.cols + '"></label>' +
+        '</div>' +
+        '<div class="row wrap presets">' +
+        [4, 5, 6, 7, 8, 9].map(v => '<button class="ghost sm" data-act="preset" data-v="' + v + '">' + v + '×' + v + '</button>').join('') +
+        '</div>' +
+        '<button class="primary block" data-act="gen">生成地图</button>' +
+        '<p class="hint">' + (bgOk
+          ? '✓ 地图框已对位（黄框贴着地图四边）· 人物数 = min(行, 列) = <b>' + Core.peopleCount(st.rows, st.cols) + '</b>'
+          : '还没框地图：点上面的「框地图外框」，沿地图四边拖一个框（要贴住网格）') + '</p></section>');
+    } else if (step === 2) {
+      body.push('<section class="card"><h2>自动识别区域</h2>' +
+        (st.bg
+          ? '<button class="ghost block" data-act="detect-regions" ' + (MH.ui.ocrBusy ? 'disabled' : '') + '>' +
+            (MH.ui.ocrBusy ? '🔍 正在识别（读区域名…）' : '🔍 自动识别区域') + '</button>' +
+            '<p class="hint">PDF 读文字层；截图自动找区域名标签并用内置 OCR 读名字。结果都是候选，可撤销。</p>'
+          : '<p class="hint">还没有底图 —— 回上一步导入。</p>') +
+        (!d ? '<button class="ghost block" data-act="new-region">＋ 手动新建区域</button>' : '') +
+        (st.regions.length ? '<div class="link-title">已识别 ' + st.regions.length + ' 个区域</div>' : '<p class="hint">还没有区域。</p>') +
+        '</section>');
+      body.push('<ul class="list">' + entityList('region', st) + '</ul>');
+    } else if (step === 3) {
+      body.push('<section class="card"><h2>从图例列出物品</h2>' +
+        (st.bg
+          ? '<button class="ghost block" data-act="legend-auto" title="从右侧图例卡片切出图标、认名字，并按图例里的说明分可占据/不可占据">🚀 从图例自动列出物品</button>' +
+            '<button class="ghost block" data-act="legend-locate" title="用图例图标当模板，逐件到地图上找格子">' +
+            (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>' +
+            '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
+          : '<p class="hint">还没有底图 —— 回第 1 步导入。</p>') +
+        '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
+        '</section>');
+      body.push('<ul class="list">' + entityList('item', st) + '</ul>');
+    } else {
+      body.push('<section class="card"><h2>读人物线索</h2>' +
+        '<button class="ghost block" data-act="clue-read" title="从右侧卡片读每个人物的说明（PDF 优先读文字层）">🔎 读人物线索（从卡片）</button>' +
+        '<p class="hint">整句都会存下来 ✓（没解析出物品/区域关联也存）；也可以直接在下面每个人那里手打/粘贴。</p>' +
+        '<div class="chips">' +
+        st.people.map(p => '<button class="chip' + (sel && p.id === sel.id ? ' active' : '') + '" data-act="select-person" data-id="' + esc(p.id) + '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</button>').join('') +
+        '</div>' +
+        (sel ? personDetail(st, sel) : '') +
+        '</section>');
+    }
+
+    const dots = WIZ_STEPS.map(x => '<span class="wiz-dot' + (x.id === step ? ' on' : '') + (x.id < step ? ' done' : '') + '">' + x.id + '. ' + esc(x.name) + '</span>').join('');
+    const last = step >= WIZ_STEPS.length;
+    return '<div class="wizard">' +
+      '<div class="wiz-head"><b>分步引导</b><span class="muted">第 ' + step + ' / ' + WIZ_STEPS.length + ' 步</span>' +
+      '<span class="grow"></span><button class="ghost sm" data-act="wiz-exit">退出引导</button></div>' +
+      '<div class="wiz-steps">' + dots + '</div>' +
+      '<h2 class="wiz-title">' + esc(info.name) + '</h2>' +
+      '<p class="hint">' + esc(info.tip) + '</p>' +
+      body.join('') +
+      '<div class="wiz-foot">' +
+      '<button class="ghost sm" data-act="wiz-go" data-v="' + (step - 1) + '"' + (step <= 1 ? ' disabled' : '') + '>← 上一步</button>' +
+      '<button class="ghost sm" data-act="wiz-go" data-v="' + (step + 1) + '">跳过这步 →</button>' +
+      '<span class="grow"></span>' +
+      '<button class="primary sm" data-act="wiz-go" data-v="' + (step + 1) + '">' + (last ? '完成 ✓' : '下一步 →') + '</button>' +
+      '</div></div>';
+  }
+
   function prepHTML(st) {
+    // **引导模式**：只显示当前这一步 ✓（用户要求"分阶段只显示" ✓）
+    if (MH.ui.wizard) return wizardHTML(st) + '<section class="card">' +
+      '<button class="ghost block" data-act="wiz-exit">退出引导，显示完整面板</button></section>';
     const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
     const d = MH.ui.draft;
     const n = Core.peopleCount(st.rows, st.cols);
     return '' +
+      (!MH.store.state.bg
+        ? '<section class="card wizard-entry"><h2>第一次用？</h2>' +
+          '<button class="primary block" data-act="wiz-start">🧭 分步引导：导入 → 对齐 → 区域 → 物品 → 线索</button>' +
+          '<p class="hint">按顺序走四步，每一步只显示要用的东西 ✓（也可以直接用下面的完整面板 ✓）</p></section>'
+        : '') +
       bgCard(st) +
 
       '<section class="card">' +
@@ -2254,6 +2345,14 @@
     'new-region'() { startDraft('region'); },
     'new-item'() { startDraft('item'); },
     'legend-auto'() { guard(runLegendAuto)(); },
+    'wiz-start'() { MH.ui.wizard = 1; MH.render(); },
+    'wiz-exit'() { MH.ui.wizard = null; MH.render(); },
+    'wiz-go'(el) {
+      const v = Number(el.dataset.v);
+      MH.ui.wizard = (v > WIZ_STEPS.length || v < 1) ? null : v;   // 第 4 步再点"完成" → 退出引导 ✓
+      MH.render();
+      if (MH.ui.wizard == null) MH.toast('引导完成 ✓ 现在可以逐个人核对线索，或直接去准备/游玩 ✓', 'ok');
+    },
     'clue-read'() { guard(runClueRead)(); },
     'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },
     'clue-apply'() { applyClueCands(); },

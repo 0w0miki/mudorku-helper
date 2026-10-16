@@ -893,3 +893,15 @@ body.picking #board { cursor: crosshair; }
   border: 1px solid var(--line); border-radius: 6px; resize: vertical; background: #fff; }
 #personClue { width: 100%; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line);
   border-radius: 6px; resize: vertical; }
+
+/* 分步引导（导入 → 对齐 → 区域 → 物品 → 线索） */
+.wizard-entry { border: 1px solid var(--accent); }
+.wizard { border: 1px solid var(--accent); border-radius: 10px; padding: 10px; background: #fbfdff; }
+.wiz-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.wiz-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.wiz-dot { font-size: 11px; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--line); color: #667; }
+.wiz-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wiz-dot.done { color: #2e7d32; border-color: #a5d6a7; }
+.wiz-title { margin: 4px 0 2px; }
+.wiz-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.wiz-foot .grow { flex: 1 1 auto; }

@@ -1406,6 +1406,54 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   });
   ok(canUndo && afterUndo === '', '失焦后可撤销，撤销后线索回到空 ✓：' + JSON.stringify(afterUndo));
 
+  // 39) 分步引导：**每一步只显示该步需要的东西** ✓，走完能退出、完整面板恢复 ✓
+  await p.click('#tabPrep');
+  // 入口按钮只在"还没底图"时出现 ✓ —— 先在干净的 state 上验证它 ✓
+  await p.evaluate(() => {
+    window.MH.ui.wizard = null;
+    window.MH.store.replace(window.MurdokuCore.createState(6, 6), 'x');
+  });
+  const entryN = await p.locator('[data-act="wiz-start"]').count();
+  ok(entryN === 1, '没有底图时显示「分步引导」入口 ✓：' + entryN);
+  // 直接进入引导 ✓（入口按钮已单独验证 ✓）。注意：引导只在**准备阶段**渲染 ✓
+  // —— 这条长流程前面章节可能把应用留在游玩阶段 ✗，所以先在页面内切回准备阶段 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizard = 1;
+    window.MH.render();
+  });
+  const renderWiz = await p.evaluate(() => ({
+    phase: window.MH.store.state.phase, panel: !!document.querySelector('.wizard'),
+  }));
+  ok(renderWiz.panel, '准备阶段进入引导后渲染出引导面板 ✓：' + JSON.stringify(renderWiz));
+  // "下一步/完成"永远是页脚里**最后一个** wiz-go 按钮 ✓（data-v 是目标步号，会变 ✓）
+  const clickNext = () => p.evaluate(() => {
+    const bs = document.querySelectorAll('.wiz-foot [data-act="wiz-go"]');
+    if (bs.length) bs[bs.length - 1].click();
+  });
+  const wizState = async () => p.evaluate(() => ({
+    step: window.MH.ui.wizard,
+    rows: !!document.getElementById('rowsInput'),
+    detect: !!document.querySelector('[data-act="detect-regions"]'),
+    legend: !!document.querySelector('[data-act="legend-auto"]'),
+    clue: !!document.querySelector('[data-act="clue-read"]'),
+  }));
+  const w1 = await wizState();
+  ok(w1.step === 1 && w1.rows && !w1.detect && !w1.legend && !w1.clue,
+    '第 1 步只显示对齐相关（行列/底图）：' + JSON.stringify(w1));
+  for (let k = 0; k < 3; k++) { await clickNext(); }     // 1→2→3→4 ✓
+  const w4 = await wizState();
+  ok(w4.step === 4 && w4.clue && !w4.rows && !w4.legend,
+    '第 4 步只显示线索相关：' + JSON.stringify(w4));
+  await clickNext();                                      // 第 4 步的"完成 ✓" → 退出引导 ✓
+  const back = await p.evaluate(() => ({
+    exited: window.MH.ui.wizard === null,
+    wizard: !!document.querySelector('.wizard'),
+    full: !!document.querySelector('[data-act="new-item"]') && !!document.querySelector('[data-act="clue-read"]'),
+  }));
+  ok(back.exited && !back.wizard && back.full, '点「完成」退出引导并恢复完整面板：' + JSON.stringify(back));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
