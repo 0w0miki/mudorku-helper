@@ -1365,7 +1365,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const editVal = await p.locator('.clue-panel textarea[data-act="clue-text"]').first().inputValue();
   ok(/car/i.test(editVal), '整句在可编辑框里，能直接改：' + editVal);
   // **可以在面板里直接改整句** ✓（改成带句号的版本，应用后应存这个 ✓）
-  await p.locator('.clue-panel textarea[data-act="clue-text"]').nth(0).fill('He was in a car (改过) .');
+  await p.locator('.clue-panel textarea[data-act="clue-text"]').nth(0).fill('He was in the car .');
   const mapped = await p.evaluate(() => [...document.querySelectorAll('.clue-panel select[data-act="clue-map"]')].map(s => s.value).slice(0, 2));
   const labels = await p.evaluate(ids => ids.map(id => (window.MH.store.state.people.find(x => x.id === id) || {}).label), mapped);
   ok(labels[0] === 'A' && labels[1] === 'B',
@@ -1376,7 +1376,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     return st.people.map(x => ({ l: x.label, clue: x.clue, links: x.links.length }));
   });
   const an = applied.find(x => x.l === 'A'), br = applied.find(x => x.l === 'B');
-  ok(an && an.clue === 'He was in a car (改过) .' && an.links === 1,
+  ok(an && an.clue === 'He was in the car .' && an.links === 1,
     'A 的线索按**面板里改过的整句**存下来了，关联也建了：' + JSON.stringify(an));
   ok(br && br.clue && br.links === 0, 'B（Breck）的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
   const victim = applied.filter(x => /Victim/i.test(x.clue));
@@ -1981,6 +1981,39 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const backBtn = await p.evaluate(() => !!document.querySelector('[data-act="new-region"]'));
   ok(backBtn, '取消草稿后「手动新建区域」按钮回来 ✓');
   await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.render(); });
+
+  // 54) 改过线索文字后，应用时按**改后的文字**重新解析关联 ✓（识别那一刻的关联会过期 ✓）
+  const reparsePid = await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    C.createItem(st, 'Chair', [], true);
+    C.createItem(st, 'Shelf', [], true);
+    C.createRegion(st, 'FRONT AREA', []);
+    const pid = st.people[0].id;
+    // 注入的候选：文字说 chair，但关联列表给的是 Shelf（模拟"识别后用户改了文字" ✓）
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'He was in a chair.', person: null, personId: pid,
+        links: [{ kind: 'in', polarity: 1, target: 'Shelf', targetKind: 'item' }] },
+    ] }, 'json', []);
+    return pid;
+  });
+  await p.evaluate(() => {
+    const ta = document.querySelector('.clue-panel textarea[data-act="clue-text"]');
+    ta.value = 'She was sitting in a chair in the front area.';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await p.evaluate(() => document.querySelector('[data-act="clue-apply"]').click());
+  await p.waitForTimeout(250);
+  const reparsed = await p.evaluate((pid) => {
+    const st = window.MH.store.state;
+    const p2 = st.people.find(x => x.id === pid);
+    const name = id => ((st.items.find(i => i.id === id) || {}).name || (st.regions.find(r => r.id === id) || {}).name);
+    return { clue: p2.clue, links: p2.links.map(l => name(l.id)) };
+  }, reparsePid);
+  ok(reparsed.links.includes('Chair') && reparsed.links.includes('FRONT AREA') && !reparsed.links.includes('Shelf'),
+    '应用时按改后的文字重新解析关联 ✓（不是识别那一刻的 Shelf ✗）：' + JSON.stringify(reparsed));
+  ok(/front area/i.test(reparsed.clue || ''), '线索原文存的也是改后的版本 ✓：' + JSON.stringify(reparsed.clue));
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

@@ -1181,7 +1181,8 @@
     const clues = mapped.map(c => {
       // 识别阶段**只保留名字** ✓：具体关联（人物 / 物品区域）在点"应用"时才解析 ✓
       // （这样识别之后再新建或改名也能对上 ✓）
-      return { ...c, personId: c.personId || '', skip: false };
+      // 另外记下"识别时的原文" ✓ —— 应用时用它判断用户有没有改过文字 ✓
+      return { ...c, personId: c.personId || '', skip: false, origText: c.text };
     });
     MH.ui.clueCands = { clues, via: via || 'json', names: names || [], wholePage: !!(out && out.wholePage) };
     MH.render();
@@ -1194,34 +1195,56 @@
   function applyClueCands() {
     const cc = MH.ui.clueCands;
     if (!cc) return;
-    let wrote = 0, linked = 0, skipped = 0, missing = 0;
+    const C = window.MurdokuClues;
+    let wrote = 0, linked = 0, skipped = 0, missing = 0, reparsed = 0;
     MH.store.commit('应用人物线索', st => {
+      // 解析用的名称表：**用当前**的物品/区域 ✓（识别之后新建/改名的也能对上 ✓）
+      const names = (st.items || []).map(i => ({ name: i.name, kind: 'item', id: i.id }))
+        .concat((st.regions || []).map(r => ({ name: r.name, kind: 'region', id: r.id })));
       for (const c of cc.clues) {
         if (c.skip || !c.personId) { skipped++; continue; }
         const p = Core.person(st, c.personId);
         if (!p) { skipped++; continue; }
-        p.clue = String(c.text || '').slice(0, 300);       // **整句都存** ✓（没解析出关联也存 ✓）
+        const text = String(c.text || '').slice(0, 300);
+        p.clue = text;                                     // **整句都存** ✓（没解析出关联也存 ✓）
         wrote++;
-        for (const l of (c.links || [])) {
+        // **在这里按"当前这段文字"重新解析关联** ✓（用户要求 ✓）
+        // 理由：面板里的文字是**可编辑**的 ✓ —— 用户改过之后 ✓，
+        // 识别那一刻解析出来的关联就过期了 ✗（改文字 = 改线索内容 ✓，关联应随之更新 ✓）
+        // **文字改了** → 按改后的文字重新解析 ✓（用户要求 ✓：改文字 = 改线索内容 ✓）
+        // **文字没改** → 用识别时的关联 ✓（它带着目标 id ✓，之后给物品改名也仍然对得上 ✓）
+        const edited = String(c.origText == null ? text : c.origText) !== text;
+        let links;
+        if (edited && C && C.clauseLinks) {
+          links = [];
+          for (const cl of (C.splitClauses ? C.splitClauses(text) : [text])) {
+            for (const l of C.clauseLinks(cl, names)) {
+              if (!links.some(x => x.target === l.target && x.kind === l.kind)) links.push(l);
+            }
+          }
+          reparsed++;
+        } else {
+          links = c.links || [];
+        }
+        for (const l of links) {
           // 只有"在…里/在…上"这种位置关系才建关联 ✓
           // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
           if (l.kind !== 'in') continue;
-          // **在这里（点应用时）才按名字查目标** ✓ —— 识别阶段只留名字 ✓
-          // 好处：识别之后你又新建/改名了物品或区域，也能对上 ✓（用识别那一刻的 id 会失效 ✗）
-          const t = Core.findEntityByName
-            ? Core.findEntityByName(st, l.target)
+          const t = l.targetId && ((st.items || []).some(i => i.id === l.targetId) || (st.regions || []).some(r => r.id === l.targetId))
+            ? { id: l.targetId }
             : ((st.items || []).find(i => i.name === l.target) || (st.regions || []).find(r => r.name === l.target));
           if (!t) { missing++; continue; }
           const kind = (st.regions || []).some(r => r.id === t.id) ? 'region' : 'item';
-          Core.setLink(st, p.id, l.targetKind || kind, t.id, l.polarity === -1 ? -1 : 1);
+          Core.setLink(st, p.id, kind, t.id, l.polarity === -1 ? -1 : 1);
           linked++;
         }
       }
     });
+    void reparsed;
     MH.ui.clueCands = null;
     MH.render();
-    MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
-      (missing ? ' · ' + missing + ' 条关联没找到对应物品/区域（可能名字变了，先建好再应用 ✓）' : '') +
+    MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓，关联按**当前文字**重新解析 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
+      (missing ? ' · ' + missing + ' 条没找到对应物品/区域（先建好再应用 ✓）' : '') +
       (skipped ? ' · ' + skipped + ' 段跳过（未指定人或被忽略）' : '') +
       '（"在旁边"这类只记录原文，不建关联 ✓）', 'ok');
   }
