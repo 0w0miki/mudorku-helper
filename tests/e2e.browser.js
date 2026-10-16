@@ -70,7 +70,17 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const errs = [];
   p.on('pageerror', e => errs.push('pageerror: ' + e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  // 应用默认在准备阶段显示"分步引导" ✓；这条流程多数章节逐个测"完整面板"的控件 ✓
+  // → 定义 helper：**每次加载/刷新后**都退出引导 ✓（引导章节会自己设 MH.ui.wizard = k ✓）
+  const exitWizard = () => p.evaluate(() => {
+    if (!window.MH || !window.MH.ui) return;
+    window.MH.ui.wizardOptOut = true;
+    window.MH.ui.wizard = null;
+    window.MH.render();
+  });
   await p.goto(FILE);
+  await p.waitForSelector('.cell');
+  await exitWizard();
   await p.waitForSelector('.cell');
 
   const S = () => p.evaluate(() => window.MH.store.state);
@@ -223,7 +233,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(st.regions.length === 1 && st.play.placed[pid] === '3,1', '导出/导入往返一致');
 
   // 11) 刷新后 localStorage 恢复
-  await p.reload();
+  await p.reload(); await exitWizard();
   await p.waitForSelector('.cell');
   st = await S();
   ok(st.regions.length === 1 && st.rows === 5 && st.phase === 'play', '刷新后从 localStorage 恢复');
@@ -253,7 +263,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(st.grid.x === g0.x + 45 && st.grid.y === g0.y + 25, '对齐模式拖动网格：' + JSON.stringify(g0) + ' → ' + JSON.stringify(st.grid));
   ok(await p.locator('#alignHandle').isVisible(), '缩放手柄可见');
 
-  await p.reload();
+  await p.reload(); await exitWizard();
   await p.waitForSelector('.cell');
   await p.waitForFunction(() => !!window.MH.store.state.bg, null, { timeout: 10000 });
   st = await S();
@@ -355,7 +365,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.waitForTimeout(250);
   ok(!(await p.locator('.snipper-panel').isVisible()), '📌 可收起悬浮窗');
   await p.screenshot({ path: '/tmp/mh-e2e-snipper.png' });
-  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(700);
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(700); await exitWizard();
   const pins2 = await p.locator('.snipper-pin').count();
   ok(pins2 >= 1, '刷新后摘录卡片仍在：' + pins2 + ' 张');
 
@@ -492,7 +502,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   }));
   ok(folded.hidden, 'PDF 缩略图可折叠');
   ok(folded.h >= pinsH0, '折叠后卡片区更高：' + Math.round(pinsH0) + ' → ' + Math.round(folded.h));
-  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(500);
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(500); await exitWizard();
   ok(await p.evaluate(() => getComputedStyle(document.querySelector('.snipper-stage')).display === 'none'), '折叠状态刷新后保留');
   await p.screenshot({ path: '/tmp/mh-e2e-snipper2.png' });
 
@@ -1005,7 +1015,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(srW2 === 300, '最小宽度夹在 300px：' + srW2);
   const srSaved = await p.evaluate(() => localStorage.getItem('murdoku-helper.v1.ui'));
   ok(/"sidebarW":300/.test(srSaved || ''), '宽度落盘：' + srSaved);
-  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(400);
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(400); await exitWizard();
   const srW3 = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')));
   ok(srW3 === 300, '刷新后宽度保留：' + srW3);
   const boardW = await p.evaluate(() => Math.round(document.querySelector('.board-area').getBoundingClientRect().width));
@@ -1084,7 +1094,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(afterGen.data === beforeGen.data && afterGen.data > 100, '底图数据没被清掉：' + afterGen.data + ' 字符');
   ok(afterGen.regions === 0 && afterGen.placed === 0, '题面数据确实清空了');
   ok(await p.locator('#bgLayer').isVisible(), '底图仍然显示在棋盘下方');
-  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(600);
+  await p.reload(); await p.waitForSelector('.cell'); await p.waitForTimeout(600); await exitWizard();
   const afterReload = await p.evaluate(() => {
     const s = window.MH.store.state;
     return { rows: s.rows, bg: !!s.bg, scale: s.bg && s.bg.scale, grid: { ...s.grid } };
@@ -1450,13 +1460,24 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const w4 = await wizState();
   ok(w4.step === 4 && w4.clue && !w4.rows && !w4.legend,
     '第 4 步只显示线索相关：' + JSON.stringify(w4));
-  await clickNext();                                      // 第 4 步的"完成 ✓" → 退出引导 ✓
+  await clickNext();                                      // 第 4 步的"完成" → 引导收尾 ✓
+  await p.waitForTimeout(300);
   const back = await p.evaluate(() => ({
-    exited: window.MH.ui.wizard === null,
-    wizard: !!document.querySelector('.wizard'),
-    full: !!document.querySelector('[data-act="new-item"]') && !!document.querySelector('[data-act="clue-read"]'),  // 完整面板保留这两个按钮 ✓
+    phase: window.MH.store.state.phase,                    // 收尾后进入游玩 ✓
+    playPanel: !!document.querySelector('.play-clue'),
   }));
-  ok(back.exited && !back.wizard && back.full, '点「完成」退出引导并恢复完整面板：' + JSON.stringify(back));
+  ok(back.phase === 'play' && back.playPanel,
+    '点「完成」→ 引导收尾并进入「② 游玩」✓：' + JSON.stringify(back));
+  // 回到准备阶段：仍然是引导（应用里准备阶段只有引导这一套界面 ✓）
+  await p.evaluate(() => { window.MH.ui.wizardOptOut = false; window.MH.ui.wizard = null; });
+  await p.click('#tabPrep');
+  const prepBack = await p.evaluate(() => ({
+    wizard: window.MH.ui.wizard, wizardPanel: !!document.querySelector('.wizard'),
+    legacy: !!document.querySelector('[data-act="detect-regions"]'),
+  }));
+  ok(prepBack.wizardPanel && !prepBack.legacy, '回到准备阶段仍是引导（没有"完整面板"入口）✓：' + JSON.stringify(prepBack));
+  // 后面章节仍按旧面板驱动 ✓
+  await p.evaluate(() => { window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
   // 40) 物品/人物步：**在主界面上框选** → 自动变成右侧卡片 ✓
   await p.evaluate(() => {

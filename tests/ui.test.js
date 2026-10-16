@@ -32,6 +32,11 @@ async function boot() {
   dom.window.prompt = () => '新名字';
   // 长按阈值调小：单元测试不必真等 700ms ✓（这也是 board.js 里 MH.ui.longPressMs 的用途）
   dom.window.MH.ui.longPressMs = 80;
+  // **单测渲染"完整面板"** ✓：应用里准备阶段默认只有引导 ✓，
+  // 而这些用例是逐个控件测旧面板的 ✓ → 这里显式退出引导 ✓
+  dom.window.MH.ui.wizardOptOut = true;
+  dom.window.MH.ui.wizard = null;
+  dom.window.MH.render();
   return { dom, win: dom.window, doc: dom.window.document, errors };
 }
 

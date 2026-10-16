@@ -249,9 +249,9 @@
    */
   const WIZ_STEPS = [
     { id: 1, name: '网格地图对齐', tip: '导入 PDF 或截图，把地图区域框出来，确认行列数' },
-    { id: 2, name: '区域识别', tip: '在已对位的底图上逐格取色，自动分出区域（结果可撤销、可改名）' },
-    { id: 3, name: '物品识别', tip: '从图例卡片读出物品清单，再按样例补格子（都可以手动加减）' },
-    { id: 4, name: '人物线索识别', tip: '读每个人物的说明；解析出的关联先给候选，确认后再写进人物' },
+    { id: 2, name: '添加区域', tip: '在已对位的底图上逐格取色，自动分出区域；也可以手动刷格子新建（结果都可撤销、可改名）' },
+    { id: 3, name: '添加物品', tip: '框选图例就能自动列出物品并找位置；也可以手动新建（都可手动加减）' },
+    { id: 4, name: '添加人物线索', tip: '框选线索卡片就自动读出来；解析出的关联先给候选，确认后再写进人物' },
   ];
 
   /**
@@ -404,7 +404,7 @@
   }
 
   function wizardHTML(st) {
-    const step = MH.ui.wizard || 1;
+    const step = Math.min(WIZ_STEPS.length, Math.max(1, MH.ui.wizard || 1));
     const info = WIZ_STEPS[step - 1] || WIZ_STEPS[0];
     const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
     const d = MH.ui.draft;
@@ -469,8 +469,7 @@
     const dots = WIZ_STEPS.map(x => '<span class="wiz-dot' + (x.id === step ? ' on' : '') + (x.id < step ? ' done' : '') + '">' + x.id + '. ' + esc(x.name) + '</span>').join('');
     const last = step >= WIZ_STEPS.length;
     return '<div class="wizard">' +
-      '<div class="wiz-head"><b>分步引导</b><span class="muted">第 ' + step + ' / ' + WIZ_STEPS.length + ' 步</span>' +
-      '<span class="grow"></span><button class="ghost sm" data-act="wiz-exit">退出引导</button></div>' +
+      '<div class="wiz-head"><b>分步引导</b><span class="muted">第 ' + step + ' / ' + WIZ_STEPS.length + ' 步</span></div>' +
       '<div class="wiz-steps">' + dots + '</div>' +
       '<h2 class="wiz-title">' + esc(info.name) + '</h2>' +
       '<p class="hint">' + esc(info.tip) + '</p>' +
@@ -484,9 +483,11 @@
   }
 
   function prepHTML(st) {
-    // **引导模式**：只显示当前这一步 ✓（用户要求"分阶段只显示" ✓）
-    if (MH.ui.wizard) return wizardHTML(st) + '<section class="card">' +
-      '<button class="ghost block" data-act="wiz-exit">退出引导，显示完整面板</button></section>';
+    // **准备阶段默认只有引导这一套界面** ✓（用户："感觉可以只保留这个" ✓）
+    // · 应用启动时把 `MH.ui.wizard` 设为 1（见 mount ✓）→ 界面上就只有引导 ✓
+    // · 下面的"完整面板"仍保留 ✓，但只作为**单元测试的渲染面**（jsdom 测试直接测这些控件 ✓）
+    //   —— 应用里已经没有任何入口能进到这里 ✓
+    if (MH.ui.wizard != null) return wizardHTML(st);
     const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
     const d = MH.ui.draft;
     const n = Core.peopleCount(st.rows, st.cols);
@@ -2629,7 +2630,7 @@
     'wiz-exit'() { MH.ui.wizard = null; MH.render(); },
     'wiz-go'(el) {
       const v = Number(el.dataset.v);
-      const leaving = (v > WIZ_STEPS.length || v < 1);
+      const leaving = (v > WIZ_STEPS.length || v < 1);   // 第 4 步再点"完成" ✓
       // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
       //    同时要**记下这次对齐** ✓，否则第 2 步"自动识别区域"会报"底图未对齐" ✗（实测踩过）
       if (v !== 1) exitAligning();
@@ -2648,7 +2649,12 @@
         }
       }
       MH.render();
-      if (leaving) MH.toast('引导完成 ✓ 现在可以逐个人核对线索，或直接去准备/游玩 ✓', 'ok');
+      if (leaving) {
+        // 引导的收尾 = 去游玩 ✓（准备阶段只有引导这一套界面 ✓，想回来改点顶部「① 地图准备」即可 ✓）
+        MH.toast('引导完成 ✓ 已进入「② 游玩」（想改准备内容就点顶部「① 地图准备」✓）', 'ok');
+        const tab = document.getElementById('tabPlay');
+        if (tab) tab.click();
+      }
     },
     'crop-item'() { startBoardCrop('item'); },
     'crop-person'() { startBoardCrop('person'); },
@@ -3215,6 +3221,9 @@
     },
 
     render(st) {
+      // 应用默认：准备阶段直接进引导第 1 步 ✓（用户："感觉可以只保留这个" ✓）
+      // 单元测试要测旧的完整面板 ✓ → 置 `MH.ui.wizardOptOut = true` 即可 ✓
+      if (st.phase === 'prep' && !MH.ui.wizardOptOut && MH.ui.wizard == null) MH.ui.wizard = 1;
       const el = MH.els.sidebar;
       if (!el) return;
       const top = el.scrollTop;
