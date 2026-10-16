@@ -273,10 +273,21 @@
       for (let k = 1; k < ln.items.length; k++) {
         const gap = ln.items[k].x - (cur[cur.length - 1].x + cur[cur.length - 1].w);
         // **行内切段**的空隙阈值 ✓：段 = 同一列里的一小串词 ✓
-        // 调紧一点（1.6 → 1.0 行高 ✓）：一张卡片里常常并排着**两列**人像 ✓，
-        // 列间空隙若小于阈值就会把两列粘成一段 ✗（golf 实测粘成
-        // "He was the onl man  She did not occupy to occupy a golf …" ✗ → 人名和文字对不上 ✓）
-        if (gap > Math.max(8, medH * (opt.segGap == null ? 1.0 : opt.segGap))) { flush(); cur = []; }
+        //
+        // 这是个**有代价的旋钮** ✗（实测过 ✓）：
+        //   · 调松（1.6 行高）→ 窄列沟（约 1.2~1.5 行高 ✓）会把**两列粘成一段** ✗（golf 实测 ✓）
+        //   · 调紧（1.0 行高）→ 字距被拉宽的正文（两端对齐 ✓）会被**从中间切开** ✗，
+        //     而**同行的段永远不会再合回去** ✓ → 一句完整的话被拆成碎片 → **整条线索丢掉** ✗
+        //     （合成实测：词距 1.3 行高时，阈值 1.0 → 0 条 ✗、阈值 1.6 → 1 条 ✓）
+        //
+        // 因此**按来源给不同默认值** ✓：
+        //   · OCR 逐词框（wordLevel ✓）：词距小、噪声大 ✓ → 1.0（宁可切开列 ✓，避免跨列粘连 ✓）
+        //   · PDF 文字层 ✓：宽度精确、两端对齐常见 ✓ → 1.6（**别切坏句子** ✓）
+        //
+        // 真正的解法是"**按列沟检测**"（见文档 ✓）：沟是**跨多行重复出现的空白带** ✓，
+        // 与绝对间隙无关 ✓ —— 那样就能既切准列、又不切坏句子 ✓。此处先按来源取值 ✓。
+        const segGap = opt.segGap == null ? (opt.wordLevel ? 1.0 : 1.6) : opt.segGap;
+        if (gap > Math.max(8, medH * segGap)) { flush(); cur = []; }
         cur.push(ln.items[k]);
       }
       if (cur.length) flush();
