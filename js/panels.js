@@ -47,7 +47,7 @@
       (cc.clues.some(c => !c.personId)
         ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
           ' 段没能按名字/首字母对上人物' +
-          ((cc.names || []).length ? '（首字母不在编号里）' : '（**这张卡片上没有人名** —— 这版题目用人像区分，请对照题面的人像用下拉框指定 ✓）') +
+          ((cc.names || []).length ? '（首字母不在编号里）' : '（<b>这张卡片上没有人名</b> —— 这版题目用人像区分，请对照题面的人像用下拉框指定 ✓）') +
           ' —— 用左边的下拉框指定一下 ✓</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
@@ -307,11 +307,13 @@
     layer.id = 'boardCrop';
     layer.className = 'board-crop';
     layer.innerHTML =
-      '<div class="bc-head"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
+      '<div class="bc-head">' +
+      '<div class="bc-line"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
       '<span class="muted">拖一个框 → 变右侧卡片 ✓（可连框多张，识别时拼在一起一起用 ✓）；' +
-      '点「完成」就**自动接着识别**' + (kind === 'item' ? '物品并找位置 ✓' : '人物线索 ✓') + '</span>' +
-      '<span class="grow"></span>' +
-      '<button class="ghost sm" data-act="crop-close">完成</button></div>' +
+      '点「完成」就<b>自动接着识别</b>' + (kind === 'item' ? '物品并找位置 ✓' : '人物线索 ✓') + '</span></div>' +
+      // "完成"放到**下一行靠左** ✓（顶部右侧容易和右边摘录浮窗打架 ✓）
+      '<div class="bc-actions"><button class="ghost sm" data-act="crop-close">完成 ✓</button></div>' +
+      '</div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
     // 右边「PDF 摘录」浮窗是 `position: fixed` + `z-index: 60` ✓ —— 会盖住这一层的**右侧** ✗
     // （"完成"按钮正好在最右边 ✓ → 真实鼠标点不到 ✓，之前只能靠脚本点 ✓）
@@ -454,7 +456,7 @@
             '<button class="ghost block" data-act="legend-locate" title="用图例图标当模板，逐件到地图上找格子">' +
             (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>' +
             '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
-          : '<p class="hint">还没有可用的页面 —— 回第 1 步导入底图 ✓（导入的那份会**自动**带到右侧卡片 ✓，不用再导一次 ✓）。</p>') +
+          : '<p class="hint">还没有可用的页面 —— 回第 1 步导入底图 ✓（导入的那份会<b>自动</b>带到右侧卡片 ✓，不用再导一次 ✓）。</p>') +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
