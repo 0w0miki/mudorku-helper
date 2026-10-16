@@ -2502,6 +2502,15 @@
     applyBgPatch({ scale: next });
   }
 
+  /** 记住"开始编辑这个线索框之前"的值 ✓ —— 用于失焦时生成一个可撤销步骤 ✓ */
+  function onDocumentFocusIn(e) {
+    const t = e.target;
+    if (t && t.dataset && t.dataset.act === 'person-clue') {
+      const p2 = Core.person(MH.store.state, t.dataset.id);
+      MH.ui.clueBefore = p2 ? (p2.clue || '') : '';
+    }
+  }
+
   function onDocumentInput(e) {
     const t = e.target;
     if (t.dataset && t.dataset.act === 'clue-text') {
@@ -2511,10 +2520,15 @@
       return;
     }
     if (t.dataset && t.dataset.act === 'person-clue') {
+      // **不再每敲一个字就 commit** ✗ —— commit 会整栏重绘，输入框被换掉 → 丢焦点 ✓
+      // 输入时只写状态（不重绘 ✓），并防抖落盘（`touch` 不产生撤销步骤 ✓）；
+      // 失焦（change）时再用 commit 记一个可撤销的步骤 ✓
       const pid = t.dataset.id;
       const v = String(t.value || '').slice(0, 300);
-      const cur = (Core.person(MH.store.state, pid) || {}).clue || '';
-      if (v !== cur) MH.store.commit('写人物线索', st => { const p2 = Core.person(st, pid); if (p2) p2.clue = v; });
+      const p2 = Core.person(MH.store.state, pid);
+      if (p2) p2.clue = v;
+      clearTimeout(MH.ui.clueTimer);
+      MH.ui.clueTimer = setTimeout(() => { MH.ui.clueTimer = null; MH.store.touch('写人物线索'); }, 600);
       return;
     }
     if (t.id === 'draftName') {
@@ -2540,6 +2554,19 @@
     }
     if (t.name === 'draftOcc') {
       if (MH.ui.draft) { MH.ui.draft.occupiable = t.value === '1'; MH.render(); }
+    } else if (t.dataset && t.dataset.act === 'person-clue') {
+      clearTimeout(MH.ui.clueTimer); MH.ui.clueTimer = null;
+      const pid = t.dataset.id;
+      const v = String(t.value || '').slice(0, 300);
+      const before = MH.ui.clueBefore == null ? '' : MH.ui.clueBefore;
+      MH.ui.clueBefore = null;
+      if (v !== before) {
+        // **先还原成"编辑前"的值，再 commit ✓** —— 输入时状态已经被直接改过了，
+        // 直接 commit 会被当成"没变化" → 不产生撤销步骤 ✗（实测：Undo 拿不回来 ✓）
+        const p2 = Core.person(MH.store.state, pid);
+        if (p2) p2.clue = before;
+        MH.store.commit('写人物线索', st => { const p3 = Core.person(st, pid); if (p3) p3.clue = v; });
+      }
     } else if (t.dataset && t.dataset.act === 'clue-text') {
       // **不重绘** ✗→✓：输入框失焦时的 change 若触发 render，会把按钮也换掉，
       // 紧接着的点击就落在被替换的节点上 → 点了没反应 ✓（实测踩过）
@@ -2713,6 +2740,7 @@
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);
+      document.addEventListener('focusin', onDocumentFocusIn);
       const sidebar = MH.els.sidebar;
       sidebar.addEventListener('pointermove', onSidebarHover);
       sidebar.addEventListener('pointerleave', clearSidebarHover);
@@ -2747,8 +2775,29 @@
       const el = MH.els.sidebar;
       if (!el) return;
       const top = el.scrollTop;
+      // **记住焦点与光标** ✓：整栏重绘会把输入框整个换掉 ✗ → 焦点/光标丢失 ✓
+      // （手动输入线索时每敲一个字就丢焦点 ✓ —— 实测踩过）
+      const act = document.activeElement;
+      const keep = (act && el.contains(act) && (act.id || (act.dataset && act.dataset.act)))
+        ? { id: act.id || null, aid: (act.dataset && act.dataset.act) || null,
+            i: (act.dataset && act.dataset.i) || null,
+            start: act.selectionStart, end: act.selectionEnd }
+        : null;
       el.innerHTML = st.phase === 'prep' ? prepHTML(st) : playHTML(st);
       el.scrollTop = top;
+      if (keep) {
+        let next = null;
+        if (keep.id) next = el.querySelector('#' + keep.id);
+        if (!next && keep.aid) {
+          next = el.querySelector('[data-act="' + keep.aid + '"]' + (keep.i != null ? '[data-i="' + keep.i + '"]' : ''));
+        }
+        if (next && next.focus) {
+          next.focus();
+          try {
+            if (keep.start != null && next.setSelectionRange) next.setSelectionRange(keep.start, keep.end);
+          } catch (err) { /* 非文本控件忽略 ✓ */ }
+        }
+      }
       syncChrome(st);
     },
 

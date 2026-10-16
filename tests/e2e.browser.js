@@ -1380,6 +1380,32 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '没解析出关联的整句也存下来了（仍按位置推定给了某个人 ✓）：' + JSON.stringify(victim));
   ok(await p.evaluate(() => !window.MH.ui.clueCands), '应用后候选面板收起');
 
+  // 38) 手工输入线索：连续打字不能丢焦点 ✓，失焦后要能撤销 ✓
+  await p.evaluate(() => window.MH.store.replace(window.MurdokuCore.createState(6, 6), 'x'));
+  await p.click('#tabPrep');
+  await p.click('[data-act="select-person"]');
+  const clueBox = p.locator('#personClue');
+  await clueBox.click();
+  await clueBox.type('He was beside a shelf', { delay: 30 });
+  const typing = await p.evaluate(() => ({
+    focus: document.activeElement && document.activeElement.id,
+    pos: document.activeElement && document.activeElement.selectionStart,
+    val: (document.getElementById('personClue') || {}).value,
+  }));
+  ok(typing.focus === 'personClue', '打字时焦点仍在输入框（不丢 ✓）：' + JSON.stringify(typing.focus));
+  ok(typing.pos === 'He was beside a shelf'.length, '光标在末尾 ✓：' + typing.pos);
+  ok(typing.val === 'He was beside a shelf', '框内是打进去的字 ✓：' + JSON.stringify(typing.val));
+  await p.keyboard.press('Tab');                     // 失焦 → 记一个可撤销步骤 ✓
+  await p.waitForTimeout(200);
+  const canUndo = await p.evaluate(() => !!window.MH.store.canUndo());
+  await p.evaluate(() => window.MH.store.undo());
+  await p.waitForTimeout(150);
+  const afterUndo = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    return (st.people.find(x => x.id === st.selectedPersonId) || {}).clue;
+  });
+  ok(canUndo && afterUndo === '', '失焦后可撤销，撤销后线索回到空 ✓：' + JSON.stringify(afterUndo));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
