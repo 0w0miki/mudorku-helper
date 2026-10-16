@@ -1504,6 +1504,32 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   await p.evaluate(() => { const b2 = document.querySelector('#boardCrop [data-act="crop-close"]'); if (b2) b2.click(); });
   ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '点「完成」关闭框选层 ✓');
 
+  // 41) 卡片顺序（按使用顺序 ✓）+ setClueCandidates 返回数组（读人物线索不报 clues.some ✓）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    const st = window.MH.store.state;
+    st.bg = { kind: 'image', name: 'x.png', w: 900, h: 700, page: 1, pages: 1, opacity: 1, scale: 1, visible: true, bound: false };
+    window.MH.ui.wizard = 1;
+    window.MH.render();
+  });
+  const cardOrder = await p.evaluate(() => [...document.querySelectorAll('#sidebar .card')].map(card => {
+    const has = a => !!card.querySelector('[data-act="' + a + '"]');
+    if (has('bg-import')) return '底图';
+    if (has('gen')) return '地图';
+    if (has('bg-region')) return '对齐网格';
+    return '其他';
+  }).filter(x => x !== '其他'));
+  ok(cardOrder[0] === '底图' && cardOrder[1] === '地图' && cardOrder[2] === '对齐网格',
+    '顺序：底图 → 行列/生成 → 框外框/微调 ✓：' + JSON.stringify(cardOrder));
+  const ret = await p.evaluate(() => {
+    const r = window.MH.panels.setClueCandidates({ clues: [{ text: 'He was in a car .', person: null, links: [] }] }, 'json', []);
+    return { isArray: Array.isArray(r), len: r.length, some: typeof r.some };
+  });
+  ok(ret.isArray && ret.len === 1 && ret.some === 'function',
+    'setClueCandidates 返回数组（调用处能用 .length/.some）✓：' + JSON.stringify(ret));
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

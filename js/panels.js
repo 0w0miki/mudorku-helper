@@ -196,10 +196,6 @@
       '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分；裁完图片与网格绑定，缩放一起变">✂ 裁切到网格</button>' +
       '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
       '</div>' +
-      '<div class="row wrap">' +
-      '<button class="ghost sm" data-act="bg-region" title="拖动矩形，正好圈住地图外框；再用当前行列数算出格距与偏移">▭ 框地图外框</button>' +
-      (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
-      '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
       ' · ' + b.w + '×' + b.h + (b.kind === 'pdf' ? '（第 ' + b.page + '/' + b.pages + ' 页）' : '') + '</p>' +
       (b.kind === 'pdf' && b.pages > 1
@@ -218,11 +214,6 @@
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="bg-scale-reset" title="回到 100%">还原 100%</button>' +
       '</div>' +
-      '<label class="check"><input type="checkbox" data-act="bg-align" ' + (MH.ui.aligning ? 'checked' : '') + '> <b>对齐底图</b>（拖动移动网格 · 拖右下角手柄缩放 · 方向键微调）</label>' +
-      (MH.ui.aligning
-        ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
-          '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
-        : '<p class="hint">格子大小也可以调（顶栏 🔍 或下面的缩放），网格会以左上角为锚点变化。</p>') +
       '</section>';
   }
 
@@ -261,6 +252,26 @@
     { id: 3, name: '物品识别', tip: '从图例卡片读出物品清单，再按样例补格子（都可以手动加减）' },
     { id: 4, name: '人物线索识别', tip: '读每个人物的说明；解析出的关联先给候选，确认后再写进人物' },
   ];
+
+  /**
+   * 框地图外框 + 网格位置调整 ✓ —— 单独成卡，**放在"生成地图"下面** ✓
+   * 使用顺序：导入底图 → 设行列 → 生成网格 → 再框地图外框、微调网格位置 ✓（用户要求 ✓）
+   */
+  function bgAlignCard(st) {
+    if (!st.bg) return '';
+    return '<section class="card">' +
+      '<h2>对齐网格 <span class="muted">框地图外框 · 再微调</span></h2>' +
+      '<div class="row wrap">' +
+      '<button class="ghost sm" data-act="bg-region" title="拖动矩形，正好圈住地图外框；再用当前行列数算出格距与偏移">▭ 框地图外框</button>' +
+      (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
+      '</div>' +
+      '<label class="check"><input type="checkbox" data-act="bg-align" ' + (MH.ui.aligning ? 'checked' : '') + '> <b>对齐底图</b>（拖动移动网格 · 拖右下角手柄缩放 · 方向键微调）</label>' +
+      (MH.ui.aligning
+        ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
+          '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
+        : '<p class="hint">格子大小也可以调（顶栏 🔍 或底图卡片里的缩放），网格会以左上角为锚点变化。</p>') +
+      '</section>';
+  }
 
   /**
    * **在主界面上框选** ✓（用户要求）：
@@ -351,6 +362,7 @@
     const body = [];
 
     if (step === 1) {
+      // 顺序按使用来 ✓：导入底图 → 行列数 → 生成网格 → 框外框/微调 ✓
       body.push(bgCard(st));
       body.push('<section class="card"><h2>行列数</h2>' +
         '<div class="grid2">' +
@@ -363,7 +375,8 @@
         '<button class="primary block" data-act="gen">生成地图</button>' +
         '<p class="hint">' + (bgOk
           ? '✓ 地图框已对位（黄框贴着地图四边）· 人物数 = min(行, 列) = <b>' + Core.peopleCount(st.rows, st.cols) + '</b>'
-          : '还没框地图：点上面的「框地图外框」，沿地图四边拖一个框（要贴住网格）') + '</p></section>');
+          : '还没框地图：生成网格后，在下面「对齐网格」里点「框地图外框」，沿地图四边拖一个框（要贴住网格）') + '</p></section>');
+      body.push(bgAlignCard(st));
     } else if (step === 2) {
       body.push('<section class="card"><h2>自动识别区域</h2>' +
         (st.bg
@@ -380,13 +393,15 @@
         '<button class="ghost block" data-act="crop-item">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
         '<p class="hint">在棋盘区的那页图上，沿一个物品图标拖一个框 ✓ → 右侧会出现这张卡片 ✓；' +
           '再点物品的「按样例添加」就能把同类格子找出来。</p></section>');
+      const snipReady = !!(window.MurdokuSnipper && window.MurdokuSnipper.state &&
+        (window.MurdokuSnipper.state.img || (window.MurdokuSnipper.state.pins || []).length));
       body.push('<section class="card"><h2>从图例列出物品</h2>' +
-        (st.bg
+        (snipReady
           ? '<button class="ghost block" data-act="legend-auto" title="从右侧图例卡片切出图标、认名字，并按图例里的说明分可占据/不可占据">🚀 从图例自动列出物品</button>' +
             '<button class="ghost block" data-act="legend-locate" title="用图例图标当模板，逐件到地图上找格子">' +
             (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>' +
             '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
-          : '<p class="hint">还没有底图 —— 回第 1 步导入。</p>') +
+          : '<p class="hint">还没有可用的页面 —— 用上面「✂️ 在主界面上框选」，或在右侧卡片面板里导入图片/PDF ✓（两处用的是同一份 ✓）。</p>') +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
@@ -449,6 +464,7 @@
       '<p class="hint">人物数 = min(行, 列) = <b>' + n + '</b>，标签 A–Z 且跳过 X' +
       (st.people.length ? '：' + st.people.map(p => p.label).join(' ') : '') + '</p>' +
       '</section>' +
+      bgAlignCard(st) +        // 框地图外框 / 网格位置调整：放在"生成地图"后面 ✓（按使用顺序 ✓）
 
       '<section class="card">' +
       '<h2>人物 <span class="muted">点击选择后可设置关联</span></h2>' +
@@ -1044,7 +1060,9 @@
     });
     MH.ui.clueCands = { clues, via: via || 'json', names: names || [] };
     MH.render();
-    return clues.length;
+    // **返回数组本身** ✓ —— 调用处要 `clues.length` 与 `clues.some(...)` ✓
+    // （以前返回的是长度数字 ✗ → 读人物线索时报 "clues.some is not a function" ✓）
+    return clues;
   }
 
   /** 把候选应用到人物上：写线索原文 ✓ + 只在"在…里"这类关系上建关联 ✓ */
