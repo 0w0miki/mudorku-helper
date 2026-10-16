@@ -427,15 +427,27 @@
    * @param {Array} items 带坐标的文字块（PDF 文字层或 OCR 词框 ✓）
    * @param {Array} names 已知物品/区域名
    */
+  /**
+   * **唯一的取字入口** ✓ —— 行优先版面分析（行 → 按大空隙切段 → 段竖向相邻归块 ✓）
+   *
+   * 为什么统一（2026-10-16）：PDF 走 `cluster`（逐对连边 ✗）、OCR 走 `clusterLines` ✓，
+   * 两条路行为不一致 ✓ → 同类问题只在一侧出现，排查总要问"这次走哪条路" ✗。
+   * 现在只有一条 ✓，差异只在阈值（`wordLevel` ✓）。
+   *
+   * 回归实测（三份真题 ✓）：
+   * · car-repair：Diane 那条线索**变完整** ✓（"She was alone in the Waiting Area" ✓，
+   *   旧路径截断成 "She was alone in the" ✗）
+   * · familymurdoku：句子分块同样正常 ✓
+   * · contest（6 条长条）：人名配对仍正确 ✓（Seraphina/Quincy/Rosalind/Ursula… ✓）
+   */
   function readItems(items, names, opts) {
     const o = Object.assign({}, opts || {}, { blocks: true });
-    return extract(cluster(items, o), names, o);
+    return extract(clusterLines(items, o), names, o);
   }
 
-  /** OCR 来源的入口：**走行优先版面分析** ✓（逐词框用它最稳 ✓） */
+  /** 兼容旧调用：OCR 来源 = 行优先 + 逐词框阈值 ✓（与 readItems 同一套算法 ✓） */
   function readOcrItems(items, names, opts) {
-    const o = Object.assign({}, opts || {}, { blocks: true, wordLevel: true });
-    return extract(clusterLines(items, o), names, o);
+    return readItems(items, names, Object.assign({}, opts || {}, { wordLevel: true }));
   }
 
   /**
