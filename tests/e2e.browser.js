@@ -1722,8 +1722,10 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     const raster = await window.MH.panels.cardsRaster();
     return { w: raster.width, h: raster.height, merged: window.MH.ui.cardsMerged };
   });
-  ok(merged.w === 520 && merged.h === 484 && merged.merged === 2,
-    '两张卡片竖着拼成一张（200+200+留白 = 484）✓：' + JSON.stringify(merged));
+  // 留白必须**大于聚类的竖向相邻阈值**（1.8 × 行高 ≈ 36~72px ✓）→ 现在用 160px ✓
+  // （以前 28px ✗ → 跨卡片粘成一块 ✓，golf 实测三张卡的线索粘成一条 ✗）
+  ok(merged.w === 520 && merged.h === 200 * 2 + 160 * 3 && merged.merged === 2,
+    '两张卡片竖着拼成一张（200+200+留白×3 = 880）✓：' + JSON.stringify(merged));
   const bothTexts = await p.evaluate(async () => {
     const raster = await window.MH.panels.cardsRaster();
     const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },

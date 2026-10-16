@@ -272,7 +272,11 @@
       };
       for (let k = 1; k < ln.items.length; k++) {
         const gap = ln.items[k].x - (cur[cur.length - 1].x + cur[cur.length - 1].w);
-        if (gap > Math.max(10, medH * (opt.segGap == null ? 1.6 : opt.segGap))) { flush(); cur = []; }
+        // **行内切段**的空隙阈值 ✓：段 = 同一列里的一小串词 ✓
+        // 调紧一点（1.6 → 1.0 行高 ✓）：一张卡片里常常并排着**两列**人像 ✓，
+        // 列间空隙若小于阈值就会把两列粘成一段 ✗（golf 实测粘成
+        // "He was the onl man  She did not occupy to occupy a golf …" ✗ → 人名和文字对不上 ✓）
+        if (gap > Math.max(8, medH * (opt.segGap == null ? 1.0 : opt.segGap))) { flush(); cur = []; }
         cur.push(ln.items[k]);
       }
       if (cur.length) flush();
@@ -284,6 +288,15 @@
     for (let i = 0; i < segs.length; i++) {
       for (let j = i + 1; j < segs.length; j++) {
         const a = segs[i], b = segs[j];
+        // **卡片分割线** ✓：用户框的卡片是一张一张的 ✓ —— 跨线的两段永不合并 ✓
+        // （以前只靠"留白间隔" ✓，而间隔一旦小于"竖向相邻阈值"就会跨卡粘成一块 ✗，
+        //  golf 实测三张卡的线索粘成一条 ✗ → 人名和文字对不上 ✓）
+        if (opt.cuts && opt.cuts.length) {
+          const mid = (Math.max(a.y, b.y) + Math.min(a.y1, b.y1)) / 2;
+          const yA = a.y + (a.y1 - a.y) / 2, yB = b.y + (b.y1 - b.y) / 2;
+          const crossed = opt.cuts.some(c => (yA - c) * (yB - c) < 0 || (mid && Math.abs(mid - c) < 1));
+          if (crossed) continue;
+        }
         const gapY = Math.max(0, Math.max(a.y - b.y1, b.y - a.y1));
         if (gapY > Math.max(8, medH * (opt.blockGap == null ? 1.8 : opt.blockGap))) continue;
         const ox = Math.min(a.x1, b.x1) - Math.max(a.x, b.x);

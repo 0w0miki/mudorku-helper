@@ -854,7 +854,11 @@
       });
       imgs.push({ img, w: pin.w || img.naturalWidth, h: pin.h || img.naturalHeight });
     }
-    const gap = 28;                                            // 留白隔开 ✓（免得跨卡片粘连 ✓）
+    // **留白必须大于聚类的"竖向相邻"阈值** ✗→✓：阈值是 `1.8 × 行高`（实测行高 20~40 → 36~72px ✓），
+    // 以前只留 28px ✗ → 相邻两张卡片的文字会被当成同一块 ✓✓
+    // （golf 实测：三张卡的线索粘成 "He was the only man  She did not occupy …" ✗
+    //   → 用户看到的"人名和文字对不上 / F 和 G 的线索给了 E" ✓）
+    const gap = 160;
     const W = Math.max.apply(null, imgs.map(z => z.w));
     const H = imgs.reduce((a, z) => a + z.h + gap, gap);
     const cv = document.createElement('canvas');
@@ -863,13 +867,16 @@
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, W, H);
     let y = gap;
-    for (const z of imgs) {
-      ctx.drawImage(z.img, 0, y, z.w, z.h);
-      y += z.h + gap;
+    const cuts = [];                        // 卡片之间的分割线（y ✓）→ 聚类时禁止跨线合块 ✓
+    for (let i = 0; i < imgs.length; i++) {
+      ctx.drawImage(imgs[i].img, 0, y, imgs[i].w, imgs[i].h);
+      y += imgs[i].h;
+      cuts.push(Math.round(y + gap / 2));    // 分割线取间隔中点 ✓
+      y += gap;
     }
     const d = ctx.getImageData(0, 0, W, H);
     MH.ui.cardsMerged = imgs.length;
-    return { data: d.data, width: W, height: H };
+    return { data: d.data, width: W, height: H, cuts };
   }
 
   /**
@@ -1160,7 +1167,8 @@
       const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },
         { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') });
       return words && words.length
-        ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr' }
+        ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr',
+            cuts: raster.cuts || [] }                                   // **卡片分割线** ✓
         : null;
     }
     return null;
