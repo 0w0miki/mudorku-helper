@@ -1634,6 +1634,43 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   }));
   ok(gotIt.name === 'bg.png' && gotIt.w === 8, '同一份文件被带到右侧卡片 ✓：' + JSON.stringify(gotIt));
 
+  // 45) 游玩界面：点到人物就显示他的线索 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    const st = window.MH.store.state;
+    st.people[0].clue = 'He was in a car .';
+    st.people[1].clue = 'She was not sitting in a chair.';
+    st.people[2].clue = '';
+    window.MH.render();
+  });
+  await p.click('#tabPlay');
+  const playClue1 = await p.evaluate(() => {
+    const c = document.querySelector('.play-clue');
+    return { has: !!c, text: c && c.querySelector('.clue-text') ? c.querySelector('.clue-text').textContent : null };
+  });
+  ok(playClue1.has && /car/i.test(playClue1.text || ''), '游玩界面显示当前人物的线索 ✓：' + JSON.stringify(playClue1));
+  await p.evaluate(() => {
+    const st = window.MH.store.state;
+    document.querySelector('.plist li[data-id="' + st.people[1].id + '"]').click();
+  });
+  const playClue2 = await p.evaluate(() => {
+    const c = document.querySelector('.play-clue');
+    return { who: (c.querySelector('.muted') || {}).textContent, text: (c.querySelector('.clue-text') || {}).textContent };
+  });
+  ok(/B/.test(playClue2.who || '') && /chair/i.test(playClue2.text || ''),
+    '换一个人物，线索跟着换 ✓：' + JSON.stringify(playClue2));
+  await p.evaluate(() => {
+    const st = window.MH.store.state;
+    document.querySelector('.plist li[data-id="' + st.people[2].id + '"]').click();
+  });
+  const playClue3 = await p.evaluate(() => {
+    const c = document.querySelector('.play-clue');
+    return { hint: !!c.querySelector('.hint'), text: !!c.querySelector('.clue-text') };
+  });
+  ok(playClue3.hint && !playClue3.text, '没线索的人给出提示而不是空框 ✓：' + JSON.stringify(playClue3));
+  await p.click('#tabPrep');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

@@ -583,11 +583,33 @@
     return cnt ? cnt + ' 个候选' : '未标注';
   }
 
+  /** 游玩时显示"当前选中人物"的线索 ✓（用户要求：点到人物就显示对应线索 ✓） */
+  function playClueCard(st, sel) {
+    if (!sel) return '';
+    const links = (sel.links || []).map(l => {
+      const t = l.kind === 'region' ? Core.region(st, l.id) : Core.item(st, l.id);
+      if (!t) return '';
+      const neg = l.polarity === -1;
+      return '<span class="tag ' + (neg ? 'neg' : 'pos') + '">' + (l.kind === 'region' ? '区域 ' : '') +
+        esc(t.name) + (neg ? ' −' : ' +') + '</span>';
+    }).filter(Boolean).join(' ');
+    return '<section class="card play-clue">' +
+      '<h2>线索 <span class="muted">「' + esc(sel.label) + '」</span></h2>' +
+      (sel.clue
+        ? '<p class="clue-text">' + esc(sel.clue) + '</p>'
+        : '<p class="hint">这个人的线索还是空的 —— 在「① 地图准备」里可以手打/粘贴，' +
+          '也可以用卡片上的「读人物线索」自动读 ✓</p>') +
+      (links ? '<div class="chips">' + links + '</div>' : '') +
+      '</section>';
+  }
+
   function playHTML(st) {
     const sel = Core.person(st, st.selectedPersonId) || st.people[0] || null;
     const placedCount = st.people.filter(p => st.play.placed[p.id]).length;
     const issues = st.settings.liveValidate ? Core.validate(st) : [];
     return '' +
+      // 点到谁就显示谁的线索 ✓（放在最上面 —— 游玩时这就是最常看的信息 ✓）
+      playClueCard(st, sel) +
       '<section class="card">' +
       '<h2>人物 <span class="muted">' + placedCount + '/' + st.people.length + ' 已确定</span></h2>' +
       // 人多时一行一个太长了（24 人 ≈ 700px 以上），改成紧凑网格：
