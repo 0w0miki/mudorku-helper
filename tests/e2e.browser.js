@@ -1870,6 +1870,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '框选层铺满棋盘区（不再为浮窗改宽度）✓：' + JSON.stringify(cropGeo));
   ok(cropGeo && cropGeo.topmost === 'crop-close',
     '「完成」在下一行靠左 → 不被浮窗挡住，仍是命中的最上层 ✓：' + (cropGeo && cropGeo.topmost));
+
   // 真实鼠标点击 ✓（这条以前会因为被遮挡而超时 ✗）
   await p.click('#boardCrop [data-act="crop-close"]', { timeout: 5000 });
   ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '真实鼠标点「完成」能关掉框选层 ✓');
@@ -2139,13 +2140,25 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     const old = document.getElementById('boardCrop'); if (old) old.remove();
     document.querySelector('[data-act="crop-item"]').click();
   });
-  const pageNav = await p.evaluate(() => ({
-    n: document.querySelectorAll('#boardCrop [data-act="crop-page"]').length,
-    title: (document.querySelector('#boardCrop .bc-line b') || {}).textContent,
-    prevDisabled: (document.querySelector('#boardCrop [data-act="crop-page"][data-dir="-1"]') || {}).disabled,
-  }));
+  const pageNav = await p.evaluate(() => {
+    const layer = document.getElementById('boardCrop');
+    const acts = [...layer.querySelectorAll('.bc-actions button')];
+    const done = layer.querySelector('[data-act="crop-close"]');
+    const br = done.getBoundingClientRect(), lr = layer.getBoundingClientRect();
+    const hit = document.elementFromPoint(br.x + br.width / 2, br.y + br.height / 2);
+    return {
+      n: layer.querySelectorAll('[data-act="crop-page"]').length,
+      title: (layer.querySelector('.bc-line b') || {}).textContent,
+      prevDisabled: layer.querySelector('[data-act="crop-page"][data-dir="-1"]').disabled,
+      doneFirst: acts[0] === done,                                  // **「完成」在最左** ✓
+      doneNearLeft: Math.round(br.left - lr.left) < 40,
+      topmost: hit ? (hit.getAttribute('data-act') || hit.tagName) : null,
+    };
+  });
   ok(pageNav.n === 2 && /第 1 \/ 3 页/.test(pageNav.title || '') && pageNav.prevDisabled === true,
     '多页时框选层出现翻页按钮，标题带页码 ✓：' + JSON.stringify(pageNav));
+  ok(pageNav.doneFirst && pageNav.doneNearLeft && pageNav.topmost === 'crop-close',
+    '有翻页按钮时「完成」仍在最左且不被遮挡 ✓：' + JSON.stringify(pageNav));
   await p.evaluate(() => {
     const Sn = window.MurdokuSnipper;
     Sn.state.page = 2;                                  // 模拟翻到第 2 页 ✓

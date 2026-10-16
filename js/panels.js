@@ -316,16 +316,17 @@
       '点「完成」就<b>自动接着识别</b>' + (kind === 'item' ? '物品并找位置' : '人物线索') + '</span></div>' +
       // "完成"放到**下一行靠左** ✓（顶部右侧容易和右边摘录浮窗打架 ✓）
       '<div class="bc-actions">' +
-      // **翻页** ✓（PDF 多页时：线索/图例可能在别的页 ✓）
+      // **「完成」放最左** ✓ —— 右侧会被悬浮窗盖住 ✗（实测踩过两次 ✓）
+      '<button class="ghost sm" data-act="crop-close">完成 ✓</button>' +
+      // **翻页**跟在后面 ✓（PDF 多页时：线索/图例可能在别的页 ✓）
       (Sn && Sn.state && Sn.state.pages > 1
         ? '<button class="ghost sm" data-act="crop-page" data-dir="-1"' +
             (Sn.state.page <= 1 ? ' disabled' : '') + '>◀ 上一页</button>' +
           '<span class="meta">第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页</span>' +
           '<button class="ghost sm" data-act="crop-page" data-dir="1"' +
-            (Sn.state.page >= Sn.state.pages ? ' disabled' : '') + '>下一页 ▶</button>' +
-          '<span class="grow"></span>'
+            (Sn.state.page >= Sn.state.pages ? ' disabled' : '') + '>下一页 ▶</button>'
         : '') +
-      '<button class="ghost sm" data-act="crop-close">完成 ✓</button></div>' +
+      '</div>' +
       '</div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
     // 「完成」已经挪到下一行靠左 ✓ → 不必再为它让位、也不必压在右侧浮窗之上 ✓

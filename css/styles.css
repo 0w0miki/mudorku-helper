@@ -916,7 +916,8 @@ body.picking #board { cursor: crosshair; }
 .bc-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .bc-head .muted { min-width: 0; }
 /* "完成"在**下一行靠左** ✓（放在顶部右侧会和右边摘录浮窗打架 ✓） */
-.bc-actions { margin-top: 6px; display: flex; gap: 8px; }
+.bc-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.bc-actions .meta { font-size: 12px; color: #667; }
 .bc-actions button { white-space: nowrap; }
 .bc-head .grow { flex: 1 1 auto; }
 .bc-stage { position: relative; overflow: auto; flex: 1 1 auto; padding: 8px; text-align: center; }
