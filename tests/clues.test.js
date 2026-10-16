@@ -416,3 +416,18 @@ test('已经指定过人物的候选不会被"位置推定"改派 ✓', () => {
   const gone = C.mapByInitial([{ text: 'x', personId: 'nope', links: [] }], people);
   assert.equal(gone[0].personId, 'p1', '指向不存在的人时，按位置补 ✓');
 });
+
+test('人名配对：**横向对齐优先** ✓（不能只看纵向最近 —— contest 实测踩过）', () => {
+  // 名字：Seraphina 在正上方且横向对齐 ✓；Rosalind 在左边远处但纵向更近 ✗
+  const lines = [
+    { text: 'Seraphina', x: 672, y: 1204, w: 144, h: 34 },
+    { text: 'Rosalind', x: 433, y: 1242, w: 125, h: 33 },
+    { text: 'She was at least six rows north of Linus .', x: 665, y: 1252, w: 162, h: 62 },
+    { text: 'She was sitting in a chair .', x: 419, y: 1285, w: 153, h: 41 },
+  ];
+  const out = C.extract(lines, []);
+  const byText = Object.fromEntries(out.clues.map(c => [c.text, c.person]));
+  assert.equal(byText['She was at least six rows north of Linus .'], 'Seraphina',
+    '横向对齐的 Seraphina 才对（Rosalind 纵向更近 ✗）');
+  assert.equal(byText['She was sitting in a chair .'], 'Rosalind', '自己正下方那条仍归自己 ✓');
+});

@@ -634,13 +634,22 @@
     // 只保留"下方有内容"的人名 ✓，并把人的位置带给候选（按块/位置推定用 ✓）
     const used = new Set();
     for (const r of rows) {
-      let best = null, bestRow = Infinity, bestX = Infinity;
+      let best = null, bestKey = null;
       for (const n of personNames) {
-        const above = n.y <= r.y + 4;
-        const row = above ? (r.y - n.y) : 1e5 + Math.abs(r.y - n.y);
-        const dx = Math.abs(r.x - n.x);
-        const better = row < bestRow - 1 || (Math.abs(row - bestRow) <= 1 && dx < bestX);
-        if (!best || better) { best = n; bestRow = row; bestX = dx; }
+        if (n.y > r.y + 4) continue;                       // 只看**上方**的名字 ✓
+        // **横向关系优先** ✓：名字与线索在同一列（框有重叠）才算"这个人的" ✓
+        // 以前只看纵向最近 ✗ —— contest 实测：一条线索正上方横向对齐的是 Seraphina ✓，
+        // 但左边远处的 Rosalind 纵向更近（dy 10 vs 48 ✗）→ 被错认 ✓（这就是用户说的"对应不准" ✓）
+        const nx1 = n.x + (n.w || 60), rx1 = r.x + (r.w || 60);
+        const ox = Math.min(nx1, rx1) - Math.max(n.x, r.x);
+        const sameCol = ox > 0;
+        const dx = sameCol ? 0 : Math.min(Math.abs(n.x - r.x), Math.abs(nx1 - rx1));
+        const dy = r.y - n.y;
+        const key = [sameCol ? 0 : 1, dy, dx];
+        const better = !bestKey || key[0] < bestKey[0] ||
+          (key[0] === bestKey[0] && (key[1] < bestKey[1] - 1 ||
+            (Math.abs(key[1] - bestKey[1]) <= 1 && key[2] < bestKey[2])));
+        if (better) { best = n; bestKey = key; }
       }
       r.person = best ? best.name : null;
       if (best) used.add(best.name);
