@@ -1126,7 +1126,11 @@
    * 框了卡片就只取卡片里的文字 ✓（和"卡片定义范围"的原则一致 ✓）。
    * @returns {{items:Array, via:string}|null}
    */
-  async function readClueItems() {
+  /**
+   * 取线索文字项 ✓
+   * @param names 已知物品/区域名（用于"低置信度也把已知目标名捞回来" ✓）—— 必传 ✓
+   */
+  async function readClueItems(names) {
     const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
     const pins = (Sn && Sn.pins) || [];
     const isPdf = !!(Sn && Sn.file && /pdf/i.test(Sn.file.type || Sn.file.name || ''));
@@ -1175,8 +1179,31 @@
       // 截图来源：用卡片栅格做 OCR（没有字体信息 ✓ → 解析时自动退回按名字匹配 ✓）
       const raster = await cardsRaster();
       if (!raster) return null;
-      const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },
-        { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') });
+      // **双通道取词** ✓：正文按阈值 60（干净 ✓），另跑一遍只为**捞回已知物品名** ✓
+      // 为什么：tesseract 对加粗/手写字体常给极低置信度 ✓
+      // （用户实测：卡里明明写着加粗的 "flag" ✓ 却给 conf=0 ✗ → 被 minConf 60 滤掉 ✗
+      //   → 线索变成 "He was beside a" ✗ 没有目标 ✓；
+      //   而直接把阈值降到 40 ✗ 会放进大量垃圾词 ✓ → 句子被搅乱、反而一条都读不出 ✓）
+      const rect = { x: 0, y: 0, w: raster.width, h: raster.height };
+      const opts = { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') };
+      const words = (await window.MurdokuOCR.readWords(raster, rect, opts)) || [];
+      const keyOf = t2 => String(t2 || '').replace(/[^a-z]/gi, '').toLowerCase();
+      const known = new Set((names || []).map(n => keyOf(n && n.name)).filter(Boolean));
+      if (known.size) {
+        try {
+          const low = (await window.MurdokuOCR.readWords(raster, rect,
+            Object.assign({}, opts, { minConf: 0, onStatus: null }))) || [];
+          const have = new Set(words.map(w => keyOf(w.text) + '@' + Math.round(w.x) + ',' + Math.round(w.y)));
+          for (const w of low) {
+            const k = keyOf(w.text);
+            if (!k || !(known.has(k) || known.has(k.replace(/s$/, '')))) continue;   // 只捞"已知物品/区域名" ✓
+            const sig = k + '@' + Math.round(w.x) + ',' + Math.round(w.y);
+            if (have.has(sig)) continue;
+            have.add(sig);
+            words.push(w);
+          }
+        } catch (err) { void err; }
+      }
       return words && words.length
         ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr',
             cuts: raster.cuts || [], spans: raster.spans || [] }         // **卡片分割线 + 每张卡的范围** ✓
@@ -1195,7 +1222,7 @@
     if (!names.length) { MH.toast('先把物品/区域建出来（或用「从图例自动列出物品」），线索才能对上目标', 'warn'); return; }
     MH.toast('正在读卡片上的文字…', 'ok');
     let src;
-    try { src = await readClueItems(); }
+    try { src = await readClueItems(names); }
     catch (err) { MH.toast('读不到卡片文字：' + err.message, 'error'); return; }
     if (!src || !src.items.length) {
       MH.toast(src && src.unmappedCards
