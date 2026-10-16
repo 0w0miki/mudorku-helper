@@ -908,7 +908,7 @@ body.picking #board { cursor: crosshair; }
 
 /* 主界面框选层（物品/人物步）✓ */
 .board-area { position: relative; }
-.board-crop { position: absolute; inset: 0; z-index: 70; background: rgba(255,255,255,.97);
+.board-crop { position: absolute; inset: 0; z-index: 30; background: rgba(255,255,255,.97);
   display: flex; flex-direction: column; }
 .bc-head { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .bc-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

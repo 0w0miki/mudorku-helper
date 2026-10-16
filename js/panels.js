@@ -310,22 +310,15 @@
     layer.className = 'board-crop';
     layer.innerHTML =
       '<div class="bc-head">' +
-      '<div class="bc-line"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
-      '<span class="muted">拖一个框 → 变右侧卡片 ✓（可连框多张，识别时拼在一起一起用 ✓）；' +
-      '点「完成」就<b>自动接着识别</b>' + (kind === 'item' ? '物品并找位置 ✓' : '人物线索 ✓') + '</span></div>' +
+      '<div class="bc-line"><b>' + (kind === 'item' ? '框选物品图例' : '框选人物线索卡片') + '</b>' +
+      '<span class="muted">在图上拖一个框（可以连着框多张，识别时拼在一起识别）；' +
+      '点「完成」就<b>自动接着识别</b>' + (kind === 'item' ? '物品并找位置' : '人物线索') + '</span></div>' +
       // "完成"放到**下一行靠左** ✓（顶部右侧容易和右边摘录浮窗打架 ✓）
       '<div class="bc-actions"><button class="ghost sm" data-act="crop-close">完成 ✓</button></div>' +
       '</div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
-    // 右边「PDF 摘录」浮窗是 `position: fixed` + `z-index: 60` ✓ —— 会盖住这一层的**右侧** ✗
-    // （"完成"按钮正好在最右边 ✓ → 真实鼠标点不到 ✓，之前只能靠脚本点 ✓）
-    // → 让开它的宽度 ✓（右侧留给浮窗，卡片照样在那边出现 ✓），层级也提到它之上 ✓
-    const sn = document.getElementById('snipper');
-    if (sn) {
-      const r = sn.getBoundingClientRect();
-      const w = Math.max(0, window.innerWidth - r.left);
-      if (w > 8) layer.style.right = Math.min(w, Math.round(window.innerWidth * 0.5)) + 'px';
-    }
+    // 「完成」已经挪到下一行靠左 ✓ → 不必再为它让位、也不必压在右侧浮窗之上 ✓
+    // （浮窗照旧浮在右上 ✓；框选层铺满棋盘区 ✓ —— 用户要求 ✓）
     area.appendChild(layer);
     const stage = layer.querySelector('.bc-stage');
     const im = layer.querySelector('.bc-img');
@@ -382,7 +375,7 @@
    * · 人物步：直接"读人物线索" ✓
    */
   async function afterCropDone(kind, added) {
-    if (!added) { MH.toast('这次没有框到东西 —— 拖一个框再点「完成」 ✓', 'warn'); return; }
+    if (!added) { MH.toast('这次没有框到东西 —— 拖一个框再点「完成」', 'warn'); return; }
     if (kind === 'item') {
       MH.toast('开始按图例识别物品…（识别完会自动找位置 ✓）', 'ok');
       try { await runLegendAuto(); }
@@ -449,30 +442,23 @@
         '</section>');
       body.push('<ul class="list">' + entityList('region', st) + '</ul>');
     } else if (step === 3) {
-      body.push('<section class="card"><h2>截取物品图标</h2>' +
-        '<button class="ghost block" data-act="crop-item">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
-        '<p class="hint">在棋盘区的那页图上，沿一个物品图标拖一个框 ✓ → 右侧会出现这张卡片 ✓；' +
-          '再点物品的「按样例添加」就能把同类格子找出来。</p></section>');
-      const snipReady = !!(window.MurdokuSnipper && window.MurdokuSnipper.state &&
-        (window.MurdokuSnipper.state.img || (window.MurdokuSnipper.state.pins || []).length));
-      body.push('<section class="card"><h2>从图例列出物品</h2>' +
-        (snipReady
-          ? '<button class="ghost block" data-act="legend-auto" title="从右侧图例卡片切出图标、认名字，并按图例里的说明分可占据/不可占据">🚀 从图例自动列出物品</button>' +
-            '<button class="ghost block" data-act="legend-locate" title="用图例图标当模板，逐件到地图上找格子">' +
-            (MH.ui.locating ? '⏳ 正在找…（点这里取消）' : '📍 自动找地点（用图例图标）') + '</button>' +
-            '<p class="hint">结果都是候选 ✓；某件找不到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p>'
-          : '<p class="hint">还没有可用的页面 —— 回第 1 步导入底图 ✓（导入的那份会<b>自动</b>带到右侧卡片 ✓，不用再导一次 ✓）。</p>') +
+      body.push('<section class="card"><h2>框选物品图例</h2>' +
+        '<button class="ghost block" data-act="crop-item">✂️ 在主界面上框选物品图例</button>' +
+        '<p class="hint">在棋盘区的那页图上拖一个框，把图例框进去 —— <b>整块图例一起框</b>也行 ' +
+          '（多张图例就框多张）；点「完成」后自动识别物品、并自动到地图上找位置。' +
+          '某件没找到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p></section>');
+      body.push('<section class="card"><h2>手动补充</h2>' +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
         (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +   // 编辑界面 ✓（同上 ✓）
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
     } else {
-      body.push('<section class="card"><h2>截取人物线索卡片</h2>' +
-        '<button class="ghost block" data-act="crop-person">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
-        '<p class="hint">把写着人物线索的卡片框下来 ✓（几张都行 ✓，识别时一起用 ✓）→ 再点下面的「读人物线索」 ✓。</p></section>');
-      body.push('<section class="card"><h2>读人物线索</h2>' +
-        '<button class="ghost block" data-act="clue-read" title="从右侧卡片读每个人物的说明（PDF 优先读文字层）">🔎 读人物线索（从卡片）</button>' +
-        '<p class="hint">整句都会存下来 ✓（没解析出物品/区域关联也存）；也可以直接在下面每个人那里手打/粘贴。</p>' +
+      body.push('<section class="card"><h2>框选人物线索卡片</h2>' +
+        '<button class="ghost block" data-act="crop-person">✂️ 在主界面上框选人物线索卡片</button>' +
+        '<p class="hint">把写着人物线索的卡片框下来（几张都行，识别时拼在一起识别）；' +
+          '点「完成」后自动读线索。整句都会存下来，没解析出物品/区域关联也存；' +
+          '也可以直接在下面每个人那里手打/粘贴。</p></section>');
+      body.push('<section class="card"><h2>人物</h2>' +
         '<div class="chips">' +
         st.people.map(p => '<button class="chip' + (sel && p.id === sel.id ? ' active' : '') + '" data-act="select-person" data-id="' + esc(p.id) + '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</button>').join('') +
         '</div>' +

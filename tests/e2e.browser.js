@@ -1440,8 +1440,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     step: window.MH.ui.wizard,
     rows: !!document.getElementById('rowsInput'),
     detect: !!document.querySelector('[data-act="detect-regions"]'),
-    legend: !!document.querySelector('[data-act="legend-auto"]'),
-    clue: !!document.querySelector('[data-act="clue-read"]'),
+    legend: !!document.querySelector('[data-act="crop-item"]'),   // 物品步现在的入口是"框选物品图例" ✓
+    clue: !!document.querySelector('[data-act="crop-person"]'),   // 人物步现在是"框选人物线索卡片" ✓
   }));
   const w1 = await wizState();
   ok(w1.step === 1 && w1.rows && !w1.detect && !w1.legend && !w1.clue,
@@ -1454,7 +1454,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   const back = await p.evaluate(() => ({
     exited: window.MH.ui.wizard === null,
     wizard: !!document.querySelector('.wizard'),
-    full: !!document.querySelector('[data-act="new-item"]') && !!document.querySelector('[data-act="clue-read"]'),
+    full: !!document.querySelector('[data-act="new-item"]') && !!document.querySelector('[data-act="clue-read"]'),  // 完整面板保留这两个按钮 ✓
   }));
   ok(back.exited && !back.wizard && back.full, '点「完成」退出引导并恢复完整面板：' + JSON.stringify(back));
 
@@ -1739,7 +1739,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     ];
     window.MH.render();
   });
-  await p.click('[data-act="legend-auto"]');
+  // 引导里已经没有「从图例自动列出物品」按钮了（完成会自动跑 ✓）→ 这里直接调 API ✓
+  await p.evaluate(() => { window.MH.ui.lastLegend = null; window.MH.panels.legendAuto(); });
   await p.waitForFunction(() => window.MH.ui.lastLegend, null, { timeout: 180000 });
   const legendMulti = await p.evaluate(() => ({
     last: window.MH.ui.lastLegend,
@@ -1834,10 +1835,13 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       topmost: hit ? (hit.getAttribute('data-act') || hit.tagName) : null,
     };
   });
-  ok(cropGeo && cropGeo.layerRight <= cropGeo.snipLeft,
-    '框选层给右边浮窗让位（不再被盖住）✓：' + JSON.stringify(cropGeo));
-  ok(cropGeo && cropGeo.zLayer > cropGeo.zSnip, '框选层层级高于浮窗 ✓：' + JSON.stringify(cropGeo));
-  ok(cropGeo && cropGeo.topmost === 'crop-close', '「完成」按钮在事件命中的最上层 ✓：' + (cropGeo && cropGeo.topmost));
+  // **新预期**（用户要求 ✓）：「完成」已挪到下一行靠左 ✓ → 框选层不必让位、也不必压在浮窗之上 ✓
+  ok(cropGeo && cropGeo.zLayer < cropGeo.zSnip,
+    '框选层不再压在右侧浮窗之上（浮窗照旧浮在右上）✓：' + JSON.stringify(cropGeo));
+  ok(cropGeo && cropGeo.layerRight > cropGeo.snipLeft,
+    '框选层铺满棋盘区（不再为浮窗改宽度）✓：' + JSON.stringify(cropGeo));
+  ok(cropGeo && cropGeo.topmost === 'crop-close',
+    '「完成」在下一行靠左 → 不被浮窗挡住，仍是命中的最上层 ✓：' + (cropGeo && cropGeo.topmost));
   // 真实鼠标点击 ✓（这条以前会因为被遮挡而超时 ✗）
   await p.click('#boardCrop [data-act="crop-close"]', { timeout: 5000 });
   ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '真实鼠标点「完成」能关掉框选层 ✓');
