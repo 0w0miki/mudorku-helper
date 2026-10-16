@@ -2036,6 +2036,44 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '应用时按改后的文字重新解析关联 ✓（不是识别那一刻的 Shelf ✗）：' + JSON.stringify(reparsed));
   ok(/front area/i.test(reparsed.clue || ''), '线索原文存的也是改后的版本 ✓：' + JSON.stringify(reparsed.clue));
 
+  // 55) 四个步骤圆点可点跳转 ✓；草稿跨步会被收掉 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = false;
+    window.MH.ui.wizard = 1;
+    window.MH.render();
+  });
+  const dotsAreButtons = await p.evaluate(() => ({
+    n: document.querySelectorAll('.wiz-dot').length,
+    allButtons: [...document.querySelectorAll('.wiz-dot')].every(d => d.tagName === 'BUTTON'),
+  }));
+  ok(dotsAreButtons.n === 4 && dotsAreButtons.allButtons,
+    '四个步骤圆点都是可点按钮 ✓：' + JSON.stringify(dotsAreButtons));
+  for (const k of [3, 4, 2]) {
+    await p.evaluate((v) => document.querySelector('.wiz-dot[data-v="' + v + '"]').click(), k);
+    await p.waitForTimeout(120);
+    const now = await p.evaluate(() => ({
+      step: window.MH.ui.wizard,
+      on: (document.querySelector('.wiz-dot.on') || {}).textContent,
+      title: (document.querySelector('.wiz-title') || {}).textContent,
+    }));
+    ok(now.step === k && String(now.on || '').indexOf(String(k) + '.') === 0,
+      '点第 ' + k + ' 个圆点跳到第 ' + k + ' 步并高亮 ✓：' + JSON.stringify(now));
+  }
+  // 草稿只在自己那一步编辑 ✓：第 3 步的草稿跳到第 2 步应被收掉 ✓
+  await p.evaluate(() => { document.querySelector('.wiz-dot[data-v="3"]').click(); });
+  await p.waitForTimeout(120);
+  await p.evaluate(() => document.querySelector('[data-act="new-item"]').click());
+  await p.waitForTimeout(120);
+  const draftedKind = await p.evaluate(() => window.MH.ui.draft && window.MH.ui.draft.kind);
+  await p.evaluate(() => { document.querySelector('.wiz-dot[data-v="2"]').click(); });
+  await p.waitForTimeout(150);
+  const afterJump = await p.evaluate(() => ({ draft: window.MH.ui.draft, step: window.MH.ui.wizard }));
+  ok(draftedKind === 'item' && !afterJump.draft && afterJump.step === 2,
+    '离开草稿所属的步骤会自动收掉草稿 ✓：' + JSON.stringify({ draftedKind, afterJump }));
+  await p.evaluate(() => { window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

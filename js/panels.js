@@ -466,7 +466,11 @@
         '</section>');
     }
 
-    const dots = WIZ_STEPS.map(x => '<span class="wiz-dot' + (x.id === step ? ' on' : '') + (x.id < step ? ' done' : '') + '">' + x.id + '. ' + esc(x.name) + '</span>').join('');
+    // 四个步骤**可点跳转** ✓（点哪一步就跳到哪一步 ✓；当前步高亮、已过的变绿 ✓）
+    const dots = WIZ_STEPS.map(x => '<button class="wiz-dot' + (x.id === step ? ' on' : '') +
+      (x.id < step ? ' done' : '') + '" data-act="wiz-go" data-v="' + x.id + '"' +
+      ' title="跳到第 ' + x.id + ' 步：' + esc(x.name) + '"' +
+      (x.id === step ? ' aria-current="step"' : '') + '>' + x.id + '. ' + esc(x.name) + '</button>').join('');
     const last = step >= WIZ_STEPS.length;
     return '<div class="wizard">' +
       '<div class="wiz-head"><b>分步引导</b><span class="muted">第 ' + step + ' / ' + WIZ_STEPS.length + ' 步</span></div>' +
@@ -2630,15 +2634,20 @@
     'wiz-exit'() { MH.ui.wizard = null; MH.render(); },
     'wiz-go'(el) {
       const v = Number(el.dataset.v);
+      const from = MH.ui.wizard;                        // 从哪一步离开 ✓（按来源判断 ✓）
       const leaving = (v > WIZ_STEPS.length || v < 1);   // 第 4 步再点"完成" ✓
       // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
       //    同时要**记下这次对齐** ✓，否则第 2 步"自动识别区域"会报"底图未对齐" ✗（实测踩过）
-      if (v !== 1) exitAligning();
-      // ② 离开区域识别步（第 2 步）时**收掉区域编辑态** ✓ —— 否则下一步还在刷格子的模式里 ✗
-      //    （和离开第 1 步退出"对齐底图"是同一类问题 ✓）
-      if (v !== 2 && MH.ui.draft) {
-        MH.ui.draft = null;
-        MH.toast('已退出区域编辑（没保存的草稿已放弃 ✓）', 'warn');
+      if (from === 1 && v !== 1) exitAligning();
+      // ② 草稿只在它所属的那一步里编辑 ✓（区域=第 2 步 ✓ 物品=第 3 步 ✓）
+      //    → 一旦离开它所属的步骤就收掉 ✓，免得它在下游步骤里"隐形"地挡住"手动新建" ✗
+      if (MH.ui.draft) {
+        const home = MH.ui.draft.kind === 'region' ? 2 : 3;
+        if (leaving || v !== home) {
+          const what = MH.ui.draft.kind === 'region' ? '区域' : '物品';
+          MH.ui.draft = null;
+          MH.toast('已退出' + what + '编辑（没保存的草稿已放弃 ✓）', 'warn');
+        }
       }
       MH.ui.wizard = leaving ? null : v;
       if (leaving) {
