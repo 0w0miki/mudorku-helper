@@ -41,27 +41,31 @@
     const kindText = (k, pol) => (k === 'in' ? (pol === -1 ? '不在' : '在')
       : k === 'beside' || k === 'not-beside' ? ((pol === -1) ? '不在旁边' : '在旁边') : '');
     return '<div class="clue-panel">' +
-      '<div class="link-title">读到 ' + cc.clues.length + ' 条线索（候选 · ' +
-      (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') + '）—— 逐条核对，再点应用</div>' +
+      '<div class="link-title">读到 ' + cc.clues.length + ' 段（候选 · ' +
+      (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') +
+      '）—— 整句都会存下来 ✓，解析出的关联列在下面；文字不对可以直接改 ✓</div>' +
       (cc.clues.some(c => !c.personId)
         ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
-          ' 条没能按名字/首字母对上人物' +
+          ' 段没能按名字/首字母对上人物' +
           ((cc.names || []).length ? '（首字母不在编号里）' : '（**这张卡片上没有人名** —— 这版题目用人像区分，请对照题面的人像用下拉框指定 ✓）') +
           ' —— 用左边的下拉框指定一下 ✓</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
-        '<div class="grow"><div>' + esc(c.text) + '</div>' +
+        '<div class="grow">' +
+        '<textarea class="clue-text-edit" data-act="clue-text" data-i="' + i + '" rows="2">' + esc(c.text) + '</textarea>' +
         '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」' +
           (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' :
             c.mappedBy === 'order' ? '（按位置推定）' : '') + ' · ' : '') +
-        (c.mappedBy === 'order' ? '<span class="muted">按页面位置推定</span> · ' : '') +
-        kindText(c.kind, c.polarity) + ' <b>' + esc(c.target) + '</b>' +
-        (c.kind !== 'in' ? '（只记录原文，不建关联）'
-          : c.polarity === -1 ? '（负相关 ✓）' : '') + '</div></div>' +
+        ((c.links || []).length
+          ? c.links.map(l => kindText(l.kind, l.polarity) + ' <b>' + esc(l.target) + '</b>' +
+              (l.kind !== 'in' ? '（只记文字 ✓）' : l.polarity === -1 ? '（负相关 ✓）' : '')).join(' ／ ')
+          : '<span class="muted">没解析出关联 —— 整句仍会存下来 ✓（关联可在人物卡片里手填）</span>') +
+        '</div></div>' +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
         '</div>').join('') +
-      '<div class="row"><button class="ghost sm" data-act="clue-apply">应用选中的线索</button>' +
+      '<div class="row"><button class="ghost sm" data-act="clue-apply">应用（写线索' +
+      (cc.clues.some(c => (c.links || []).some(l => l.kind === 'in')) ? ' + 建关联' : '') + '）</button>' +
       '<button class="ghost sm" data-act="clue-cancel">取消</button></div>' +
       '</div>';
   }
@@ -84,7 +88,9 @@
     collect('item', st.items, '物品');
 
     return '<div class="person-detail">' +
-      (p.clue ? '<p class="hint clue-text" title="从卡片读到的线索原文">📝 ' + esc(p.clue) + '</p>' : '') +
+      '<label class="field">这个人的线索（可手工输入 / 粘贴 ✓ 识别出来的也能在这里改）' +
+      '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
+      'placeholder="例如：He was beside a shelf .">' + esc(p.clue || '') + '</textarea></label>' +
       '<div class="row center"><span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span><b>的相关性</b>' +
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button></div>' +
@@ -863,31 +869,32 @@
   function applyClueCands() {
     const cc = MH.ui.clueCands;
     if (!cc) return;
-    const C = window.MurdokuClues;
     let wrote = 0, linked = 0, skipped = 0;
     MH.store.commit('应用人物线索', st => {
       for (const c of cc.clues) {
         if (c.skip || !c.personId) { skipped++; continue; }
         const p = Core.person(st, c.personId);
         if (!p) { skipped++; continue; }
-        p.clue = String(c.text || '').slice(0, 300);
+        p.clue = String(c.text || '').slice(0, 300);       // **整句都存** ✓（没解析出关联也存 ✓）
         wrote++;
-        // 只有"在…里/在…上"这种位置关系才建关联 ✓
-        // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
-        const tid = c.targetId2 || (C && c.targetKind === 'item'
-          ? (st.items.find(i => i.name === c.target) || {}).id
-          : (st.regions.find(r => r.name === c.target) || {}).id);
-        if (c.kind === 'in' && tid) {
-          Core.setLink(st, p.id, c.targetKind, tid, c.polarity === -1 ? -1 : 1);
+        for (const l of (c.links || [])) {
+          // 只有"在…里/在…上"这种位置关系才建关联 ✓
+          // beside / not beside 属于"相邻"关系，应用里没有这个模型 ✗ → 只记文字，不硬套成"在里面" ✓
+          if (l.kind !== 'in') continue;
+          const tid = l.targetId || (l.targetKind === 'item'
+            ? (st.items.find(i => i.name === l.target) || {}).id
+            : (st.regions.find(r => r.name === l.target) || {}).id);
+          if (!tid) continue;
+          Core.setLink(st, p.id, l.targetKind, tid, l.polarity === -1 ? -1 : 1);
           linked++;
         }
       }
     });
     MH.ui.clueCands = null;
     MH.render();
-    MH.toast('已应用：' + wrote + ' 人的线索' + (linked ? ' · ' + linked + ' 条关联' : '') +
-      (skipped ? ' · ' + skipped + ' 条跳过（未指定人或被忽略）' : '') +
-      '（"在旁边"这类线索只记录原文，不建关联）', 'ok');
+    MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
+      (skipped ? ' · ' + skipped + ' 段跳过（未指定人或被忽略）' : '') +
+      '（"在旁边"这类只记录原文，不建关联 ✓）', 'ok');
   }
 
   /** 批量 OCR 一批框（失败就返回空串，不抛） */
@@ -2497,6 +2504,19 @@
 
   function onDocumentInput(e) {
     const t = e.target;
+    if (t.dataset && t.dataset.act === 'clue-text') {
+      const cc = MH.ui.clueCands;
+      const i = Number(t.dataset.i);
+      if (cc && cc.clues[i]) cc.clues[i].text = t.value;      // 不重绘，避免光标跳 ✓
+      return;
+    }
+    if (t.dataset && t.dataset.act === 'person-clue') {
+      const pid = t.dataset.id;
+      const v = String(t.value || '').slice(0, 300);
+      const cur = (Core.person(MH.store.state, pid) || {}).clue || '';
+      if (v !== cur) MH.store.commit('写人物线索', st => { const p2 = Core.person(st, pid); if (p2) p2.clue = v; });
+      return;
+    }
     if (t.id === 'draftName') {
       if (MH.ui.draft) MH.ui.draft.name = t.value;
     } else if (t.id === 'bgOpacity') {
@@ -2520,6 +2540,12 @@
     }
     if (t.name === 'draftOcc') {
       if (MH.ui.draft) { MH.ui.draft.occupiable = t.value === '1'; MH.render(); }
+    } else if (t.dataset && t.dataset.act === 'clue-text') {
+      // **不重绘** ✗→✓：输入框失焦时的 change 若触发 render，会把按钮也换掉，
+      // 紧接着的点击就落在被替换的节点上 → 点了没反应 ✓（实测踩过）
+      const cc = MH.ui.clueCands;
+      const i = Number(t.dataset.i);
+      if (cc && cc.clues[i]) cc.clues[i].text = t.value;
     } else if (t.dataset && t.dataset.act === 'clue-map') {
       const cc = MH.ui.clueCands;
       const i = Number(t.dataset.i);

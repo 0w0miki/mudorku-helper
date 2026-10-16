@@ -408,82 +408,85 @@
   }
 
   /**
-   * 端到端（纯部分）：给定文字行 + 名称清单 → 线索候选
-   * @returns {{clues:Array, names:Array, skipped:Array}}
+   * 这段文字**像不像线索陈述**（不要求里面有物品/区域 ✓）
+   * 用户要求："整句都记录下来，不管有没有发现物品和区域的关联" ✓
+   * —— 所以这里只挡"规则文字/署名/没有主语的碎片" ✓，其余（含"受害者说明"这类 ✓）都留下 ✓
+   */
+  function looksLikeClueStatement(text) {
+    const t = norm(text);
+    if (!t || letters(t).length < 6) return false;
+    for (const bad of NOT_CLUE) if (bad.test(t)) return false;
+    if (!SUBJECT.test(t)) return false;
+    if (/^[^a-z]*(?:can't|cannot|can) be occupied/i.test(t)) return false;
+    return true;
+  }
+
+  /**
+   * 端到端（纯部分）：给定文字行 + 名称清单 → **按"气泡"分组**的线索候选 ✓
+   * 一个气泡 = 一个人的整段话 ✓ → 一行候选 ✓（内容整句记下来 ✓，里面能解析出的关联单独列出 ✓）
+   * 为什么按气泡而不是按句子：用户要"整句都记录下来，不管有没有发现物品/区域的关联" ✓
+   * —— 句子级会把无关的整句丢掉 ✗（Vaughn 的"受害者"说明、只有方向没有实物的线索… ✓）
+   * @returns {{clues:Array, names:Array, skipped:Array, blocks:Array}}
+   *   clues[i] = { text（整段原文 ✓）, person, x, y, links:[{kind,target,targetKind,targetId,polarity,bold}] }
    */
   function extract(lines, names, opts) {
-    // 已经聚好的块别再合并一次 ✗（`cluster` 内部已经把容差收紧到 0.6 字高 ✓；
-    // 这里再按 2.2 字高合并一次，会把相邻两张卡又粘起来 —— 实测踩过 ✓）
     const already = opts && opts.blocks === true;
     const blocks = already ? (lines || []).filter(b => b && norm(b.text)) : mergeBlocks(lines, opts);
-    const clues = [], personNames = [], skipped = [];
+    const rows = [], personNames = [], skipped = [];
     for (const b of blocks) {
-      // 块的加粗片段 = 各行的加粗合起来 ✓（PDF 文字层才有的信息；OCR 没有就为空 ✓）
       const byFont = new Map();
       const fold = (g) => byFont.set(g.font, (((byFont.get(g.font) || '') + ' ' + g.text).replace(/\s+/g, ' ').trim()));
-      if (Array.isArray(b.groups)) {
-        b.groups.forEach(fold);                     // cluster() 已经按字体分好组了 ✓
-      } else {
-        for (const ln of (b.lines || [])) {
-          if (Array.isArray(ln.runs)) readRuns(ln.runs).groups.forEach(fold);
-        }
-      }
+      if (Array.isArray(b.groups)) b.groups.forEach(fold);
+      else for (const ln of (b.lines || [])) if (Array.isArray(ln.runs)) readRuns(ln.runs).groups.forEach(fold);
       const groupsAll = [...byFont].map(([font, text]) => ({ font, text }));
-      // **逐句解析** ✓：关系与目标必须同源；一块里有两句线索就各算一条 ✓
-      const clauses = splitClauses(b.text);
-      const parsedList = (clauses.length ? clauses : [b.text]).map(cl => {
-        // 字体组只在**这一句范围内**生效 ✓（否则会拿别句的加粗词当目标 ✗）
-        const key = norm(cl).replace(/\s+/g, ' ').toLowerCase();
-        const gs = groupsAll.map(g => {
-          const gt = norm(g.text).toLowerCase();
-          return key.includes(gt) ? g : null;
-        }).filter(Boolean);
-        return parse(cl, names, { groups: gs.length ? gs : groupsAll });
-      }).filter(r2 => r2.kind !== 'none' && r2.target);
-      const p = parsedList[0] || parse(b.text, names, { groups: groupsAll });
-      // 坐标两种来源都要认：`cluster()` 给的是 x/y ✓，`mergeBlocks()` 给的是 x0/y0 ✓
-      // （写成 b.x0 时 cluster 的块会变成 NaN ✗ → 人名配对准失败 ✓ —— 单测先抓到的）
       const bx = Math.round(b.x != null ? b.x : b.x0);
       const by = Math.round(b.y != null ? b.y : b.y0);
-      if (parsedList.length) {
-        parsedList.forEach(r2 => clues.push({ text: r2.text, kind: r2.kind, polarity: r2.polarity, bold: r2.bold,
-          target: r2.target.name, targetKind: r2.target.kind, targetId: r2.target.id, x: bx, y: by, block: b }));
-      } else if (looksLikePersonName(b.text)) {
+      // 整段文字（把署名/页脚标注切掉 ✓）
+      let whole = norm(b.text);
+      const cut0 = whole.search(CREDIT);
+      if (cut0 >= 0) whole = whole.slice(0, cut0).trim();
+      // 段内逐句解析 → 收集**关联** ✓（一个都能没有 ✓ —— 那也照样记整句 ✓）
+      const clauses = splitClauses(b.text);
+      const links = [];
+      for (const cl of clauses) {
+        const key = norm(cl).replace(/\s+/g, ' ').toLowerCase();
+        const gs = groupsAll.filter(g => key.includes(norm(g.text).toLowerCase()));
+        const p2 = parse(cl, names, { groups: gs.length ? gs : groupsAll });
+        if (p2.kind === 'none' || !p2.target) continue;
+        if (links.some(x => x.target === p2.target.name && x.kind === p2.kind && x.polarity === p2.polarity)) continue;
+        links.push({ kind: p2.kind, polarity: p2.polarity, bold: p2.bold,
+          target: p2.target.name, targetKind: p2.target.kind, targetId: p2.target.id, text: p2.text });
+      }
+      // 人名块（很短、没有陈述）→ 只作为"归属用的名字" ✓
+      if (!links.length && looksLikePersonName(b.text) && !looksLikeClueStatement(b.text)) {
         personNames.push({ name: b.text, x: bx, y: by, w: b.w });
+        continue;
+      }
+      // **整句留下** ✓（有关联更好，没有也留 ✓）；只有规则文字/署名/碎片才丢 ✓
+      if (looksLikeClueStatement(whole)) {
+        rows.push({ text: whole, person: null, x: bx, y: by, links, block: b });
       } else {
-        skipped.push({ text: b.text, reason: p.reason || '不是线索也不是人名' });
+        skipped.push({ text: whole, reason: links.length ? '有主语但要清理' : '规则文字/署名/没有主语' });
       }
     }
-    // 人名候选：**不能在已知物品/区域清单里** ✗（Car/Chair/Shelf 这些是图例物品，
-    // 真实 PDF 里它们和人物名看起来一样都是 Title case ✓ —— 实测混进来 8 个 ✗）
-    const known = new Set((names || []).map(n => norm(n.name).toLowerCase()).filter(Boolean));
-    for (let i = personNames.length - 1; i >= 0; i--) {
-      const t = norm(personNames[i].name).toLowerCase();
-      if (known.has(t)) personNames.splice(i, 1);
-      else if (/\d/.test(personNames[i].name)) personNames.splice(i, 1);
-    }
-    // 人名 → 线索：**先要求横向有交叠**（名字在气泡正上方 ✓），再看竖向距离 ✓
-    // （只看"谁在上方、更近"太弱 ✗ —— 实测线索会挂到页面另一头的标题上 ✓，
-    //  和图例那套"heading 归属"是同一个教训 ✓）
-    for (const c of clues) {
-      const cw = Math.max(10, c.block ? blockWidth(c.block) : 40);
-      let best = null, bestScore = Infinity;
+    // 整段文字里提到的人名（"clue: Crystal is the only person…" ✓）→ 作为归属线索的一部分 ✓
+    const allNames = new Set(personNames.map(n => n.name));
+    // 只保留"下方有内容"的人名 ✓，并把人的位置带给候选（按块/位置推定用 ✓）
+    const used = new Set();
+    for (const r of rows) {
+      let best = null, bestRow = Infinity, bestX = Infinity;
       for (const n of personNames) {
-        const nw = n.w != null ? n.w : 40;
-        const ox = Math.min(n.x + nw, c.x + cw) - Math.max(n.x, c.x);
-        const dx = ox > 0 ? 0 : Math.max(0, Math.max(n.x - (c.x + cw), c.x - (n.x + nw)));
-        const above = n.y <= c.y + 4;
-        const dy = above ? (c.y - n.y) : 1e5 + Math.abs(c.y - n.y);
-        const score = (ox > 0 ? 0 : 1000 + dx) + dy;
-        if (score < bestScore) { bestScore = score; best = n; }
+        const above = n.y <= r.y + 4;
+        const row = above ? (r.y - n.y) : 1e5 + Math.abs(r.y - n.y);
+        const dx = Math.abs(r.x - n.x);
+        const better = row < bestRow - 1 || (Math.abs(row - bestRow) <= 1 && dx < bestX);
+        if (!best || better) { best = n; bestRow = row; bestX = dx; }
       }
-      c.person = best ? best.name : null;
-      c.personX = best ? best.x : null;
+      r.person = best ? best.name : null;
+      if (best) used.add(best.name);
     }
-    // 只留下"真的挂住了线索"的人名 ✓：标题、页眉、说明里的名词都不是人名 ✗
-    const usedNames = new Set(clues.map(c => c.person).filter(Boolean));
-    const keep = personNames.filter(n => usedNames.has(n.name));
-    return { clues, names: keep, skipped, blocks };
+    void allNames;
+    return { clues: rows, names: personNames.filter(n => used.has(n.name)), skipped, blocks };
   }
 
   /**
@@ -548,7 +551,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, looksLikeClueStatement, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

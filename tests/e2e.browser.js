@@ -1348,14 +1348,21 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     // **保持默认编号 A/B** ✓ —— 验证"按首字母对应"（Anthony→A、Breck→B）
     // 直接注入"解析结果"（读卡片那一步的产物 ✓），覆盖面板与应用逻辑
     window.MH.panels.setClueCandidates({ clues: [
-      { text: 'He was in a car .', kind: 'in', polarity: 1, person: 'Anthony', target: 'Car', targetKind: 'item' },
-      { text: 'He was beside a shelf .', kind: 'beside', polarity: 1, person: 'Breck', target: 'Shelf', targetKind: 'item' },
+      { text: 'He was in a car .', person: 'Anthony', links: [
+        { kind: 'in', polarity: 1, target: 'Car', targetKind: 'item' }] },
+      { text: 'He was beside a shelf .', person: 'Breck', links: [
+        { kind: 'beside', polarity: 1, target: 'Shelf', targetKind: 'item' }] },
+      { text: 'The Victim. He was alone with the murderer.', person: null, links: [] },
     ] }, 'json', [{ name: 'Anthony' }, { name: 'Breck' }]);
   });
   await p.waitForSelector('.clue-panel .clue-row');
   const rowsN = await p.locator('.clue-panel .clue-row').count();
-  ok(rowsN === 2, '候选面板列出 2 条线索：' + rowsN);
-  const mapped = await p.evaluate(() => [...document.querySelectorAll('.clue-panel select[data-act="clue-map"]')].map(s => s.value));
+  ok(rowsN === 3, '候选面板列出 3 段：' + rowsN);
+  const editVal = await p.locator('.clue-panel textarea[data-act="clue-text"]').first().inputValue();
+  ok(/car/i.test(editVal), '整句在可编辑框里，能直接改：' + editVal);
+  // **可以在面板里直接改整句** ✓（改成带句号的版本，应用后应存这个 ✓）
+  await p.locator('.clue-panel textarea[data-act="clue-text"]').nth(0).fill('He was in a car (改过) .');
+  const mapped = await p.evaluate(() => [...document.querySelectorAll('.clue-panel select[data-act="clue-map"]')].map(s => s.value).slice(0, 2));
   const labels = await p.evaluate(ids => ids.map(id => (window.MH.store.state.people.find(x => x.id === id) || {}).label), mapped);
   ok(labels[0] === 'A' && labels[1] === 'B',
     '按首字母对应人物（Anthony→A、Breck→B）：' + JSON.stringify(labels));
@@ -1365,8 +1372,12 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     return st.people.map(x => ({ l: x.label, clue: x.clue, links: x.links.length }));
   });
   const an = applied.find(x => x.l === 'A'), br = applied.find(x => x.l === 'B');
-  ok(an && /car/i.test(an.clue) && an.links === 1, 'A（Anthony）的线索与关联都写上了：' + JSON.stringify(an));
+  ok(an && an.clue === 'He was in a car (改过) .' && an.links === 1,
+    'A 的线索按**面板里改过的整句**存下来了，关联也建了：' + JSON.stringify(an));
   ok(br && br.clue && br.links === 0, 'B（Breck）的"在旁边"只记原文、不建关联：' + JSON.stringify(br));
+  const victim = applied.filter(x => /Victim/i.test(x.clue));
+  ok(victim.length === 1 && victim[0].links === 0,
+    '没解析出关联的整句也存下来了（仍按位置推定给了某个人 ✓）：' + JSON.stringify(victim));
   ok(await p.evaluate(() => !window.MH.ui.clueCands), '应用后候选面板收起');
 
   console.log(A.join('\n'));

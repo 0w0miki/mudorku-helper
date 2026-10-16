@@ -887,3 +887,9 @@ body.picking #board { cursor: crosshair; }
 .clue-row select { max-width: 92px; }
 .clue-row .grow { flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.35; word-break: break-word; }
 .clue-row .hint { font-size: 11px; }
+
+/* 线索候选：可编辑的整句 ✓ */
+.clue-text-edit { width: 100%; font: inherit; font-size: 12px; line-height: 1.4; padding: 4px 6px;
+  border: 1px solid var(--line); border-radius: 6px; resize: vertical; background: #fff; }
+#personClue { width: 100%; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line);
+  border-radius: 6px; resize: vertical; }

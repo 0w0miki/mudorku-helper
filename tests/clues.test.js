@@ -114,10 +114,11 @@ test('端到端（纯部分）：行 → 线索候选 + 人名，并把线索挂
     { text: 'Rule: One person per Row and Column', x: 600, y: 100, h: 12, w: 200 },
   ], NAMES);
   assert.equal(out.clues.length, 2, JSON.stringify(out.clues.map(c => c.text)));
-  const byCar = out.clues.find(c => c.target === 'Oil Slick');
-  const byChair = out.clues.find(c => c.target === 'Chair');
+  const byCar = out.clues.find(c => (c.links[0] || {}).target === 'Oil Slick');
+  const byChair = out.clues.find(c => (c.links[0] || {}).target === 'Chair');
   assert.equal(byCar.person, 'Brock');
   assert.equal(byChair.person, 'Crystal');
+  assert.equal(byCar.text, 'He was on an oil slick.', '整句都记下来 ✓');
   assert.ok(out.skipped.some(s => /Rule:/.test(s.text)), '规则文字被跳过');
 });
 
@@ -159,9 +160,9 @@ test('extract：行里带 runs（含字体）时，加粗片段会一路传到�
       { text: 'He was in a', font: 'f1' }, { text: 'car', font: 'f2' }, { text: '.', font: 'f1' }] },
   ], [{ name: 'Car', kind: 'item' }, { name: 'Chair', kind: 'item' }]);
   assert.equal(out.clues.length, 1);
-  assert.equal(out.clues[0].target, 'Car');
+  assert.equal(out.clues[0].links[0].target, 'Car');
   assert.equal(out.clues[0].person, 'Anthony');
-  assert.equal(out.clues[0].bold, 'car');
+  assert.equal(out.clues[0].links[0].bold, 'car');
 });
 
 test('二维聚类：**两列并排**的卡片不能连成一块 ✗（上次就是被这个搞挂的）', () => {
@@ -191,9 +192,9 @@ test('取字到解析（readItems）：字体分组一路传到目标 ✓', () =
     { text: '.', x: 185, y: 430, w: 4, h: 12, font: 'f1' },
   ], [{ name: 'Car', kind: 'item' }, { name: 'Chair', kind: 'item' }]);
   assert.equal(out.clues.length, 1);
-  assert.equal(out.clues[0].target, 'Car');
+  assert.equal(out.clues[0].links[0].target, 'Car');
   assert.equal(out.clues[0].person, 'Anthony');
-  assert.equal(out.clues[0].bold, 'car');
+  assert.equal(out.clues[0].links[0].bold, 'car');
 });
 
 test('人物对应：① 编号同名 ② **按首字母** ✓ ③ 对不上的留空（不猜 ✗）', () => {
@@ -301,11 +302,13 @@ test('极性：否定句是**负**相关 ✗→✓（以前判成正的，会误
 test('分句：一块里两句线索要**各算一条** ✓，且关系与目标同源 ✓', () => {
   const names = [{ name: 'Chair', kind: 'item' }, { name: 'Desk', kind: 'item' }];
   const out = C.extract([{ text: 'He was beside a desk. He was not sitting in a chair.', x: 0, y: 500, h: 12, w: 300 }], names);
-  assert.equal(out.clues.length, 2, JSON.stringify(out.clues.map(x => x.text)));
-  assert.equal(out.clues[0].target, 'Desk');
-  assert.equal(out.clues[0].polarity, 1);
-  assert.equal(out.clues[1].target, 'Chair', '不能配成 beside+Chair ✗');
-  assert.equal(out.clues[1].polarity, -1);
+  assert.equal(out.clues.length, 1, '一个气泡 = 一段 ✓');
+  assert.equal(out.clues[0].text, 'He was beside a desk. He was not sitting in a chair.', '整段都记下来 ✓');
+  assert.equal(out.clues[0].links.length, 2, '段内解析出两条关联 ✓');
+  assert.equal(out.clues[0].links[0].target, 'Desk');
+  assert.equal(out.clues[0].links[0].polarity, 1);
+  assert.equal(out.clues[0].links[1].target, 'Chair', '不能配成 beside+Chair ✗');
+  assert.equal(out.clues[0].links[1].polarity, -1);
 });
 
 test('OCR 逐词框：来源不同、阈值不同 ✓（词距小、y 有抖动，也要连成一句）', () => {
@@ -321,8 +324,8 @@ test('OCR 逐词框：来源不同、阈值不同 ✓（词距小、y 有抖动�
   const names = [{ name: 'Chair', kind: 'item' }];
   const out = C.readOcrItems(words, names);
   assert.equal(out.clues.length, 1, JSON.stringify(out.blocks.map(b => b.text)));
-  assert.equal(out.clues[0].target, 'Chair');
-  assert.equal(out.clues[0].kind, 'in');
+  assert.equal(out.clues[0].links[0].target, 'Chair');
+  assert.equal(out.clues[0].links[0].kind, 'in');
   assert.match(out.clues[0].text, /^She was sitting in a chair/, '词序要按"行内 x"还原 ✓：' + out.clues[0].text);
 });
 
@@ -346,4 +349,26 @@ test('截断的残句不要 ✗（"She was sitting in a" 会和完整那句重�
   assert.equal(good.target.name, 'Chair', '关系词后面最近的目标 ✓');
   // 完整句里"在…附近/旁边"这类结构不受影响 ✓
   assert.equal(C.parse('He was beside a desk.', names).kind, 'beside');
+});
+
+test('用户要求：**整句都记下来** ✓ —— 没解析出关联的照样留 ✓', () => {
+  const names = [{ name: 'Chair', kind: 'item' }];
+  const out = C.extract([
+    { text: 'Vaughn', x: 480, y: 400, h: 14, w: 50 },
+    { text: 'The Victim. He was alone with the murderer.', x: 460, y: 430, h: 12, w: 220 },
+  ], names);
+  assert.equal(out.clues.length, 1, '有主语就留下 ✓');
+  assert.equal(out.clues[0].text, 'The Victim. He was alone with the murderer.');
+  assert.equal(out.clues[0].links.length, 0, '没关联也照样记整句 ✓');
+  assert.equal(out.clues[0].person, 'Vaughn');
+  // 规则文字仍然不认 ✗
+  const out2 = C.extract([{ text: 'Rule: One person per Row and Column', x: 0, y: 100, h: 12, w: 200 }], names);
+  assert.equal(out2.clues.length, 0);
+});
+
+test('looksLikeClueStatement：有主语就算线索陈述 ✓；规则/碎片不算 ✗', () => {
+  assert.ok(C.looksLikeClueStatement('He was alone with the murderer.'));
+  assert.ok(!C.looksLikeClueStatement('Rule: One person per Row and Column'));
+  assert.ok(!C.looksLikeClueStatement('chair in the bottom row.'));
+  assert.ok(!C.looksLikeClueStatement('What does “beside” mean?'));
 });
