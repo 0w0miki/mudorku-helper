@@ -2081,6 +2081,47 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '离开草稿所属的步骤会自动收掉草稿 ✓：' + JSON.stringify({ draftedKind, afterJump }));
   await p.evaluate(() => { window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 56) 编辑已有区域/物品时只能有**一个**编辑框 ✓（以前会出现两个 ✗）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = false;
+    const st = window.MH.store.state, C = window.MurdokuCore;
+    if (!st.regions.length) C.createRegion(st, 'A区', ['0,0', '0,1']);
+    if (!st.items.length) C.createItem(st, '车', [], true);
+    window.MH.ui.wizard = 2;
+    window.MH.ui.draft = null;
+    window.MH.render();
+  });
+  // 新建：一个编辑框 ✓
+  await p.evaluate(() => document.querySelector('[data-act="new-region"]').click());
+  await p.waitForTimeout(150);
+  const newDraft = await p.evaluate(() => document.querySelectorAll('#sidebar .draft').length);
+  ok(newDraft === 1, '新建区域时只有一个编辑框 ✓：' + newDraft);
+  await p.evaluate(() => document.querySelector('[data-act="draft-cancel"]').click());
+  await p.waitForTimeout(150);
+  // 编辑已有区域：仍然只有一个（内联的那个 ✓）
+  await p.evaluate(() => { const b2 = document.querySelector('[data-act="edit-region"]'); if (b2) b2.click(); });
+  await p.waitForTimeout(200);
+  const editDraft = await p.evaluate(() => ({
+    drafts: document.querySelectorAll('#sidebar .draft').length,
+    inline: document.querySelectorAll('#sidebar .draft.inline').length,
+  }));
+  ok(editDraft.drafts === 1 && editDraft.inline === 1,
+    '编辑已有区域时只有一个（内联）编辑框 ✓：' + JSON.stringify(editDraft));
+  await p.evaluate(() => { window.MH.ui.draft = null; window.MH.ui.wizard = 3; window.MH.render(); });
+  await p.evaluate(() => document.querySelector('[data-act="new-item"]').click());
+  await p.waitForTimeout(150);
+  const newItemDraft = await p.evaluate(() => document.querySelectorAll('#sidebar .draft').length);
+  ok(newItemDraft === 1, '新建物品时只有一个编辑框 ✓：' + newItemDraft);
+  await p.evaluate(() => document.querySelector('[data-act="draft-cancel"]').click());
+  await p.waitForTimeout(150);
+  await p.evaluate(() => { const b2 = document.querySelector('[data-act="edit-item"]'); if (b2) b2.click(); });
+  await p.waitForTimeout(200);
+  const editItemDraft = await p.evaluate(() => document.querySelectorAll('#sidebar .draft').length);
+  ok(editItemDraft === 1, '编辑已有物品时只有一个编辑框 ✓：' + editItemDraft);
+  await p.evaluate(() => { window.MH.ui.draft = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

@@ -438,7 +438,9 @@
         (st.regions.length ? '<div class="link-title">已识别 ' + st.regions.length + ' 个区域</div>' : '<p class="hint">还没有区域。</p>') +
         // **草稿编辑界面** ✓ —— 普通面板里有 ✓，引导分支漏了 ✗：
         // 以前点了"手动新建区域"只会让按钮消失 ✓，编辑界面却不出现 ✓
-        (d && d.kind === 'region' ? draftHTML(st, d) : '') +
+        // 注意 `!d.editingId` ✓：编辑**已存在的**区域时 ✓，列表项里已经有内联编辑框了 ✗
+        // 这里再渲染一个就会**出现两个编辑框** ✓（用户实测踩过 ✓）
+        (d && d.kind === 'region' && !d.editingId ? draftHTML(st, d) : '') +
         '</section>');
       body.push('<ul class="list">' + entityList('region', st) + '</ul>');
     } else if (step === 3) {
@@ -554,7 +556,8 @@
           '<div class="row"><button class="ghost sm" data-act="diag-copy">复制</button>' +
           '<span class="grow"></span><button class="ghost sm" data-act="diag-close">关闭</button></div>'
         : '') +
-      (d && d.kind === 'region' ? draftHTML(st, d) : '') +
+      // 同上 ✓：编辑已存在的区域时，内联编辑框在列表项里 ✓ → 这里只在"新建"时渲染 ✓
+      (d && d.kind === 'region' && !d.editingId ? draftHTML(st, d) : '') +
       '<ul class="list">' + entityList('region', st) + '</ul>' +
       '</section>' +
 
