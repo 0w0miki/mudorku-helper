@@ -1530,6 +1530,32 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     'setClueCandidates 返回数组（调用处能用 .length/.some）✓：' + JSON.stringify(ret));
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 42) 引导精修：不放"裁切到网格"、透明度/缩放在对齐网格卡里、离开第 1 步自动退出对齐模式 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    const st = window.MH.store.state;
+    st.bg = { kind: 'image', name: 'x.png', w: 400, h: 320, page: 1, pages: 1, opacity: 1, scale: 1, visible: true, bound: true };
+    window.MH.ui.wizard = 1;
+    window.MH.ui.aligning = true;
+    window.MH.render();
+  });
+  const wiz1 = await p.evaluate(() => {
+    const card = [...document.querySelectorAll('#sidebar .card')].find(c2 => c2.querySelector('[data-act="bg-region"]'));
+    return {
+      crop: document.querySelectorAll('#sidebar [data-act="bg-crop"]').length,
+      alignHasOpacity: !!(card && card.querySelector('#bgOpacity')),
+      alignHasScale: !!(card && card.querySelector('#bgScale')),
+      aligning: window.MH.ui.aligning,
+    };
+  });
+  ok(wiz1.crop === 0, '引导里不显示「裁切到网格」（最后一步自动做）✓：' + wiz1.crop);
+  ok(wiz1.alignHasOpacity && wiz1.alignHasScale, '透明度与缩放在「对齐网格」卡片里 ✓：' + JSON.stringify(wiz1));
+  await p.evaluate(() => { const bs = document.querySelectorAll('.wiz-foot [data-act="wiz-go"]'); bs[bs.length - 1].click(); });
+  ok(await p.evaluate(() => window.MH.ui.aligning === false && window.MH.ui.wizard === 2),
+    '离开第 1 步自动退出「对齐底图」模式，并进入第 2 步 ✓');
+  await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

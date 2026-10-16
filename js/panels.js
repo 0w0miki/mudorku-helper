@@ -176,9 +176,14 @@
       (overlap ? ' · <span class="bad">其中 ' + overlap + ' 格已在其它' + kindName(d.kind) + '里，保存后归属会移过来</span>' : '');
   }
 
-  function bgCard(st) {
+  /** 百分比显示 ✓（bgCard 与 bgAlignCard 共用 ✓ —— 之前只在 bgCard 里定义 ✗，
+   *  移动标记时漏了它 → 有底图时整页渲染报错 "pct is not defined" ✓ 被单测抓到 ✓） */
+  const pctOf = v => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+
+  function bgCard(st, opt) {
+    const o = opt || {};
     const b = st.bg;
-    const pct = v => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+    const pct = pctOf;
     if (!b) {
       return '<section class="card">' +
         '<h2>底图 <span class="muted">图片 / PDF 衬在网格下方</span></h2>' +
@@ -193,7 +198,7 @@
       '<button class="ghost sm" data-act="bg-import" ' + (MH.ui.bgBusy ? 'disabled' : '') + '>更换</button>' +
       '<button class="ghost sm" data-act="bg-toggle">' + (b.visible ? '隐藏' : '显示') + '</button>' +
       '<button class="ghost sm" data-act="bg-fit">适应窗口</button>' +
-      '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分；裁完图片与网格绑定，缩放一起变">✂ 裁切到网格</button>' +
+      (o.wizard ? '' : '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分；裁完图片与网格绑定，缩放一起变">✂ 裁切到网格</button>') +
       '<button class="ghost sm danger" data-act="bg-remove">移除</button>' +
       '</div>' +
       '<p class="hint ellipsis" title="' + esc(b.name) + '">' + esc(b.name) +
@@ -203,17 +208,6 @@
           '<span class="meta">第 ' + b.page + ' / ' + b.pages + ' 页</span>' +
           '<button class="ghost sm" data-act="bg-page" data-dir="1">下一页 ▶</button></div>'
         : '') +
-      '<label class="field">底图透明度 <input type="range" id="bgOpacity" min="10" max="100" step="5" value="' + Math.round(b.opacity * 100) + '"></label>' +
-      // 步长 0.1%：底图对齐需要能落在精确的比例上（5% 一步对地图来说太粗了，
-      // 一张 1000px 宽的图一步就是 50px 的误差，怎么都对不上）
-      '<label class="field">底图缩放 <input type="range" id="bgScale" min="10" max="400" step="0.1" value="' + (Math.round(b.scale * 1000) / 10) + '">' +
-      '<span class="meta" data-bg="scale">' + pct(b.scale) + '</span></label>' +
-      '<div class="row wrap">' +
-      '<button class="ghost sm" data-act="bg-scale-step" data-dir="-1" title="缩小 0.1%（按住 Shift 1%）">−</button>' +
-      '<button class="ghost sm" data-act="bg-scale-step" data-dir="1" title="放大 0.1%（按住 Shift 1%）">+</button>' +
-      '<span class="grow"></span>' +
-      '<button class="ghost sm" data-act="bg-scale-reset" title="回到 100%">还原 100%</button>' +
-      '</div>' +
       '</section>';
   }
 
@@ -257,8 +251,10 @@
    * 框地图外框 + 网格位置调整 ✓ —— 单独成卡，**放在"生成地图"下面** ✓
    * 使用顺序：导入底图 → 设行列 → 生成网格 → 再框地图外框、微调网格位置 ✓（用户要求 ✓）
    */
-  function bgAlignCard(st) {
+  function bgAlignCard(st, opt) {
     if (!st.bg) return '';
+    const b = st.bg;
+    const pct = pctOf;
     return '<section class="card">' +
       '<h2>对齐网格 <span class="muted">框地图外框 · 再微调</span></h2>' +
       '<div class="row wrap">' +
@@ -269,7 +265,20 @@
       (MH.ui.aligning
         ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
           '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
-        : '<p class="hint">格子大小也可以调（顶栏 🔍 或底图卡片里的缩放），网格会以左上角为锚点变化。</p>') +
+        : '<p class="hint">格子大小也可以调（顶栏 🔍），网格会以左上角为锚点变化。</p>') +
+      // 透明度与缩放也属于"对位" ✓（用户要求放这一张卡里 ✓）
+      '<label class="field">底图透明度 <input type="range" id="bgOpacity" min="10" max="100" step="5" value="' + Math.round(b.opacity * 100) + '"></label>' +
+      // 步长 0.1%：底图对齐需要能落在精确的比例上（5% 一步对地图来说太粗了，
+      // 一张 1000px 宽的图一步就是 50px 的误差，怎么都对不上）
+      '<label class="field">底图缩放 <input type="range" id="bgScale" min="10" max="400" step="0.1" value="' + (Math.round(b.scale * 1000) / 10) + '">' +
+      '<span class="meta" data-bg="scale">' + pct(b.scale) + '</span></label>' +
+      '<div class="row wrap">' +
+      '<button class="ghost sm" data-act="bg-scale-step" data-dir="-1" title="缩小 0.1%（按住 Shift 1%）">−</button>' +
+      '<button class="ghost sm" data-act="bg-scale-step" data-dir="1" title="放大 0.1%（按住 Shift 1%）">+</button>' +
+      '<span class="grow"></span>' +
+      '<button class="ghost sm" data-act="bg-scale-reset" title="回到 100%">还原 100%</button>' +
+      (opt && opt.wizard ? '' : '<button class="ghost sm" data-act="bg-crop" title="按网格外框裁掉四周多余部分">✂ 裁切到网格</button>') +
+      '</div>' +
       '</section>';
   }
 
@@ -363,7 +372,7 @@
 
     if (step === 1) {
       // 顺序按使用来 ✓：导入底图 → 行列数 → 生成网格 → 框外框/微调 ✓
-      body.push(bgCard(st));
+      body.push(bgCard(st, { wizard: true }));
       body.push('<section class="card"><h2>行列数</h2>' +
         '<div class="grid2">' +
         '<label class="field">行 <input id="rowsInput" type="number" min="1" max="40" value="' + st.rows + '"></label>' +
@@ -376,7 +385,7 @@
         '<p class="hint">' + (bgOk
           ? '✓ 地图框已对位（黄框贴着地图四边）· 人物数 = min(行, 列) = <b>' + Core.peopleCount(st.rows, st.cols) + '</b>'
           : '还没框地图：生成网格后，在下面「对齐网格」里点「框地图外框」，沿地图四边拖一个框（要贴住网格）') + '</p></section>');
-      body.push(bgAlignCard(st));
+      body.push(bgAlignCard(st, { wizard: true }));
     } else if (step === 2) {
       body.push('<section class="card"><h2>自动识别区域</h2>' +
         (st.bg
@@ -2454,9 +2463,19 @@
     'wiz-exit'() { MH.ui.wizard = null; MH.render(); },
     'wiz-go'(el) {
       const v = Number(el.dataset.v);
-      MH.ui.wizard = (v > WIZ_STEPS.length || v < 1) ? null : v;   // 第 4 步再点"完成" → 退出引导 ✓
+      const leaving = (v > WIZ_STEPS.length || v < 1);
+      // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
+      if (v !== 1) MH.ui.aligning = false;
+      MH.ui.wizard = leaving ? null : v;
+      if (leaving) {
+        // ② 最后一步完成时：如果框过地图外框，就**自动按网格裁切底图** ✓（引导里不放这个按钮 ✓）
+        const bg = MH.store.state.bg;
+        if (bg && bg.bound && !bg.cropped) {
+          try { cropBackground(); } catch (err) { void err; }
+        }
+      }
       MH.render();
-      if (MH.ui.wizard == null) MH.toast('引导完成 ✓ 现在可以逐个人核对线索，或直接去准备/游玩 ✓', 'ok');
+      if (leaving) MH.toast('引导完成 ✓ 现在可以逐个人核对线索，或直接去准备/游玩 ✓', 'ok');
     },
     'crop-item'() { startBoardCrop('item'); },
     'crop-person'() { startBoardCrop('person'); },
