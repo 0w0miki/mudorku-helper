@@ -67,8 +67,8 @@
         // 点一下放大看图 ✓（不再用"悬停放大" ✗ —— 那会盖住线索 ✓）
         (c.cardIndex != null && c.cardUrl
           ? '<span class="clue-card">' +
-            '<img class="clue-thumb" data-act="clue-peek" src="' + esc(c.cardUrl) + '"' +
-            ' title="来自你在主界面框的第 ' + (c.cardIndex + 1) + ' 张卡片 —— 点一下放大 ✓"' +
+            '<img class="clue-thumb" src="' + esc(c.cardUrl) + '"' +
+            ' title="来自卡' + (c.cardIndex + 1) + '"' +
             ' alt="卡 ' + (c.cardIndex + 1) + '">' +
             '<span class="clue-card-no">卡' + (c.cardIndex + 1) + '</span></span>'
           : '') +
@@ -3219,7 +3219,7 @@
     box.id = 'cardHover';
     box.className = 'card-hover';
     box.innerHTML = '<img src="' + esc(img.src) + '" alt="来源卡片">' +
-      '<span class="clue-card-no">' + esc(img.alt || '') + '（来自你框的这张卡片）</span>';
+      '<span class="clue-card-no">来自' + esc(img.alt || '这张卡') + '</span>';
     document.body.appendChild(box);
     MH.ui.peekFor = img.src;
     // 放在缩略图**右边** ✓；右边放不下就放左边 ✓；整体限制在视口内 ✓
