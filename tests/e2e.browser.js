@@ -1701,6 +1701,54 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(bothTexts.includes('car') && bothTexts.includes('tree'),
     '第一张的 Car 与第二张的 Tree 都读到了 ✓（不再是只用第一张）✓：' + JSON.stringify(bothTexts.slice(0, 10)));
 
+  // 47) 「自动找地点」的模板：多张卡片时，每件物品的 patch/mask 都要裁对、非空 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    // 前面章节留过 PDF（bgPdfFile）→ 会先走文字层，把这些清掉才能测"截图卡片"这条路 ✓
+    window.MH.bgPdfFile = null;
+    window.MH.ui.pdfFile = null;
+    window.MH.store.state.bg = null;
+    // 前面章节跑过图例识别 → lastLegend/legendItems 是旧结果 ✓：不清掉的话等待会立即返回 ✗
+    window.MH.ui.lastLegend = null;
+    window.MH.ui.legendItems = null;
+    window.MH.ui.wizard = 3;
+    window.MH.render();
+  });
+  await p.evaluate(async () => {
+    const mk = (head, name, occ, colour) => {
+      const cv = document.createElement('canvas');
+      cv.width = 520; cv.height = 150;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff'; cx.fillRect(0, 0, 520, 150);
+      cx.fillStyle = occ ? '#dff5df' : '#fde0e0'; cx.fillRect(8, 8, 504, 134);
+      cx.fillStyle = '#111'; cx.font = 'bold 26px sans-serif'; cx.fillText(head, 20, 46);
+      cx.fillStyle = colour; cx.beginPath(); cx.arc(60, 100, 22, 0, Math.PI * 2); cx.fill();
+      cx.fillStyle = '#111'; cx.font = '24px sans-serif'; cx.fillText(name, 100, 108);
+      return cv.toDataURL('image/png');
+    };
+    window.MurdokuSnipper.state.pins = [
+      { id: 'L1', page: 1, w: 520, h: 150, url: mk('Can be occupied', 'Car', true, '#2b6cb0'),
+        srcX: 0, srcY: 0, srcW: 520, srcH: 150, srcPageW: 520, srcPageH: 150 },
+      { id: 'L2', page: 1, w: 520, h: 150, url: mk('Cannot be occupied', 'Tree', false, '#276749'),
+        srcX: 0, srcY: 0, srcW: 520, srcH: 150, srcPageW: 520, srcPageH: 150 },
+    ];
+    window.MH.render();
+  });
+  await p.click('[data-act="legend-auto"]');
+  await p.waitForFunction(() => window.MH.ui.lastLegend, null, { timeout: 180000 });
+  const legendMulti = await p.evaluate(() => ({
+    last: window.MH.ui.lastLegend,
+    items: (window.MH.ui.legendItems || []).map(it => ({
+      name: it.name, occ: it.occupiable,
+      patch: it.patch ? (it.patch.width + 'x' + it.patch.height) : null, mask: !!it.mask,
+    })),
+  }));
+  ok(legendMulti.items.length === 2 && legendMulti.items.every(x => x.patch && x.mask),
+    '两张图例卡片：两件物品都拿到了模板（patch+mask ✓，自动找地点才用得上 ✓）：' + JSON.stringify(legendMulti.items));
+  ok(legendMulti.items.some(x => x.occ === true) && legendMulti.items.some(x => x.occ === false),
+    '可占据/不可占据分别来自两张卡片 ✓：' + JSON.stringify(legendMulti.items.map(x => x.name + ':' + x.occ)));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
