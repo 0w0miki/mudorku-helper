@@ -2233,12 +2233,23 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   });
   ok(thumbPos.rightOfText && thumbPos.nearRowRight,
     '来源卡片缩略图在行尾**右边** ✓：' + JSON.stringify(thumbPos));
-  // 点缩略图 → 放大浮层 ✓；点浮层关闭 ✓
-  await p.click('.clue-panel .clue-thumb');
-  const peeked = await p.evaluate(() => !!document.getElementById('cardPeek'));
-  ok(peeked, '点缩略图能放大查看来源卡片 ✓');
-  await p.evaluate(() => { const el = document.getElementById('cardPeek'); if (el) el.click(); });
-  ok(!(await p.evaluate(() => !!document.getElementById('cardPeek'))), '点一下关闭放大浮层 ✓');
+  // **悬停缩略图 → 大图浮在它右边** ✓（放左边会压住提取出的线索 ✗ —— 用户反馈 ✓）
+  await p.locator('.clue-panel .clue-thumb').first().hover();
+  await p.waitForTimeout(250);
+  const peeking = await p.evaluate(() => {
+    const box = document.getElementById('cardHover');
+    const row = document.querySelector('.clue-panel .clue-row');
+    const thumb = row.querySelector('.clue-thumb');
+    const grow = row.querySelector('.grow');
+    if (!box) return null;
+    const br = box.getBoundingClientRect(), tr = thumb.getBoundingClientRect(), gr = grow.getBoundingClientRect();
+    return { shown: true, rightOfThumb: br.left >= tr.right - 2, notCoverText: br.left >= gr.right - 2 };
+  });
+  ok(peeking && peeking.shown && peeking.rightOfThumb && peeking.notCoverText,
+    '悬停缩略图：大图出现在**右边**且不压住线索 ✓：' + JSON.stringify(peeking));
+  await p.mouse.move(5, 5);
+  await p.waitForTimeout(200);
+  ok(!(await p.evaluate(() => !!document.getElementById('cardHover'))), '鼠标移开大图就消失 ✓');
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
   console.log(A.join('\n'));

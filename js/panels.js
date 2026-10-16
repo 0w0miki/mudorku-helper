@@ -2818,19 +2818,6 @@
         if (meta) meta.textContent = '第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页';
       }).catch(() => {});
     },
-    'clue-peek'(el) {
-      const src = el && el.src;
-      if (!src) return;
-      const old = document.getElementById('cardPeek');
-      if (old) old.remove();
-      const box = document.createElement('div');
-      box.id = 'cardPeek';
-      box.className = 'card-peek';
-      box.innerHTML = '<img src="' + esc(src) + '" alt="来源卡片">' +
-        '<div class="hint">这是这条线索来自的那张卡片（点任意处关闭 ✓）</div>';
-      document.body.appendChild(box);
-      box.addEventListener('click', () => box.remove());
-    },
     'clue-read'() { guard(runClueRead)(); },
     'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },
     'clue-apply'() { applyClueCands(); },
@@ -3220,6 +3207,40 @@
     }
   }
 
+  /** 悬停缩略图 → 在它**右边**浮出大图 ✓（fixed 定位 ✓：不会被侧栏滚动裁掉 ✓，也不遮住左边的线索文字 ✓） */
+  function onCardPeek(e) {
+    const img = e.target && e.target.closest && e.target.closest('.clue-thumb');
+    if (!img) return;
+    if (MH.ui.peekFor === img.src) return;
+    const old = document.getElementById('cardHover');
+    if (old) old.remove();
+    const r = img.getBoundingClientRect();
+    const box = document.createElement('div');
+    box.id = 'cardHover';
+    box.className = 'card-hover';
+    box.innerHTML = '<img src="' + esc(img.src) + '" alt="来源卡片">' +
+      '<span class="clue-card-no">' + esc(img.alt || '') + '（来自你框的这张卡片）</span>';
+    document.body.appendChild(box);
+    MH.ui.peekFor = img.src;
+    // 放在缩略图**右边** ✓；右边放不下就放左边 ✓；整体限制在视口内 ✓
+    const bw = Math.min(460, Math.max(200, r.width * 8));
+    const bh = Math.min(340, Math.max(120, r.height * 6));
+    let left = r.right + 12;
+    if (left + bw > window.innerWidth - 8) left = Math.max(8, r.left - bw - 12);
+    let top = Math.max(8, Math.min(r.top - 12, window.innerHeight - bh - 8));
+    box.style.left = Math.round(left) + 'px';
+    box.style.top = Math.round(top) + 'px';
+    box.style.maxWidth = Math.round(Math.min(bw, window.innerWidth - left - 8)) + 'px';
+  }
+
+  function onCardPeekOut(e) {
+    const img = e.target && e.target.closest && e.target.closest('.clue-thumb');
+    if (!img) return;
+    const box = document.getElementById('cardHover');
+    if (box) box.remove();
+    MH.ui.peekFor = null;
+  }
+
   function onSidebarHover(e) {
     const reg = e.target.closest('[data-hover-region]');
     const it = e.target.closest('[data-hover-item]');
@@ -3362,6 +3383,8 @@
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);
       document.addEventListener('focusin', onDocumentFocusIn);
+      document.addEventListener('mouseover', onCardPeek);      // 悬停缩略图 → 右边浮出大图 ✓
+      document.addEventListener('mouseout', onCardPeekOut);
       const sidebar = MH.els.sidebar;
       sidebar.addEventListener('pointermove', onSidebarHover);
       sidebar.addEventListener('pointerleave', clearSidebarHover);
