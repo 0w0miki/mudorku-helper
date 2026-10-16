@@ -443,7 +443,7 @@
       body.push('<ul class="list">' + entityList('region', st) + '</ul>');
     } else if (step === 3) {
       body.push('<section class="card"><h2>框选物品图例</h2>' +
-        '<button class="ghost block" data-act="crop-item">✂️ 在主界面上框选物品图例</button>' +
+        '<button class="ghost block" data-act="crop-item">✂️ 框选物品图例</button>' +
         '<p class="hint">在棋盘区的那页图上拖一个框，把图例框进去 —— <b>整块图例一起框</b>也行 ' +
           '（多张图例就框多张）；点「完成」后自动识别物品、并自动到地图上找位置。' +
           '某件没找到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p></section>');
@@ -454,7 +454,7 @@
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
     } else {
       body.push('<section class="card"><h2>框选人物线索卡片</h2>' +
-        '<button class="ghost block" data-act="crop-person">✂️ 在主界面上框选人物线索卡片</button>' +
+        '<button class="ghost block" data-act="crop-person">✂️ 框选人物线索卡片</button>' +
         '<p class="hint">把写着人物线索的卡片框下来（几张都行，识别时拼在一起识别）；' +
           '点「完成」后自动读线索。整句都会存下来，没解析出物品/区域关联也存；' +
           '也可以直接在下面每个人那里手打/粘贴。</p></section>');
