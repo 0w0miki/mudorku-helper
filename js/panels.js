@@ -310,11 +310,22 @@
     layer.className = 'board-crop';
     layer.innerHTML =
       '<div class="bc-head">' +
-      '<div class="bc-line"><b>' + (kind === 'item' ? '框选物品图例' : '框选人物线索卡片') + '</b>' +
+      '<div class="bc-line"><b>' + (kind === 'item' ? '框选物品图例' : '框选人物线索卡片') +
+      (Sn && Sn.state && Sn.state.pages > 1 ? '（第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页）' : '') + '</b>' +
       '<span class="muted">在图上拖一个框（可以连着框多张，识别时拼在一起识别）；' +
       '点「完成」就<b>自动接着识别</b>' + (kind === 'item' ? '物品并找位置' : '人物线索') + '</span></div>' +
       // "完成"放到**下一行靠左** ✓（顶部右侧容易和右边摘录浮窗打架 ✓）
-      '<div class="bc-actions"><button class="ghost sm" data-act="crop-close">完成 ✓</button></div>' +
+      '<div class="bc-actions">' +
+      // **翻页** ✓（PDF 多页时：线索/图例可能在别的页 ✓）
+      (Sn && Sn.state && Sn.state.pages > 1
+        ? '<button class="ghost sm" data-act="crop-page" data-dir="-1"' +
+            (Sn.state.page <= 1 ? ' disabled' : '') + '>◀ 上一页</button>' +
+          '<span class="meta">第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页</span>' +
+          '<button class="ghost sm" data-act="crop-page" data-dir="1"' +
+            (Sn.state.page >= Sn.state.pages ? ' disabled' : '') + '>下一页 ▶</button>' +
+          '<span class="grow"></span>'
+        : '') +
+      '<button class="ghost sm" data-act="crop-close">完成 ✓</button></div>' +
       '</div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
     // 「完成」已经挪到下一行靠左 ✓ → 不必再为它让位、也不必压在右侧浮窗之上 ✓
@@ -361,7 +372,9 @@
       // 显示 → 源图像素的换算要用**图片的显示宽度** ✓
       // （以前除以"拖框宽度" ✗ —— 拖 120px 会裁出 1000+px 的一大块 ✓，实测踩过）
       const shown = im.getBoundingClientRect().width || box.w;
-      const k = img.naturalWidth / shown;
+      // 换算用**当前**页面图 ✓（框选过程中可能翻过页 ✓，`img` 变量会过期 ✗）
+      const cur = (Sn.state && Sn.state.img) || img;
+      const k = (cur.naturalWidth || img.naturalWidth) / shown;
       Sn.addPinFromSource(box.x * k, box.y * k, box.w * k, box.h * k);
       if (MH.ui.crop) MH.ui.crop.added = (MH.ui.crop.added || 0) + 1;
       MH.toast('已截取一张卡片 ✓ 看右侧卡片列表（' + (kind === 'item' ? '物品图标' : '人物线索') + '）', 'ok');
@@ -1443,7 +1456,7 @@
     const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
     const isPdf = !!(Sn && Sn.file && /pdf/i.test(Sn.file.type || Sn.file.name || ''));
     if (!pins.length && !isPdf) {
-      giveUp('还没有图例：在右侧「PDF 摘录」导入图例那一页（PDF 最好，能直接读文字层）');
+      giveUp('还没有图例：在右侧「线索笔记」导入图例那一页（PDF 最好，能直接读文字层）');
       return;
     }
     let out = null, via = '';
@@ -2677,6 +2690,31 @@
     'crop-item'() { startBoardCrop('item'); },
     'crop-person'() { startBoardCrop('person'); },
     'crop-close'() { closeBoardCrop(); },
+    'crop-page'(el) {
+      const Sn = window.MurdokuSnipper;
+      const layer = document.getElementById('boardCrop');
+      if (!Sn || !layer) return;
+      const dir = Number(el.dataset.dir) || 1;
+      Promise.resolve(Sn.gotoPage(Sn.state.page + dir)).then(() => {
+        const im = layer.querySelector('.bc-img');
+        const title = layer.querySelector('.bc-line b');
+        const sel = layer.querySelector('.bc-sel');
+        if (sel) sel.hidden = true;
+        if (!im) return;
+        im.src = Sn.state.img ? Sn.state.img.src : '';       // 换成新一页的图 ✓
+        if (title) {
+          title.textContent = (MH.ui.crop && MH.ui.crop.kind === 'item' ? '框选物品图例' : '框选人物线索卡片') +
+            '（第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页）';
+        }
+        // 这一层是自己搭的 DOM ✓ → 禁用状态直接改 ✓（MH.render 只刷侧栏 ✗ 刷不到它 ✓）
+        const prev = layer.querySelector('[data-act="crop-page"][data-dir="-1"]');
+        const next = layer.querySelector('[data-act="crop-page"][data-dir="1"]');
+        if (prev) prev.disabled = Sn.state.page <= 1;
+        if (next) next.disabled = Sn.state.page >= Sn.state.pages;
+        const meta = layer.querySelector('.bc-actions .meta');
+        if (meta) meta.textContent = '第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页';
+      }).catch(() => {});
+    },
     'clue-read'() { guard(runClueRead)(); },
     'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },
     'clue-apply'() { applyClueCands(); },
@@ -3306,7 +3344,7 @@
   };
 
   MH.panels = P;
-  // 右侧「PDF 摘录」悬浮窗（js/snipper.js）复用同一套 pdf.js 加载与渲染
+  // 右侧「线索笔记」悬浮窗（js/snipper.js）复用同一套 pdf.js 加载与渲染
   MH.ensurePdfLib = ensurePdfLib;
   MH.renderPdfPage = renderPdfPage;
   MH.registerRenderer(st => P.render(st));

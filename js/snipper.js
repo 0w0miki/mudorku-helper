@@ -1,6 +1,6 @@
 /*! Mudorku Helper — snipper.js
  *
- * 右侧「PDF 摘录」悬浮窗。
+ * 右侧「线索笔记」悬浮窗（导入页面 → 框成卡片；卡片给图例/线索识别用 ✓）。
  *
  * 用途：Murdoku 的 PDF 里除了地图页，往往还有一页写着人物/物品的具体信息。
  * 这个面板让你把那一块单独截出来钉在右边，游玩时一边看题一边对照，不用来回翻页。
@@ -65,11 +65,11 @@
     wrap.className = 'snipper';
     wrap.id = 'snipper';
     wrap.innerHTML =
-      '<button class="snipper-tab" type="button" data-snip="toggle" title="展开 / 收起 PDF 摘录">' + CHEV +
+      '<button class="snipper-tab" type="button" data-snip="toggle" title="展开 / 收起线索笔记">' + CHEV +
         '<span class="snipper-badge" data-snip="badge"></span></button>' +
       '<div class="snipper-panel">' +
         '<div class="snipper-head">' +
-          '<b>PDF 摘录</b>' +
+          '<b>线索笔记</b>' +
           '<span class="muted" data-snip="status"></span>' +
           '<span class="grow"></span>' +
           '<button class="ghost sm icon" type="button" data-snip="fold-stage" title="折叠 / 展开 PDF 缩略图">' + CHEV_DOWN + '</button>' +
@@ -646,7 +646,7 @@
     return el;
   }
 
-  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, loadFile, clearAll, state: S };
+  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, loadFile, clearAll, gotoPage, state: S };
 
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', mount);
   else mount();

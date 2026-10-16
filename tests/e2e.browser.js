@@ -2122,6 +2122,61 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(editItemDraft === 1, '编辑已有物品时只有一个编辑框 ✓：' + editItemDraft);
   await p.evaluate(() => { window.MH.ui.draft = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 57) 右侧悬浮窗改名「线索笔记」✓；框选层支持翻页 ✓（多页时才出现 ✓）
+  ok(await p.evaluate(() => (document.querySelector('.snipper-head b') || {}).textContent === '线索笔记'),
+    '右侧悬浮窗标题改成「线索笔记」✓');
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = true;
+    const Sn = window.MurdokuSnipper;
+    // 造一个多页状态（真实 PDF 多为单页，这里直接置状态 ✓）
+    Sn.state.img = { naturalWidth: 800, naturalHeight: 600, src: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' };
+    Sn.state.pages = 3; Sn.state.page = 1;
+    window.MH.ui.wizard = 3;
+    window.MH.ui.crop = null;
+    window.MH.render();
+    const old = document.getElementById('boardCrop'); if (old) old.remove();
+    document.querySelector('[data-act="crop-item"]').click();
+  });
+  const pageNav = await p.evaluate(() => ({
+    n: document.querySelectorAll('#boardCrop [data-act="crop-page"]').length,
+    title: (document.querySelector('#boardCrop .bc-line b') || {}).textContent,
+    prevDisabled: (document.querySelector('#boardCrop [data-act="crop-page"][data-dir="-1"]') || {}).disabled,
+  }));
+  ok(pageNav.n === 2 && /第 1 \/ 3 页/.test(pageNav.title || '') && pageNav.prevDisabled === true,
+    '多页时框选层出现翻页按钮，标题带页码 ✓：' + JSON.stringify(pageNav));
+  await p.evaluate(() => {
+    const Sn = window.MurdokuSnipper;
+    Sn.state.page = 2;                                  // 模拟翻到第 2 页 ✓
+    document.querySelector('#boardCrop [data-act="crop-page"][data-dir="1"]').click();
+  });
+  await p.waitForTimeout(300);
+  const afterPage = await p.evaluate(() => {
+    const t = (document.querySelector('#boardCrop .bc-line b') || {}).textContent;
+    const prev = document.querySelector('#boardCrop [data-act="crop-page"][data-dir="-1"]');
+    return { title: t, prevDisabled: prev && prev.disabled, page: window.MurdokuSnipper.state.page };
+  });
+  ok(/第 \d+ \/ 3 页/.test(afterPage.title || '') && afterPage.prevDisabled === false,
+    '翻页后标题与按钮状态跟着变 ✓：' + JSON.stringify(afterPage));
+  // 单页时不显示翻页 ✓
+  await p.evaluate(() => {
+    const Sn = window.MurdokuSnipper;
+    Sn.state.pages = 1; Sn.state.page = 1;
+    const b2 = document.querySelector('#boardCrop [data-act="crop-close"]'); if (b2) b2.click();
+    window.MH.ui.crop = null;
+  });
+  await p.waitForTimeout(400);
+  await p.evaluate(() => { window.MH.ui.wizard = 3; window.MH.render(); document.querySelector('[data-act="crop-item"]').click(); });
+  const single = await p.evaluate(() => document.querySelectorAll('#boardCrop [data-act="crop-page"]').length);
+  ok(single === 0, '单页时不显示翻页按钮 ✓：' + single);
+  await p.evaluate(() => {
+    const b2 = document.querySelector('#boardCrop [data-act="crop-close"]'); if (b2) b2.click();
+    window.MH.ui.crop = null; window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null;
+    window.MurdokuSnipper.state.pins = [];
+    window.MH.render();
+  });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
