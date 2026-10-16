@@ -408,6 +408,12 @@
   function addPinFromSource(sx, sy, sw, sh) {
     const img = S.img;
     if (!img || !img.naturalWidth) { toast('页面还没渲染好', 'warn'); return null; }
+    // **坐标必须是有限数** ✓ —— 否则会生成一张 srcX=NaN 的卡片 ✓：
+    // 它看起来存在 ✓，但映射回页面时恒不匹配 ✗（静默失效 ✓，实测踩过 ✓）
+    if (![sx, sy, sw, sh].every(v => Number.isFinite(v))) {
+      toast('框选坐标异常，这次没有生成卡片 —— 再拖一次 ✓', 'error');
+      return null;
+    }
     const x = Math.max(0, Math.min(Math.round(sx), img.naturalWidth - 1));
     const y = Math.max(0, Math.min(Math.round(sy), img.naturalHeight - 1));
     const w = Math.max(1, Math.min(Math.round(sw), img.naturalWidth - x));

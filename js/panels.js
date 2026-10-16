@@ -1109,7 +1109,12 @@
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         const raster = { data: ctx.getImageData(0, 0, cv.width, cv.height).data, width: cv.width, height: cv.height };
-        const rs = cardRectsForPage(raster);
+        const cr = cardRectsForPage(raster);
+        const rs = cr.rects;
+        if (cr.bad) {
+          MH.toast('有 ' + cr.bad + ' 张卡片缺少位置信息（旧版本留下的 ✓），这次已忽略 —— ' +
+            '重新框一下这些卡片就能用 ✓', 'warn');
+        }
         const inCard = (x, y) => !rs.length || rs.some(r => x >= r.x - 6 && x <= r.x + r.w + 6 && y >= r.y - 6 && y <= r.y + r.h + 6);
         const tc = await page.getTextContent();
         const items = [];
@@ -1268,16 +1273,25 @@
    * **不自动填格子**（地图上"在哪"目前还不准）：先把"有哪些物品 + 名字 + 可占据"自动化。
    */
   /** 把当前页的卡片框换算成页面栅格坐标（图例区域 = 用户框出来的那块） */
+  /**
+   * 卡片 → 页面坐标的矩形 ✓
+   * **必须校验有限数** ✓：缺源坐标的旧卡片会算出 NaN ✗ —— 那种矩形永远匹配不上 ✓
+   * （以前是静默跳过 ✗：用户以为框了 7 张 ✓，实际只有 1 张生效 ✓，读出来的内容自然对不上 ✓）
+   * @returns {{rects:Array, bad:number}} bad = 被忽略的卡片数 ✓
+   */
   function cardRectsForPage(raster) {
     const Sn = window.MurdokuSnipper && window.MurdokuSnipper.state;
-    if (!Sn || !raster) return [];
+    if (!Sn || !raster) return { rects: [], bad: 0 };
     const out = [];
+    let bad = 0;
     for (const pin of (Sn.pins || [])) {
-      if (pin.page !== (Sn.page || 1) || !pin.srcPageW || !pin.srcPageH) continue;
+      if (pin.page !== (Sn.page || 1)) continue;
+      const nums = [pin.srcX, pin.srcY, pin.srcW, pin.srcH, pin.srcPageW, pin.srcPageH];
+      if (!nums.every(v => typeof v === 'number' && Number.isFinite(v))) { bad++; continue; }
       const kx = raster.width / pin.srcPageW, ky = raster.height / pin.srcPageH;
       out.push({ x: pin.srcX * kx, y: pin.srcY * ky, w: pin.srcW * kx, h: pin.srcH * ky });
     }
-    return out;
+    return { rects: out, bad };
   }
 
   /** 从栅格上裁一小块（做模板用） */
