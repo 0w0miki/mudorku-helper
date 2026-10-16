@@ -30,6 +30,11 @@
     // "was near / by X" = 邻近 ✓（当成 beside 更贴近语义 ✓）
     { re: /\b(?:are|is|was|were)\s+(?:near|by)\b/i, kind: 'beside' },
     { re: /\b(?:lived|lies|lay|sat|sits|stood|stands)\s+(?:in|on|at|by|near)\b/i, kind: 'in' },
+    // golf 这类题："occupy a tee / the flag"、"within a sand pit" 都是"在那一格" ✓
+    { re: /\b(?:occupie[sd]?|occupying|occupy)\b/i, kind: 'in' },
+    { re: /\b(?:are|is|was|were)\s+within\b/i, kind: 'in' },
+    { re: /\bwithin\b/i, kind: 'in' },
+    { re: /\b(?:are|is|was|were)\s+inside\b/i, kind: 'in' },
     { re: /\bin\s+(?:the\s+)?(?:top|bottom|first|second|third|fourth|fifth|last)\s+(?:row|column)\b/i, kind: 'in' },
   ];
 
@@ -225,6 +230,100 @@
   }
 
   /**
+   * **行优先**版面分析（OCR 逐词框专用 ✓）
+   * 为什么不用逐对连边：词框的 y 有 ±5~10px 抖动 ✗，逐对判定会把一句话切碎 ✓
+   * （实测 142 个词被切成 75 块 ✗ → 一条线索都认不出 ✗）。
+   * 步骤：① 按 y 宽容差归行 ✓ → ② 行内按"大空隙"切段（气泡内词距小 ✓）→
+   *      ③ 段按"竖向相邻 + 横向重叠"归块 ✓
+   */
+  function clusterLines(items, opts) {
+    const opt = opts || {};
+    const list = (items || []).filter(it => it && norm(it.text)).map((it, i) => ({
+      i, text: norm(it.text), x: it.x, y: it.y,
+      w: it.w == null ? Math.max(6, letters(it.text).length * 6) : it.w,
+      h: it.h == null ? 12 : it.h, font: it.font, bold: it.bold,
+    }));
+    if (!list.length) return [];
+    const hs = list.map(z => z.h).sort((a, b) => a - b);
+    const medH = hs[hs.length >> 1] || 12;
+    // ① 归行（宽容差 ✓）
+    const lines = [];
+    for (const it of list.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))) {
+      const ln = lines.find(l => Math.abs(l.y - it.y) <= Math.max(6, medH * (opt.lineTol == null ? 0.7 : opt.lineTol)));
+      if (ln) { ln.items.push(it); ln.y = Math.min(ln.y, it.y); ln.y1 = Math.max(ln.y1, it.y + it.h); }
+      else lines.push({ y: it.y, y1: it.y + it.h, items: [it] });
+    }
+    // ② 行内按大空隙切段 ✓
+    const segs = [];
+    for (const ln of lines) {
+      ln.items.sort((a, b) => a.x - b.x);
+      let cur = [ln.items[0]];
+      const flush = () => {
+        const f = cur[0], la = cur[cur.length - 1];
+        segs.push({ y: Math.min.apply(null, cur.map(z => z.y)), y1: Math.max.apply(null, cur.map(z => z.y + z.h)),
+          x: f.x, x1: la.x + la.w, items: cur.slice() });
+      };
+      for (let k = 1; k < ln.items.length; k++) {
+        const gap = ln.items[k].x - (cur[cur.length - 1].x + cur[cur.length - 1].w);
+        if (gap > Math.max(10, medH * (opt.segGap == null ? 1.6 : opt.segGap))) { flush(); cur = []; }
+        cur.push(ln.items[k]);
+      }
+      if (cur.length) flush();
+    }
+    // ③ 段按"竖向相邻 + 横向重叠"归块 ✓
+    const parent = segs.map((_, i) => i);
+    const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };
+    for (let i = 0; i < segs.length; i++) {
+      for (let j = i + 1; j < segs.length; j++) {
+        const a = segs[i], b = segs[j];
+        const gapY = Math.max(0, Math.max(a.y - b.y1, b.y - a.y1));
+        if (gapY > Math.max(8, medH * (opt.blockGap == null ? 1.8 : opt.blockGap))) continue;
+        const ox = Math.min(a.x1, b.x1) - Math.max(a.x, b.x);
+        const narrow = Math.min(a.x1 - a.x, b.x1 - b.x);
+        if (ox < narrow * 0.4) continue;
+        if (looksLikePersonName(a.items.map(z => z.text).join(' ')) !==
+            looksLikePersonName(b.items.map(z => z.text).join(' '))) continue;   // 人名单独成块 ✓
+        union(a.i || i, b.i || j);
+      }
+    }
+    // 组装（保持局部的阅读顺序 ✓）
+    const groups = new Map();
+    segs.forEach((sg, i) => {
+      const r = find(i);
+      if (!groups.has(r)) groups.set(r, []);
+      groups.get(r).push(...sg.items);
+    });
+    const out = [];
+    for (const arr of groups.values()) {
+      const ls = [];
+      for (const it of arr) {
+        const ln = ls.find(l => Math.abs(l.y - it.y) <= Math.max(6, medH * 0.7));
+        if (ln) ln.items.push(it); else ls.push({ y: it.y, items: [it] });
+      }
+      ls.sort((a, b) => a.y - b.y);
+      const ordered = [];
+      for (const ln of ls) ordered.push(...ln.items.slice().sort((a, b) => a.x - b.x));
+      const byFont = new Map();
+      for (const z of ordered) {
+        const f = z.font == null ? '' : String(z.font);
+        byFont.set(f, (((byFont.get(f) || '') + ' ' + z.text).replace(/\s+/g, ' ').trim()));
+      }
+      out.push({
+        text: ordered.map(z => z.text).join(' ').replace(/\s+/g, ' ').trim(),
+        x: Math.min.apply(null, ordered.map(z => z.x)),
+        y: Math.min.apply(null, ordered.map(z => z.y)),
+        w: Math.max.apply(null, ordered.map(z => z.x + z.w)) - Math.min.apply(null, ordered.map(z => z.x)),
+        h: Math.max.apply(null, ordered.map(z => z.y + z.h)) - Math.min.apply(null, ordered.map(z => z.y)),
+        runs: ordered.map(z => ({ text: z.text, font: z.font, bold: z.bold })),
+        groups: [...byFont].map(([font, t]) => ({ font, text: t })),
+      });
+    }
+    out.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    return out;
+  }
+
+  /**
    * 把**散点文字块**聚成"线索块"（②取字的核心 ✓）。
    * 为什么不做"先按 y 归行、再按 x 空隙切段" ✗：真实版面是**两列并排**的卡片 ✓，
    * 同一 y 上会横跨两张卡 ✗ —— 那样切出来的"行"跨列，一句话被撕成两半 ✗（实测 car-repair 只出 1/6 条）。
@@ -326,10 +425,10 @@
     return extract(cluster(items, o), names, o);
   }
 
-  /** OCR 来源的入口：逐词框要更松的合并阈值 ✓ */
+  /** OCR 来源的入口：**走行优先版面分析** ✓（逐词框用它最稳 ✓） */
   function readOcrItems(items, names, opts) {
     const o = Object.assign({}, opts || {}, { blocks: true, wordLevel: true });
-    return extract(cluster(items, o), names, o);
+    return extract(clusterLines(items, o), names, o);
   }
 
   /**
@@ -551,7 +650,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, looksLikeClueStatement, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

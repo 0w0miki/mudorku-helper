@@ -372,3 +372,10 @@ test('looksLikeClueStatement：有主语就算线索陈述 ✓；规则/碎片�
   assert.ok(!C.looksLikeClueStatement('chair in the bottom row.'));
   assert.ok(!C.looksLikeClueStatement('What does “beside” mean?'));
 });
+
+test('golf 那类句式：occupy / within 也算"在…里" ✓', () => {
+  const names = [{ name: 'tee', kind: 'item' }, { name: 'flag', kind: 'item' }, { name: 'sand pit', kind: 'region' }];
+  assert.equal(C.parse('She occupied the flag in an even-numbered hole.', names).target.name, 'flag');
+  assert.equal(C.parse('He was the only man to occupy a golf tee.', names).target.name, 'tee');
+  assert.equal(C.parse('She was within a sand pit.', names).target.name, 'sand pit');
+});
