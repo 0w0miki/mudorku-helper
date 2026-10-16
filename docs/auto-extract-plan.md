@@ -1979,6 +1979,40 @@ y≈1492  "ROW" @x=165  ← 页面左下角另一个词 ✓（与图例无关 �
 
 临时绕过（现在就能用）✓：contest 这种"图例没有文字名"的题 ✓，把**图例那一页当图片**导入 ✓
 （截图/导出 PNG ✓）→ 走的是 **OCR 卡片路径** ✓，它**只读你框的那张卡片** ✓。
+
+**contest 图例问题：修好了 ✓（2026-10-16）—— 真凶是"对象当数组用" ✗**
+
+上一轮卡在"不知道哪条分支产出" ✓ → 这一轮先加**分支轨迹** `MH.ui.legendTrace` ✓（每步记一笔 ✓），
+一次就定位到 ✓：
+
+```
+分支轨迹：["PDF 文字层 items=15 raster=yes rawItems=108",
+          "卡片矩形",                        ← 数量是 **undefined** ✗
+          "needCardRows undefined base=15 whole=15",
+          "最终 pdf items=15"]
+```
+
+**真凶** ✗：`cardRectsForPage()` 已经被我改成返回 `{ rects, bad }` ✓，
+但这一处调用点还是 `const rects = cardRectsForPage(out.raster);` ✗ → `rects` 拿到的是**对象** ✓
+→ `rects.length` 是 `undefined` ✗ → 所有"用户框了卡片"的判断**全为 false** ✗
+→ **卡片从头到尾被忽略** ✓✓ —— 这正是"不可占据的都找到了 ✓、多了框外的 ROW ✗、
+框里的 bed/chair/hammock 一件没有 ✗"的完整解释 ✓
+（这也解释了我上一轮加的过滤"为什么没生效" ✗ —— 它压根没被执行 ✓）
+
+修：`const crPage = cardRectsForPage(out.raster); const rects = crPage.rects;` ✓（并把 bad 提示出来 ✓）
+
+实测（contest 第 2 页，框住"可占据"那块）：
+```
+分支轨迹：[…, "卡片矩形 1", "按卡片筛 15→0", "needCardRows true base=8 whole=0", "最终 pdf+card items=8"]
+物品：["crate","rope","barrel","shelf","shrub","bed","chair","hammock"] ✓
+→ **ROW 没了** ✓✓（框外的一律不进 ✓）
+→ **bed / chair / hammock 都加上了** ✓✓
+   （crate…shrub 也在，因为探针的框同时套住了上面那一行 ✓ —— 框小一点就只有那三件 ✓）
+```
+另：`lastLegend.boxes` 现在只留坐标（不再带 mask ✗ —— 之前一次打印 14KB ✓）
+
+**教训**：改了函数返回结构后，**所有调用点都要跟着改** ✗ —— 这次是靠"分支轨迹"抓到的 ✓，
+以后遇到"某个优化明明写了却没生效" ✓，先怀疑**它没被执行** ✓，别急着改逻辑 ✓。
 ## P3 线索与人物关联（①②③ 已完成 ✓）
 
 **③ 应用：已接线 ✓**（2026-10-15）

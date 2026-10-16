@@ -1447,9 +1447,14 @@
 
   async function runLegendAuto() {
     const Lg = window.MurdokuLegend;
+    // **分支轨迹** ✓：这次就是靠"不知道哪条分支产出"卡住的 ✓ → 每一步都记一笔 ✓
+    const trace = [];
+    const mark = (label, extra) => trace.push(label + (extra == null ? '' : ' ' + extra));
+    MH.ui.legendTrace = trace;
     // 每个"没做成"的分支都要留下 MH.ui.lastLegend —— 否则外部（e2e / 探针）会一直等结果 ✗
     const giveUp = (why) => {
-      MH.ui.lastLegend = { via: 'none', icons: 0, items: 0, names: [], headings: [], skipped: 0, unknowns: 0, reason: why };
+      trace.push('giveUp: ' + why);
+      MH.ui.lastLegend = { via: 'none', icons: 0, items: 0, names: [], headings: [], skipped: 0, unknowns: 0, reason: why, trace };
       MH.toast(why, 'warn');
     };
     if (!Lg) { giveUp('图例模块没加载（js/legend.js）'); return; }
@@ -1466,13 +1471,23 @@
       try {
         MH.toast('正在读 PDF 文字层…', 'ok');
         out = await readLegendByPdf();
+        mark('PDF 文字层', out ? ('items=' + (out.items || []).length + (out.raster ? ' raster=yes' : ' raster=NO') + (out.rawItems ? ' rawItems=' + out.rawItems.length : ' rawItems=no')) : 'null');
         if (out && out.raster) {
-          const rects = cardRectsForPage(out.raster);
+          // **必须取 `.rects`** ✗→✓：`cardRectsForPage` 现在返回 `{ rects, bad }` ✓，
+          // 这里以前直接把对象当数组用 ✗ → `rects.length` 是 undefined ✓
+          // → 所有"用户框了卡片"的判断全为 false ✗ → 卡片从头到尾被忽略 ✓
+          // （contest 实测：框在图例上，结果却是整页 15 件 + 框外的 ROW ✓ ← 就是这里 ✓）
+          const crPage = cardRectsForPage(out.raster);
+          const rects = crPage.rects;
+          if (crPage.bad) {
+            MH.toast('有 ' + crPage.bad + ' 张卡片缺少位置信息（旧版本留下的 ✓），这次已忽略', 'warn');
+          }
           // **用户框了什么，就只保留框里的** ✓ —— 在进入"按卡片解析"的分支之前就要做 ✓
           // （`readLegendByPdf` 在"图例没有文字名"时是按**整页**做行列切分的 ✗，
           //   结果里会带上框外的条目 ✓ —— contest 实测：框在图例上却出现了左下角的 "ROW" ✓，
           //   而真正在框里的可占据物品反而被挤掉 ✓。以前这个过滤写在内层条件里 ✗，
           //   而 contest 的 rawItems 为空 → 整段被跳过 → 过滤根本没生效 ✓）
+          mark('卡片矩形', rects.length);
           if (rects.length && out.items && out.items.length) {
             const ratio = (b) => {
               if (!b || !b.w || !b.h) return 0;
@@ -1490,6 +1505,7 @@
             // 当整页切出来的物品**全都在框外**时（contest 实测就是这种 ✓，15 件 r 全 < 0.3 ✓），
             // kept 为空 → 保底生效 → 等于**什么都没滤** ✗ → 框外的 ROW 照旧进来 ✗、
             // 而框里真正的可占据物品一件也没有 ✗（整页切分压根没切到那一组 ✓）
+            mark('按卡片筛', out.items.length + '→' + kept.length);
             MH.toast('按你框的卡片筛掉了 ' + (out.items.length - kept.length) + ' 件框外的图例 ✓' +
               (kept.length ? '' : '（框里没切出物品 → 改用"按卡片切分" ✓）'), 'ok');
             out = Object.assign({}, out, { items: kept });
@@ -1544,6 +1560,7 @@
           }
           const base = out;
           const needCardRows = rects.length && (base.items.length < whole.items.length || whole.items.length < 2);
+          mark('needCardRows', String(needCardRows) + ' base=' + base.items.length + ' whole=' + whole.items.length);
           if (needCardRows) {
             // 只有"整页文字层也没有名字"（contest 那种）才走卡片切分 + OCR ✓；
             // 整页明明有名字，只是卡片没框到 → 用整页结果并提示，别去猜（猜出来是乱码 ✗）
@@ -1730,9 +1747,15 @@
       patch: (page && it.icon) ? cropPatch(page, it.icon) : null,
       mask: it.icon && it.icon.mask ? it.icon.mask : null,
     }));
+    mark('最终', via + ' items=' + out.items.length);
     MH.ui.lastLegend = {
+      trace,
       // 每件物品的框（诊断用 ✓：判断"是不是框外的条目混进来了" ✓）
-      boxes: (out.items || []).map(it => ({ name: it.name, icon: it.icon || null, nameBox: it.nameBox || null })),
+      boxes: (out.items || []).map(it => ({
+        name: it.name,
+        icon: it.icon ? [Math.round(it.icon.x), Math.round(it.icon.y), Math.round(it.icon.w), Math.round(it.icon.h)] : null,
+        nameBox: it.nameBox ? [Math.round(it.nameBox.x), Math.round(it.nameBox.y), Math.round(it.nameBox.w), Math.round(it.nameBox.h)] : null,
+      })),
       via, icons: out.items.length, groups: (out.headings || []).length,
       items: made, names: out.items.map(i => i.name),
       occupiable: out.items.map(i => i.occupiable),
