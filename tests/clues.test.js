@@ -233,11 +233,15 @@ test('人物对应：同一个人不会被两条线索占用 ✓（先到先得�
 });
 
 test('页脚署名：混进线索里要去掉 ✓（"…in a chair in puzzle by Manuel Garand …" → 只留线索部分）', () => {
+  // 署名截掉后剩下 "She was sitting in a chair in" ✓ —— 这是**残句** ✓，现在会被拒（不再和完整那句重复 ✓）
   const r = C.parse('She was sitting in a chair in puzzle by Manuel Garand the front area. art by Eli Voisin graphic design by Katarzyna Kosobucka & MG',
     [{ name: 'Chair', kind: 'item' }]);
-  assert.equal(r.kind, 'in');
-  assert.equal(r.target.name, 'Chair');
-  assert.equal(r.text, 'She was sitting in a chair in', '署名被截掉 ✓');
+  assert.equal(r.kind, 'none');
+  assert.match(r.reason, /截断|署名/);
+  // 完整那句（切块修好后就是这样 ✓）要能解析出 Chair ✓
+  const full = C.parse('She was sitting in a chair in the front area.', [{ name: 'Chair', kind: 'item' }, { name: 'FRONT AREA', kind: 'region' }]);
+  assert.equal(full.kind, 'in');
+  assert.equal(full.target.name, 'Chair', '目标应是关系词后面最近的 Chair ✓（不是 FRONT AREA ✗）');
 });
 
 test('只有署名的块不认 ✗', () => {
@@ -330,4 +334,16 @@ test('阅读顺序：同一行里 y 抖动不会打乱词序 ✓', () => {
   ], { wordLevel: true });
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].text, 'killer was alone', '按行内 x 排序 ✓');
+});
+
+test('截断的残句不要 ✗（"She was sitting in a" 会和完整那句重复）', () => {
+  const names = [{ name: 'Chair', kind: 'item' }, { name: 'FRONT AREA', kind: 'region' }];
+  const bad = C.parse('She was sitting in a', names);
+  assert.equal(bad.kind, 'none');
+  assert.match(bad.reason, /截断/);
+  const good = C.parse('She was sitting in a chair in the front area.', names);
+  assert.equal(good.kind, 'in');
+  assert.equal(good.target.name, 'Chair', '关系词后面最近的目标 ✓');
+  // 完整句里"在…附近/旁边"这类结构不受影响 ✓
+  assert.equal(C.parse('He was beside a desk.', names).kind, 'beside');
 });

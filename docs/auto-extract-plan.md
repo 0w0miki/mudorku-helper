@@ -1314,7 +1314,34 @@ familymurdoku：7 条分句 → **6 个人各一条** ✓（p3 拿到同一气�
                4 条关联（A→BACK AREA、C→Chair(负)、E→Window、V→FRONT AREA）✓ 全部正确 ✓
 car-repair：4 条 4 人对 ✓（不变 ✓）
 ```
-**还差的**：线索文本偶尔少个尾巴 ✓（"…in a chair in" ✗，切块边界 ✓，不影响关系与目标 ✓）
+**"car-repair 4 条 / family 7 条"的明细（用户问）✓**
+
+两个数字单位不同 ✗（我一开始没说清）：car-repair 是**线索句**数 ✓，family 是**分句**数 ✓。
+
+```
+car-repair：6 个嫌疑人 → 4 条线索
+   ✓ in→Chair      She was sitting in a chair .        → Crystal
+   ✓ in→Car        He was in a car .                   → Anthony
+   ✓ in→Oil Slick  He was on an oil slick.             → Brock
+   ✓ beside→Shelf  He was beside a shelf .             → Emilio
+   ✗ Vaughn："The Victim. He was alone with the murderer." —— **不是位置线索**（没有"在/旁边"）✓ 正确地不算
+   ✗ Diane："She was alone in the Waiting Area" —— **真丢了** ✗（那个块没成块，碎片各自被拒 ✓）
+                                              ← 这是剩下的缺陷 ✓
+
+familymurdoku：6 个人 → 7 条分句（6 人各一条 ✓ + 1 条额外的）
+   ✓ 7 条全对 ✓，其中一个人的气泡里有两句：
+     "He was beside a desk." + "He was not sitting in a chair." ✓
+     → 两句都归同一个人 ✓（按块分配 ✓），所以是 7 条而不是 6 条 ✓
+```
+
+**这一轮顺手修的两处正确性问题** ✓
+1. **截断残句** ✗→✓：`"She was sitting in a"` 这种（结尾落在介词/冠词 ✓）不要 ✓
+   —— 它本来会和完整那句**重复成两条** ✓
+2. **目标要取"关系词后面最近的那个"** ✗→✓：
+   `"She was sitting in a chair in the front area."` 以前取到 **FRONT AREA** ✗（最长名字优先 ✓），
+   现在取 **Chair** ✓（加粗组内也同样处理 ✓）
+
+**还差的**：Diane 那条 "alone in the Waiting Area" 没成块 ✗（收尾那轮修 ✓）
 
 **下一步（按正确性排）**
 - 切块边界：让真线索的尾巴不要丢 ✓（如 "…in a chair in" + "the front area." 被署名切开 ✓）

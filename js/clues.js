@@ -91,6 +91,25 @@
   }
 
   /**
+   * 列出文本里**所有**被提到的物品/区域名（带位置 ✓）
+   * 用于"关系词后面最近的那个才是目标" ✓
+   */
+  function findTargets(text, names) {
+    const t = ' ' + norm(text).toLowerCase() + ' ';
+    const out = [];
+    for (const n of (names || [])) {
+      if (!n || !n.name || letters(n.name).length < 2) continue;
+      const parts = norm(n.name).toLowerCase().split(/\s+/).filter(Boolean)
+        .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      if (!parts.length) continue;
+      const re = new RegExp('(^|[^a-z])' + parts.join('\\s+') + '(s|es)?([^a-z]|$)', 'i');
+      const m = re.exec(t);
+      if (m) out.push({ name: n.name, kind: n.kind, id: n.id == null ? null : n.id, at: m.index, len: letters(n.name).length });
+    }
+    return out;
+  }
+
+  /**
    * 在文本里找"被提到的物品/区域名"。
    * **长的优先** ✓（"Oil Slick" 要胜过 "Slick" ✗ —— 这是实际踩过的坑）
    * @param {string} text
@@ -137,18 +156,48 @@
     for (const bad of NOT_CLUE) {
       if (bad.test(body)) { out.reason = '规则/说明文字，不是线索'; return out; }
     }
+    // **截断的残句不要** ✗：结尾落在介词/冠词/be 动词上，说明句子被切开了 ✓
+    // （实测 family 里 "She was sitting in a" ✗ 与完整那句 "…in a chair in the front area." ✓
+    //   重复 ✓ —— 残句被当成第二条线索 ✓）
+    if (/\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body)) {
+      out.reason = '句子被截断（结尾是介词/冠词）';
+      return out;
+    }
     let kind = null;
     for (const r of REL_WORDS) { if (r.re.test(body)) { kind = r.kind; break; } }
     if (!kind) { out.reason = '没看到"在/在…旁边"这类关系词'; return out; }
-    // **字体组优先** ✓：题目把物品名/关系词加粗（PDF 里是独立字体块 ✓），
-    // 而"哪一组才是加粗"不用猜 ✗ —— **哪一组能匹配上已知物品/区域名就用哪一组** ✓
-    // （实测：短句里加粗词可能比正文还多，靠"多数派 = 正文"会翻车 ✗）
-    let target = null;
-    for (const g of (opt.groups || [])) {
-      const hit = findTarget(g.text, names);
-      if (hit) { target = hit; out.bold = g.text; break; }
+    // 目标：**关系词后面最近的那个名字** ✓
+    // （"She was sitting in a chair in the front area." 的关系词是 sitting in ✓ → 目标是 Chair ✓；
+    //   以前"最长名字优先"会选成 FRONT AREA ✗ —— 那是第二个介词短语 ✓）
+    const bodyCands = findTargets(body, names);
+    // 关系词结束的位置（"…sitting in **a chair**" ✓ → 取它后面最近的名字 ✓）
+    let relEnd = -1;
+    for (const r of REL_WORDS) {
+      const m = r.re.exec(body);
+      if (m && (relEnd < 0 || m.index + m[0].length < relEnd)) relEnd = m.index + m[0].length;
     }
-    if (!target) target = findTarget(body, names);
+    let target = null;
+    // ① **加粗/字体组优先** ✓（PDF 里物品名是独立字体块 ✓，最准 ✓；组内取最长的那一个 ✓）
+    for (const g of (opt.groups || [])) {
+      const hits = findTargets(g.text, names);
+      if (!hits.length) continue;
+      // 组里若也提到了多个名字 ✓，同样取"离关系词最近"的那个 ✓
+      // （family 那条线索的加粗组里同时有 chair 与 front area ✗ → 用最长会选错 ✓）
+      const gAt = body.toLowerCase().indexOf(norm(g.text).toLowerCase());
+      const base = gAt >= 0 ? gAt + Math.max(0, relEnd) : -1;
+      const best = hits.slice().sort((a, b) =>
+        (base >= 0 ? (Math.abs(a.at + base - relEnd) - Math.abs(b.at + base - relEnd)) : 0) || (b.len - a.len))[0];
+      target = { name: best.name, kind: best.kind, id: best.id };
+      out.bold = g.text;
+      break;
+    }
+    // ② 正文：取"离关系词最近"的那个 ✓
+    //    （"She was sitting in a chair in the front area." → Chair ✓，不是 FRONT AREA ✗）
+    if (!target && bodyCands.length) {
+      const near = bodyCands.slice().sort((a, b) =>
+        (Math.abs(a.at - relEnd) - Math.abs(b.at - relEnd)) || (b.len - a.len));
+      target = { name: near[0].name, kind: near[0].kind, id: near[0].id };
+    }
     if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
     out.kind = kind;
     out.text = body;                       // 线索原文按"去掉署名"的版本返回 ✓
@@ -499,7 +548,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);
