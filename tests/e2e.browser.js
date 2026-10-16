@@ -1556,6 +1556,52 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '离开第 1 步自动退出「对齐底图」模式，并进入第 2 步 ✓');
   await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 43) 四处修复：离开第1步记下对齐 ✓、改名界面内编辑 ✓、候选行话术精简 ✓、下拉框变窄 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    const cv = document.createElement('canvas'); cv.width = 400; cv.height = 320;
+    cv.getContext('2d').fillRect(0, 0, 400, 320);
+    const st = window.MH.store.state;
+    st.bg = { kind: 'image', name: 'x.png', w: 400, h: 320, page: 1, pages: 1, opacity: 1, scale: 1, visible: true, bound: false };
+    window.MH.store.bgData = cv.toDataURL('image/png');
+    window.MH.ui.wizard = 1; window.MH.ui.aligning = true; window.MH.render();
+  });
+  await p.evaluate(() => { const bs = document.querySelectorAll('.wiz-foot [data-act="wiz-go"]'); bs[bs.length - 1].click(); });
+  const stamped = await p.evaluate(() => ({ aligning: window.MH.ui.aligning, bound: window.MH.store.state.bg.bound }));
+  ok(stamped.aligning === false && stamped.bound === true,
+    '离开第 1 步自动退出对齐模式的**同时记下对齐**（bound ✓）→ 第 2 步识别区域不会再报"底图未对齐"：' + JSON.stringify(stamped));
+  // 改名：界面内编辑 ✓
+  await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.render(); });
+  await p.click('[data-act="select-person"]');
+  await p.click('[data-act="rename-person"]');
+  ok(await p.locator('#renameInput').count() === 1, '点改名出现界面内输入框（不再弹 prompt ✓）');
+  await p.fill('#renameInput', '小明');
+  await p.locator('#renameInput').blur();
+  await p.waitForTimeout(150);
+  ok(await p.evaluate(() => {
+    const st = window.MH.store.state;
+    return (st.people.find(x => x.id === st.selectedPersonId) || {}).label === '小明';
+  }), '界面内改名生效 ✓');
+  // 候选行：话术精简 + 下拉框窄 ✓
+  await p.evaluate(() => {
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'She was beside a shelf.', person: 'Oh rest', mappedBy: 'order', links: [] },
+    ] }, 'json', [{ name: 'Oh rest' }]);
+  });
+  const rowInfo = await p.evaluate(() => {
+    const r = document.querySelector('.clue-row');
+    return {
+      hint: (r.querySelector('.hint') || {}).textContent || '',
+      selW: Math.round(r.querySelector('select').getBoundingClientRect().width),
+      taW: Math.round(r.querySelector('textarea').getBoundingClientRect().width),
+    };
+  });
+  ok(!/卡片上写的是/.test(rowInfo.hint), '候选行不再显示"卡片上写的是…"这类话：' + JSON.stringify(rowInfo.hint));
+  ok(rowInfo.selW <= 60 && rowInfo.taW > rowInfo.selW * 2,
+    '下拉框变窄、句子拿到更多空间：' + JSON.stringify(rowInfo));
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

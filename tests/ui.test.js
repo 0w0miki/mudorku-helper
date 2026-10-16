@@ -850,22 +850,29 @@ test('人物编号：面板上可改名，重复/非法会被拒绝', async () =
   const st = () => dom.window.MH.store.state;
   const pid = st().selectedPersonId;
 
-  assert.ok(q(doc, '[data-act="rename-person"][data-id="' + pid + '"]'), '人物面板应有改名按钮');
-  dom.window.prompt = () => '小明';
-  clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+  // 改名改成**界面内编辑** ✓（不再弹 prompt ✗）
+  const renameTo = (val) => {
+    clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+    const inp = q(doc, '#renameInput');
+    assert.ok(inp, '点改名后应出现界面内的输入框');
+    inp.value = val;
+    // 失焦（change）即保存 ✓
+    inp.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  };
+  renameTo('小明');
   assert.equal(dom.window.MH.core.person(st(), pid).label, '小明');
   assert.equal(q(doc, '.chips .chip').textContent, '小明', '人物条上的标记跟着变');
 
   // 与别人重复 → 拒绝并提示
-  dom.window.prompt = () => 'B';
-  clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+  renameTo('B');
   assert.equal(dom.window.MH.core.person(st(), pid).label, '小明', '重复编号不应生效');
   assert.ok(qa(doc, '.toast-item').some(t => t.textContent.includes('已被其它人物占用')), '应提示重复');
 
-  // 取消对话框 → 不变
-  dom.window.prompt = () => null;
+  // 点"取消" → 不变 ✓
   clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+  clickSel(dom, '[data-act="rename-cancel"]');
   assert.equal(dom.window.MH.core.person(st(), pid).label, '小明');
+  assert.ok(!q(doc, '#renameInput'), '取消后输入框收起 ✓');
 
   // 改名可撤销
   clickSel(dom, '#btnUndo');
@@ -882,9 +889,11 @@ test('长编号在棋盘上用小字号，不会撑破圆形标记', async () =>
   dom.window.MH.render();
   assert.equal(q(doc, '.cell[data-k="2,2"] .person-chip').className, 'person-chip', '单个字符用正常字号');
 
-  dom.window.prompt = () => 'ABCD';
   clickSel(dom, '#tabPrep');
   clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+  const inp = q(doc, '#renameInput');
+  inp.value = 'ABCD';
+  inp.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   clickSel(dom, '#tabPlay');
   assert.equal(q(doc, '.cell[data-k="2,2"] .person-chip').className, 'person-chip small', '4 个字符降档');
   dom.window.close();
@@ -2006,5 +2015,20 @@ test('生成地图：没有底图时一切照旧', async () => {
   assert.equal(st.cols, 5);
   assert.equal(st.bg, null, '本来没有底图，也不该凭空出现');
   assert.equal(win.MH.store.bgData, null);
+  dom.window.close();
+});
+
+test('改名不弹 prompt ✓（界面内编辑；重复/非法被拒）', async () => {
+  const { dom, doc } = await boot();
+  let asked = false;
+  dom.window.prompt = () => { asked = true; return 'X'; };
+  const pid = dom.window.MH.store.state.selectedPersonId;
+  clickSel(dom, '[data-act="rename-person"][data-id="' + pid + '"]');
+  assert.ok(!asked, '不应该弹 prompt ✗');
+  assert.ok(q(doc, '#renameInput'), '应该在界面里出现输入框 ✓');
+  const inp = q(doc, '#renameInput');
+  inp.value = 'Q';
+  inp.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  assert.equal(dom.window.MH.core.person(dom.window.MH.store.state, pid).label, 'Q');
   dom.window.close();
 });

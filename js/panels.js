@@ -54,13 +54,12 @@
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow">' +
         '<textarea class="clue-text-edit" data-act="clue-text" data-i="' + i + '" rows="2">' + esc(c.text) + '</textarea>' +
-        '<div class="hint">' + (c.person ? '卡片上写的是「' + esc(c.person) + '」' +
-          (c.mappedBy === 'initial' ? '（首字母 ' + esc(String(c.person).replace(/[^A-Za-z]/g, '')[0] || '?') + '）' :
-            c.mappedBy === 'order' ? '（按位置推定）' : '') + ' · ' : '') +
+        '<div class="hint">' +
         ((c.links || []).length
           ? c.links.map(l => kindText(l.kind, l.polarity) + ' <b>' + esc(l.target) + '</b>' +
-              (l.kind !== 'in' ? '（只记文字 ✓）' : l.polarity === -1 ? '（负相关 ✓）' : '')).join(' ／ ')
-          : '<span class="muted">没解析出关联 —— 整句仍会存下来 ✓（关联可在人物卡片里手填）</span>') +
+              (l.kind !== 'in' ? '' : l.polarity === -1 ? '（−）' : '')).join(' ／ ')
+          : '<span class="muted">无关联</span>') +
+        (c.mappedBy === 'initial' || c.mappedBy === 'order' ? ' · ' + (c.mappedBy === 'order' ? '按位置' : '按首字母') : '') +
         '</div></div>' +
         '<button class="ghost sm" data-act="clue-skip" data-i="' + i + '">' + (c.skip ? '恢复' : '忽略') + '</button>' +
         '</div>').join('') +
@@ -90,8 +89,14 @@
     return '<div class="person-detail">' +
       // ① 人物行：编号 + 改名 ✓（不再写"的相关性" ✗ —— 线索不是相关性 ✓）
       '<div class="row center"><span class="chip sm" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span>' +
-      '<span class="grow"></span>' +
-      '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button></div>' +
+      (MH.ui.renaming === p.id
+        ? '<input id="renameInput" class="rename-input" data-act="rename-input" data-id="' + esc(p.id) + '" ' +
+          'value="' + esc(p.label) + '" maxlength="' + Core.LABEL_MAX + '" placeholder="编号（不含 X）">' +
+          '<button class="ghost sm" data-act="rename-ok" data-id="' + esc(p.id) + '">保存</button>' +
+          '<button class="ghost sm" data-act="rename-cancel">取消</button>'
+        : '<span class="grow"></span>' +
+          '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button>') +
+      '</div>' +
       // ② **线索紧跟在改名下面** ✓（用户要求；它是这个人的属性 ✓）
       '<label class="field">' + esc(p.label) + ' 的线索（可手工输入 / 粘贴 ✓ 识别出来的也能在这里改）' +
       '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
@@ -2465,7 +2470,8 @@
       const v = Number(el.dataset.v);
       const leaving = (v > WIZ_STEPS.length || v < 1);
       // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
-      if (v !== 1) MH.ui.aligning = false;
+      //    同时要**记下这次对齐** ✓，否则第 2 步"自动识别区域"会报"底图未对齐" ✗（实测踩过）
+      if (v !== 1) exitAligning();
       MH.ui.wizard = leaving ? null : v;
       if (leaving) {
         // ② 最后一步完成时：如果框过地图外框，就**自动按网格裁切底图** ✓（引导里不放这个按钮 ✓）
@@ -2520,11 +2526,16 @@
       MH.render();
       MH.toast('已只保留最大的连通块', 'ok');
     },
-    'rename-person'(el) { renamePerson(el.dataset.id); },
+    'rename-person'(el) { MH.ui.renaming = el.dataset.id; MH.render(); },   // 界面内编辑 ✓
+    'rename-cancel'() { MH.ui.renaming = null; MH.render(); },
     'color-region'(el) { cycleColor('region', el.dataset.id); },
     'color-item'(el) { cycleColor('item', el.dataset.id); },
     'del-region'(el) { deleteEntity('region', el.dataset.id); },
     'del-item'(el) { deleteEntity('item', el.dataset.id); },
+    'rename-ok'(el) {
+      const inp = document.getElementById('renameInput');
+      renamePerson(el.dataset.id, inp ? String(inp.value || '').trim() : '');
+    },
     'toggle-occ'(el) {
       const id = el.dataset.id;
       const res = MH.store.commit('切换可占据', s => {
@@ -2627,17 +2638,17 @@
     'bg-reset'() { MH.store.commit('网格归位', s => Core.setGridOffset(s, 0, 0)); },
     'bg-page'(el) { switchPdfPage(Number(el.dataset.dir)); },
     'bg-align'() {
-      const was = MH.ui.aligning;
-      MH.ui.aligning = !MH.ui.aligning;
-      MH.ui.draft = null;
-      // 退出对齐模式 = 这次对齐到此为止：记下 bound（识别区域与后续缩放都以此为前提），
-      // 这样"只靠对齐网格"这条路径不需要再画一次外框就能开始识别
-      if (was && !MH.ui.aligning && MH.store.state.bg && !MH.store.state.bg.bound) {
-        MH.store.commit('记录对齐', s => Core.updateBackground(s, { bound: true }));
-        MH.toast('已记下这次对齐（之后改格子大小，底图与网格一起缩放）', 'ok');
+      if (MH.ui.aligning) {
+        // 退出对齐模式 = 这次对齐到此为止：记下 bound ✓（见 exitAligning 的说明 ✓）
+        const stamped = exitAligning();
+        MH.render();
+        if (stamped) MH.toast('已记下这次对齐（之后改格子大小，底图与网格一起缩放）', 'ok');
+        return;
       }
+      MH.ui.aligning = true;
+      MH.ui.draft = null;
       MH.render();
-      if (MH.ui.aligning) MH.toast('拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调', 'ok');
+      MH.toast('拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调', 'ok');
     },
     export() { exportJSON(); },
     import() { if (MH.els.fileInput) MH.els.fileInput.click(); },
@@ -2656,13 +2667,30 @@
     },
   };
 
-  function renamePerson(id) {
+  /**
+   * 退出"对齐底图"模式 ✓ —— 顺手把这次对齐**记下来**（`bound = true` ✓）。
+   * 识别区域、以及后续"图片与网格一起缩放"都以它为前置 ✓。
+   * **引导里离开第 1 步也必须走这条** ✗→✓：否则第 2 步点"自动识别区域"会报"底图未对齐" ✓（实测踩过）
+   * @returns {boolean} 是否真的记下了这次对齐
+   */
+  function exitAligning() {
+    if (!MH.ui.aligning) return false;
+    MH.ui.aligning = false;
+    MH.ui.draft = null;
     const st = MH.store.state;
-    const p = Core.person(st, id);
-    if (!p) return;
-    const label = prompt('给 ' + p.label + ' 换个编号（1–' + Core.LABEL_MAX + ' 个字符，不能含 X）：', p.label);
-    if (label == null) return;
+    if (st.bg && !st.bg.bound) {
+      MH.store.commit('记录对齐', s => Core.updateBackground(s, { bound: true }));
+      return true;
+    }
+    return false;
+  }
+
+  /** 提交改名 ✓（由界面内的输入框调用 ✓ —— 不再用 prompt 弹窗 ✗） */
+  function renamePerson(id, label) {
+    if (label == null || label === '') { MH.ui.renaming = null; MH.render(); return; }
     const res = MH.store.commit('修改人物编号', s => Core.setPersonLabel(s, id, label));
+    MH.ui.renaming = null;
+    MH.render();
     if (res && res.message) MH.toast(res.message, res.ok === false ? 'warn' : 'ok');
   }
 
@@ -2797,6 +2825,8 @@
         if (p2) p2.clue = before;
         MH.store.commit('写人物线索', st => { const p3 = Core.person(st, pid); if (p3) p3.clue = v; });
       }
+    } else if (t.dataset && t.dataset.act === 'rename-input') {
+      renamePerson(t.dataset.id, String(t.value || '').trim());      // 失焦（change）即保存 ✓
     } else if (t.dataset && t.dataset.act === 'clue-text') {
       // **不重绘** ✗→✓：输入框失焦时的 change 若触发 render，会把按钮也换掉，
       // 紧接着的点击就落在被替换的节点上 → 点了没反应 ✓（实测踩过）
