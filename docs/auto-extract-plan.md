@@ -2225,6 +2225,37 @@ contest 6 条长条 ✓ 不变、pnpm test 284/284 ✓、e2e 277 项 0 失败 �
 
 **一般结论** ✓：对"加粗/手写风格"的题面 ✓，**不能靠置信度阈值判断"这个词要不要"** ✗ ——
 凡是能对上**已知目标名**的词 ✓，一律保留 ✓（目标丢失的代价远大于多留一个词 ✓）。
+
+**两张 golf 卡片"识别不出东西"：句首主语判据过严（2026-10-17，用户反馈）✓**
+
+用户卡片：
+```
+snip10 x808 y799  266×167 → "In his hole, there was a woman in a cart."   （OCR 全对 ✓）
+snip11 x777 y1104 306×171 → "His hole number is greater than Naomi's …"  ✓
+```
+两条都**一条都读不出来** ✗。原因有两层：
+
+1. **"cart" 的 OCR 置信度是 0** ✗（加粗字体 ✓，同 flag 那次 ✓）→ 被 `minConf 60` 滤掉 ✓
+   → 块变成 "In his hole there was a woman in a" ✗ 没有目标 ✓
+   （应用里的**双通道捞回**已经能救 ✓ —— 我的探针直接调 OCR ✗ 所以第一次没看到 ✓）
+2. **块首是 "In …" → 被"句首必须有人称主语"整条拒掉** ✗
+   （OCR 常把逗号丢掉 ✓，所以我上一轮加的"逗号切句"没生效 ✓）
+
+修（两处 ✓）：
+- `splitClauses`：**逗号也作为句子边界** ✓（逗号还在时，"In his hole," 切开后后半句有主语 ✓）
+- 主语判据放宽为 **`hasSubject`** ✓：句首有人称主语 ✓ **或** 句中含
+  `he/she/they/there/it + was/is/were/are/had/occupied…` 这种主谓结构 ✓
+  （"In his hole there was a woman …" ✓ → 命中 `there was` ✓）
+  注意：仍要求 be 动词/位移动词 ✓ → 剧情句 "Someone drew a mean caricature…" ✗ 依旧被拒 ✓
+
+实测（用户那两张卡 ✓）：
+```
+[卡1] In his hole there was a woman in a cart → ["in→cart"] ✓✓（cart 也捞回来了 ✓）
+[卡2] His hole number is greater than hole     → []        ✓（洞号/人名约束，只存文字 ✓）
+```
+**回归全绿 ✓**：golf 5 张卡（beside→water/tree/flag ✓、in→flag/tee ✓）、
+contest 6 条长条 ✓、car-repair ✓、family ✓、pnpm test 284/284 ✓、e2e 277 项 0 失败 ✓
+（顺带白赚一个改进 ✓：golf 的 "to occupy a golf tee" 现在也能关联到 tee ✓，以前是空的 ✗）
 ## P3 线索与人物关联（①②③ 已完成 ✓）
 
 **③ 应用：已接线 ✓**（2026-10-15）

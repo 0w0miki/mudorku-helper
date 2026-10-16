@@ -64,7 +64,12 @@
   // （实测真线索全是 "He was…" / "She was…" ✓；版面碎片的句首是 "chair in the bottom row." ✗
   //   "WHO WAS IN THE TOP ROW?" ✗。先量过"上方有没有头像" ✗ —— 整页都是插画，
   //   伪线索的密度 0.41~0.63 与真线索重叠 ✓，只有这条主语判据分得开 ✓）
-  const SUBJECT = /^(?:he|she|they|it|i|the victim|the person|the culprit|the murderer|someone|somebody|there|the\s+[a-z]+)\b/i;
+  const SUBJECT = /^(?:he|she|they|it|i|his|her|their|our|my|your|the victim|the person|the culprit|the murderer|someone|somebody|there|the\s+[a-z]+)\b/i;
+  // 句中"主谓结构"也算有主语 ✓：题面常常**介词短语开头** ✓
+  // （golf 实测："In his hole, there was a woman in a cart." ✓ —— OCR 常把逗号丢掉 ✓，
+  //   切不出后半句 ✓ → 只看句首就会整条拒掉 ✗ → 这条正则兜住 ✓）
+  const SUBJECT_INLINE = /\b(?:he|she|they|it|there|someone|somebody|the person)\s+(?:was|is|were|are|had|has|occupied|sat|sits|stood|stands)\b/i;
+  const hasSubject = (t2) => SUBJECT.test(t2) || SUBJECT_INLINE.test(t2);
 
   // 人名不可能是这些词开头（He was / The Caricature / What happened / She was… ✗）
   const NAME_STOP = /^(he|she|it|they|the|a|an|what|who|where|when|there|this|that|and|or|but|if|as|in|on|at|for|with|by|to|of|is|are|was|were|can|could|do|does|did|no|not|one|two|three|read|find|rule|can)\b/i;
@@ -163,7 +168,7 @@
     // 而版面碎片的句首是 "chair in the bottom row." ✗、"WHO WAS IN THE TOP ROW?" ✗
     // （先量过"上方有没有头像" ✗ —— 整页都是插画，伪线索密度 0.41~0.63 与真线索重叠 ✓，
     //   这条主语判据才是真正分得开的 ✓）
-    if (!SUBJECT.test(t)) { out.reason = '句首没有人称主语（像版面碎片）'; return out; }
+    if (!hasSubject(t)) { out.reason = '句首没有人称主语（像版面碎片）'; return out; }
     for (const bad of NOT_CLUE) {
       if (bad.test(body)) { out.reason = '规则/说明文字，不是线索'; return out; }
     }
@@ -233,7 +238,10 @@
     const cut = t.search(CREDIT);
     if (cut >= 0) t = t.slice(0, cut).trim();      // 页脚标注（clue:/puzzle by…）连尾巴一起去掉 ✓
     if (!t) return [];
-    return t.split(/(?<=[.!?;])\s+/).map(x => x.trim()).filter(Boolean);
+    // **逗号也切开** ✓：题面常见"介词短语开头 + 主句" ✓
+    // （golf 实测："In his hole, there was a woman in a cart." ✓ ——
+    //   不切的话句首是 "In" ✗ → 被"句首要有人称主语"挡掉 ✓ → 整条读不出来 ✗）
+    return t.split(/(?<=[.!?;,])\s+/).map(x => x.trim()).filter(Boolean);
   }
 
   /**
@@ -558,7 +566,7 @@
     const t = norm(text);
     if (!t || letters(t).length < 6) return false;
     for (const bad of NOT_CLUE) if (bad.test(t)) return false;
-    if (!SUBJECT.test(t)) return false;
+    if (!hasSubject(t)) return false;
     if (/^[^a-z]*(?:can't|cannot|can) be occupied/i.test(t)) return false;
     return true;
   }
@@ -577,7 +585,7 @@
     if (cut >= 0) body = body.slice(0, cut).trim();
     if (!body || letters(body).length < 4) return [];
     for (const bad of NOT_CLUE) if (bad.test(body)) return [];
-    if (!SUBJECT.test(body)) return [];
+    if (!hasSubject(body)) return [];
     if (/\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body)) return [];
     const neg = /\b(?:not|never|n't)\b/i.test(body);
     // 所有关系词的结束位置（按出现顺序 ✓）
