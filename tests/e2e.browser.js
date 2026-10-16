@@ -1671,6 +1671,36 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(playClue3.hint && !playClue3.text, '没线索的人给出提示而不是空框 ✓：' + JSON.stringify(playClue3));
   await p.click('#tabPrep');
 
+  // 46) "框好几张"要**真的都用上** ✓（以前固定只用第一张 ✗）
+  const merged = await p.evaluate(async () => {
+    const mk = (lines) => {
+      const cv = document.createElement('canvas');
+      cv.width = 520; cv.height = 200;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff'; cx.fillRect(0, 0, 520, 200);
+      cx.fillStyle = '#111'; cx.font = 'bold 30px sans-serif';
+      lines.forEach((t, i) => cx.fillText(t, 20, 60 + i * 52));
+      return cv.toDataURL('image/png');
+    };
+    const Sn = window.MurdokuSnipper;
+    Sn.state.pins = [
+      { id: 'aa', page: 1, w: 520, h: 200, url: mk(['Can be occupied', 'Car']), srcX: 0, srcY: 0, srcW: 520, srcH: 200, srcPageW: 520, srcPageH: 200 },
+      { id: 'bb', page: 1, w: 520, h: 200, url: mk(['Cannot be occupied', 'Tree']), srcX: 0, srcY: 0, srcW: 520, srcH: 200, srcPageW: 520, srcPageH: 200 },
+    ];
+    const raster = await window.MH.panels.cardsRaster();
+    return { w: raster.width, h: raster.height, merged: window.MH.ui.cardsMerged };
+  });
+  ok(merged.w === 520 && merged.h === 484 && merged.merged === 2,
+    '两张卡片竖着拼成一张（200+200+留白 = 484）✓：' + JSON.stringify(merged));
+  const bothTexts = await p.evaluate(async () => {
+    const raster = await window.MH.panels.cardsRaster();
+    const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },
+      { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 50 });
+    return words.map(w => String(w.text || '').toLowerCase());
+  });
+  ok(bothTexts.includes('car') && bothTexts.includes('tree'),
+    '第一张的 Car 与第二张的 Tree 都读到了 ✓（不再是只用第一张）✓：' + JSON.stringify(bothTexts.slice(0, 10)));
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

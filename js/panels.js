@@ -308,7 +308,8 @@
     layer.className = 'board-crop';
     layer.innerHTML =
       '<div class="bc-head"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
-      '<span class="muted">在这个页面上拖一个框 → 自动变成右侧卡片 ✓（可以连着框好几张）</span>' +
+      '<span class="muted">在这个页面上拖一个框 → 自动变成右侧卡片 ✓（可以连着框好几张，' +
+      '识别时会把几张**拼在一起一起用** ✓）</span>' +
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="crop-close">完成</button></div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
@@ -422,7 +423,7 @@
     } else {
       body.push('<section class="card"><h2>截取人物线索卡片</h2>' +
         '<button class="ghost block" data-act="crop-person">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
-        '<p class="hint">把写着人物线索的那张卡片框下来 ✓ → 右侧多一张卡片 ✓，再点下面的「读人物线索」 ✓。</p></section>');
+        '<p class="hint">把写着人物线索的卡片框下来 ✓（几张都行 ✓，识别时一起用 ✓）→ 再点下面的「读人物线索」 ✓。</p></section>');
       body.push('<section class="card"><h2>读人物线索</h2>' +
         '<button class="ghost block" data-act="clue-read" title="从右侧卡片读每个人物的说明（PDF 优先读文字层）">🔎 读人物线索（从卡片）</button>' +
         '<p class="hint">整句都会存下来 ✓（没解析出物品/区域关联也存）；也可以直接在下面每个人那里手打/粘贴。</p>' +
@@ -774,6 +775,44 @@
   }
 
   /**
+   * 把用户框出来的**所有卡片竖着拼成一张** ✓ —— 这样"框好几张"就真的都参与识别 ✓
+   * （以前固定只用 `pins[0]` ✗：界面上写着"可以连着框好几张" ✓，但识别只用第一张 ✗，是误导 ✓）
+   * 拼接而不改识别流程：图例的分组看说明行 ✓、线索看文字块 ✓，留白隔开就不会跨卡片粘连 ✓
+   */
+  async function cardsRaster() {
+    const Sn = window.MurdokuSnipper;
+    const pins = (Sn && Sn.state && Sn.state.pins) || [];
+    if (!pins.length) return null;
+    if (pins.length === 1) return legendCardRaster();          // 只有一张：原样 ✓
+    const imgs = [];
+    for (const pin of pins) {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = () => rej(new Error('卡片图片读不出来'));
+        img.src = pin.url;
+      });
+      imgs.push({ img, w: pin.w || img.naturalWidth, h: pin.h || img.naturalHeight });
+    }
+    const gap = 28;                                            // 留白隔开 ✓（免得跨卡片粘连 ✓）
+    const W = Math.max.apply(null, imgs.map(z => z.w));
+    const H = imgs.reduce((a, z) => a + z.h + gap, gap);
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+    let y = gap;
+    for (const z of imgs) {
+      ctx.drawImage(z.img, 0, y, z.w, z.h);
+      y += z.h + gap;
+    }
+    const d = ctx.getImageData(0, 0, W, H);
+    MH.ui.cardsMerged = imgs.length;
+    return { data: d.data, width: W, height: H };
+  }
+
+  /**
    * 图例来自 PDF 时走这条路：**直接读文字层**（名字 + 精确坐标 + 两栏说明），
    * 一个像素都不用猜。图标只需在"名字上方那条带"里取一次色差外接框 ——
    * 带子很小、底色占主导，很稳。真实图例画在彩色药丸面板里，纯像素切分没有稳定解 ✗
@@ -1046,7 +1085,7 @@
     }
     if (pins.length) {
       // 截图来源：用卡片栅格做 OCR（没有字体信息 ✓ → 解析时自动退回按名字匹配 ✓）
-      const raster = await legendCardRaster();
+      const raster = await cardsRaster();
       if (!raster) return null;
       const words = await window.MurdokuOCR.readWords(raster, { x: 0, y: 0, w: raster.width, h: raster.height },
         { zoom: 4, psm: 11, chars: window.MurdokuOCR.WORDS, minConf: 60, onStatus: m => MH.toast(m, 'ok') });
@@ -1446,7 +1485,7 @@
         return;
       }
       let raster;
-      try { raster = await legendCardRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
+      try { raster = await cardsRaster(); } catch (err) { MH.toast(err.message, 'error'); return; }
       if (!raster) { giveUp('读不到图例卡片'); return; }
       // **优先用词级 OCR**：直接读出说明行和每个物品名的真实框 ✓
       // 读不出来（没引擎/字太小）再退回"行投影分排 + 列投影猜名字框"
@@ -3126,6 +3165,7 @@
     clueRead: () => guard(runClueRead)(),
     clueApply: () => applyClueCands(),
     setClueCandidates: (out, via, names) => setClueCandidates(out, via, names),
+    cardsRaster: () => cardsRaster(),      // 给探针/测试：把多张卡片拼成一张 ✓
     /** 用图例图标逐件到地图上找地点 */
     legendLocate: () => guard(locateLegendItems)(),
   };
