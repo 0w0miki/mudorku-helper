@@ -1468,6 +1468,32 @@
         out = await readLegendByPdf();
         if (out && out.raster) {
           const rects = cardRectsForPage(out.raster);
+          // **用户框了什么，就只保留框里的** ✓ —— 在进入"按卡片解析"的分支之前就要做 ✓
+          // （`readLegendByPdf` 在"图例没有文字名"时是按**整页**做行列切分的 ✗，
+          //   结果里会带上框外的条目 ✓ —— contest 实测：框在图例上却出现了左下角的 "ROW" ✓，
+          //   而真正在框里的可占据物品反而被挤掉 ✓。以前这个过滤写在内层条件里 ✗，
+          //   而 contest 的 rawItems 为空 → 整段被跳过 → 过滤根本没生效 ✓）
+          if (rects.length && out.items && out.items.length) {
+            const ratio = (b) => {
+              if (!b || !b.w || !b.h) return 0;
+              let best = 0;
+              for (const r2 of rects) {
+                const ox = Math.min(b.x + b.w, r2.x + r2.w) - Math.max(b.x, r2.x);
+                const oy = Math.min(b.y + b.h, r2.y + r2.h) - Math.max(b.y, r2.y);
+                if (ox <= 0 || oy <= 0) continue;
+                best = Math.max(best, (ox * oy) / (b.w * b.h));
+              }
+              return best;
+            };
+            const kept = out.items.filter(it => Math.max(ratio(it.icon), ratio(it.nameBox)) >= 0.3);
+            // **必须无条件替换** ✓ —— 以前加了 `if (kept.length)` 保底 ✗：
+            // 当整页切出来的物品**全都在框外**时（contest 实测就是这种 ✓，15 件 r 全 < 0.3 ✓），
+            // kept 为空 → 保底生效 → 等于**什么都没滤** ✗ → 框外的 ROW 照旧进来 ✗、
+            // 而框里真正的可占据物品一件也没有 ✗（整页切分压根没切到那一组 ✓）
+            MH.toast('按你框的卡片筛掉了 ' + (out.items.length - kept.length) + ' 件框外的图例 ✓' +
+              (kept.length ? '' : '（框里没切出物品 → 改用"按卡片切分" ✓）'), 'ok');
+            out = Object.assign({}, out, { items: kept });
+          }
           const whole = out;                       // 整页结果留作最后的兜底
           let restricted = null;
           if (rects.length && out.rawItems) {
@@ -1492,15 +1518,25 @@
               headings: whole.headings, skipped: whole.skipped || [],
               raster: out.raster, page: out.page, rawItems: out.rawItems,
             };
-            // 优先用"整页解析 + 按卡片筛"（上下文完整、过滤更可靠 ✓）；
-            // 它不足 2 件时才用"先裁文字再解析"的结果 ✓
-            const better = wholeInCard.items.length >= 2 ? wholeInCard
-              : (restricted.items.length >= 2 ? restricted : null);
-            if (better) {
-              out = better;
+            // **用户框了什么就读什么** ✓ —— 以"按卡片解析"为准 ✓
+            // （以前是"整页解析 + 按框筛"优先 ✗：contest 那种"图例没有文字名"的题目 ✓，
+            //   整页切分出来的物品框往往很大 ✓ → 按框筛"重叠>30%"会漏过 ✓，
+            //   于是框外的东西（比如左下角那个 ROW ✗）和隔壁那一行都会被收进来 ✗，
+            //   真正在框里的可占据物品反而被挤掉 ✓ —— 用户实测踩过 ✓）
+            if (restricted.items.length >= 2) {
+              out = restricted;
               via = 'pdf+card';
+              // 卡片里比整页少很多时不静默 ✗：告诉用户可以放大框 ✓
+              if (wholeInCard.items.length > restricted.items.length + 1) {
+                MH.toast('卡片里解析出 ' + restricted.items.length + ' 件 ✓（按整页筛能到 ' +
+                  wholeInCard.items.length + ' 件）—— 想多要几件就把框放大一点 ✓', 'ok');
+              }
+            } else if (wholeInCard.items.length >= 2) {
+              out = wholeInCard;
+              via = 'pdf+card';
+              MH.toast('卡片里没切出成件的图例（框太小或框偏了？）→ 改用"整页解析 + 按卡片筛" ✓', 'warn');
             } else if (whole.items.length >= 2) {
-              // 卡片里实在没有成件的图例（框太小/框偏了）→ 用整页并提示 ✓
+              // 卡片里实在没有成件的图例 → 用整页并提示 ✓
               MH.toast('卡片框里没找到成件的图例（框太小或框偏了？）→ 已按整页列出', 'warn');
               out = whole;
               via = 'pdf';
@@ -1695,6 +1731,8 @@
       mask: it.icon && it.icon.mask ? it.icon.mask : null,
     }));
     MH.ui.lastLegend = {
+      // 每件物品的框（诊断用 ✓：判断"是不是框外的条目混进来了" ✓）
+      boxes: (out.items || []).map(it => ({ name: it.name, icon: it.icon || null, nameBox: it.nameBox || null })),
       via, icons: out.items.length, groups: (out.headings || []).length,
       items: made, names: out.items.map(i => i.name),
       occupiable: out.items.map(i => i.occupiable),
