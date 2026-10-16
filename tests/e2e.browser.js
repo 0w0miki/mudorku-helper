@@ -1807,6 +1807,39 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(true, '人物步框完点「完成」→ **自动**跑完"读人物线索"（有候选或给出说明）✓');
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 49) 框选层的「完成」不能被右边浮窗挡住 ✓（z-index 与让位）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizard = 3;
+    window.MH.render();
+    document.querySelector('[data-act="crop-item"]').click();
+  });
+  const cropGeo = await p.evaluate(() => {
+    const l = document.getElementById('boardCrop');
+    const sn = document.getElementById('snipper');
+    const btn = document.querySelector('#boardCrop [data-act="crop-close"]');
+    if (!l || !btn) return null;
+    const br = btn.getBoundingClientRect();
+    const hit = document.elementFromPoint(br.x + br.width / 2, br.y + br.height / 2);
+    return {
+      layerRight: Math.round(l.getBoundingClientRect().right),
+      snipLeft: Math.round(sn.getBoundingClientRect().left),
+      zLayer: Number(getComputedStyle(l).zIndex),
+      zSnip: Number(getComputedStyle(sn).zIndex),
+      topmost: hit ? (hit.getAttribute('data-act') || hit.tagName) : null,
+    };
+  });
+  ok(cropGeo && cropGeo.layerRight <= cropGeo.snipLeft,
+    '框选层给右边浮窗让位（不再被盖住）✓：' + JSON.stringify(cropGeo));
+  ok(cropGeo && cropGeo.zLayer > cropGeo.zSnip, '框选层层级高于浮窗 ✓：' + JSON.stringify(cropGeo));
+  ok(cropGeo && cropGeo.topmost === 'crop-close', '「完成」按钮在事件命中的最上层 ✓：' + (cropGeo && cropGeo.topmost));
+  // 真实鼠标点击 ✓（这条以前会因为被遮挡而超时 ✗）
+  await p.click('#boardCrop [data-act="crop-close"]', { timeout: 5000 });
+  ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '真实鼠标点「完成」能关掉框选层 ✓');
+  await p.waitForTimeout(400);
+  await p.evaluate(() => { window.MH.ui.wizard = null; window.MH.ui.lastLegend = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

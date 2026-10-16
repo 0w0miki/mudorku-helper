@@ -908,9 +908,11 @@ body.picking #board { cursor: crosshair; }
 
 /* 主界面框选层（物品/人物步）✓ */
 .board-area { position: relative; }
-.board-crop { position: absolute; inset: 0; z-index: 30; background: rgba(255,255,255,.97);
+.board-crop { position: absolute; inset: 0; z-index: 70; background: rgba(255,255,255,.97);
   display: flex; flex-direction: column; }
 .bc-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.bc-head button { white-space: nowrap; flex: 0 0 auto; }
+.bc-head .muted { min-width: 0; }
 .bc-head .grow { flex: 1 1 auto; }
 .bc-stage { position: relative; overflow: auto; flex: 1 1 auto; padding: 8px; text-align: center; }
 .bc-img { max-width: 100%; cursor: crosshair; user-select: none; -webkit-user-drag: none; }

@@ -313,6 +313,15 @@
       '<span class="grow"></span>' +
       '<button class="ghost sm" data-act="crop-close">完成</button></div>' +
       '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
+    // 右边「PDF 摘录」浮窗是 `position: fixed` + `z-index: 60` ✓ —— 会盖住这一层的**右侧** ✗
+    // （"完成"按钮正好在最右边 ✓ → 真实鼠标点不到 ✓，之前只能靠脚本点 ✓）
+    // → 让开它的宽度 ✓（右侧留给浮窗，卡片照样在那边出现 ✓），层级也提到它之上 ✓
+    const sn = document.getElementById('snipper');
+    if (sn) {
+      const r = sn.getBoundingClientRect();
+      const w = Math.max(0, window.innerWidth - r.left);
+      if (w > 8) layer.style.right = Math.min(w, Math.round(window.innerWidth * 0.5)) + 'px';
+    }
     area.appendChild(layer);
     const stage = layer.querySelector('.bc-stage');
     const im = layer.querySelector('.bc-img');
