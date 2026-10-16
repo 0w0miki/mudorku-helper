@@ -43,6 +43,8 @@
     return '<div class="clue-panel">' +
       '<div class="link-title">读到 ' + cc.clues.length + ' 段（候选 · ' +
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') +
+      // 说清这次读的范围 ✓：没框卡片时是**整页** ✓（卡片外的句子也会进来 ✓）
+      (cc.wholePage ? ' · <b>整页</b>（还没框卡片 ✓）' : ' · 你框的卡片 ✓') +
       '）—— 整句都会存下来 ✓，解析出的关联列在下面；文字不对可以直接改 ✓</div>' +
       (cc.clues.some(c => !c.personId)
         ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
@@ -1120,7 +1122,12 @@
           items.push({ text: str, x, y, w: (it.width || 0) * scale || str.length * 6,
             h: Math.abs(it.height || 0) * scale || 10, font: it.fontName || null });
         }
-        return { items, via: 'pdf' };
+        // 把"这次是不是在读**整页**"告诉调用方 ✓：
+        // 没框过卡片时 `rs` 为空 ✓ → `inCard` 恒真 ✓ → **整页**都会被读进来 ✓
+        // （用户看到卡片外的句子就是这么来的 ✓："I didn't do it!" 确实在这一页上 ✓，
+        //   只是不在他框的那张卡里 ✓）→ 这种情况要**明说** ✓
+        const pinsN = ((window.MurdokuSnipper && window.MurdokuSnipper.state && window.MurdokuSnipper.state.pins) || []).length;
+        return { items, via: 'pdf', wholePage: pinsN === 0, unmappedCards: pinsN > 0 && !rs.length && Math.round(items.length) === 0 ? pinsN : 0 };
       } finally { try { doc.destroy(); } catch (err) { /* 忽略 */ } }
     }
     if (pins.length) {
@@ -1148,12 +1155,22 @@
     let src;
     try { src = await readClueItems(); }
     catch (err) { MH.toast('读不到卡片文字：' + err.message, 'error'); return; }
-    if (!src || !src.items.length) { MH.toast('这张卡片上没有文字（PDF 文字层或截图都试过了）', 'warn'); return; }
+    if (!src || !src.items.length) {
+      MH.toast(src && src.unmappedCards
+        ? '框的 ' + src.unmappedCards + ' 张卡片没能对应到这一页（换个页面/重新框一下 ✓）—— 这次不会读整页 ✗'
+        : '这张卡片上没有文字（PDF 文字层或截图都试过了）', 'warn');
+      return;
+    }
+    if (src.wholePage) {
+      MH.toast('你还没框卡片 → 这次读的是**整页** ✓（卡片外的句子也会进来 ✓）；' +
+        '只想读某一块就先在主界面框住它 ✓', 'warn');
+    }
     let out;
     try { out = (src.via === 'ocr' ? C.readOcrItems : C.readItems)(src.items, names); }
     catch (err) { MH.toast('线索解析出错：' + err.message, 'error'); return; }
     if (!out.clues.length) { MH.toast('没读出线索（卡片里可能没有人物说明，或目标物品还没建）', 'warn'); return; }
     const clues = setClueCandidates(out, src.via, out.names);
+    if (MH.ui.clueCands) MH.ui.clueCands.wholePage = !!src.wholePage;   // 面板上标明"整页" ✓
     MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
   }
 
@@ -1171,7 +1188,7 @@
       // （这样识别之后再新建或改名也能对上 ✓）
       return { ...c, personId: c.personId || '', skip: false };
     });
-    MH.ui.clueCands = { clues, via: via || 'json', names: names || [] };
+    MH.ui.clueCands = { clues, via: via || 'json', names: names || [], wholePage: !!(out && out.wholePage) };
     MH.render();
     // **返回数组本身** ✓ —— 调用处要 `clues.length` 与 `clues.some(...)` ✓
     // （以前返回的是长度数字 ✗ → 读人物线索时报 "clues.some is not a function" ✓）

@@ -1893,6 +1893,23 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '一句话的两条关联都在应用时建好（并用改名后的名字对上 ✓）：' + JSON.stringify(applied2));
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
 
+  // 51) 候选面板要说清"这次读的是整页还是你框的卡片" ✓（用户被卡片外的句子困惑过 ✓）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'He was in a car .', person: null, links: [] },
+    ] }, 'pdf', []);
+    window.MH.ui.clueCands.wholePage = true;
+    window.MH.render();
+  });
+  const wholeHead = await p.evaluate(() => (document.querySelector('.clue-panel .link-title') || {}).textContent || '');
+  ok(/整页/.test(wholeHead), '没框卡片时面板标明"整页" ✓：' + wholeHead);
+  await p.evaluate(() => { window.MH.ui.clueCands.wholePage = false; window.MH.render(); });
+  const cardHead = await p.evaluate(() => (document.querySelector('.clue-panel .link-title') || {}).textContent || '');
+  ok(/你框的卡片/.test(cardHead) && !/整页/.test(cardHead), '框了卡片时标明"你框的卡片" ✓：' + cardHead);
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
