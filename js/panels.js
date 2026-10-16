@@ -262,6 +262,86 @@
     { id: 4, name: '人物线索识别', tip: '读每个人物的说明；解析出的关联先给候选，确认后再写进人物' },
   ];
 
+  /**
+   * **在主界面上框选** ✓（用户要求）：
+   * 在棋盘区叠一层"当前导入的页面"，拖一个矩形 → 立刻裁成一张卡片放到**右侧卡片列表** ✓
+   * 物品步用它截图标、人物步用它截"写着线索的卡片" ✓ —— 不用再去右侧小视图里找位置 ✓
+   */
+  function startBoardCrop(kind) {
+    const Sn = window.MurdokuSnipper;
+    const img = Sn && Sn.state && Sn.state.img;
+    if (!img || !img.naturalWidth) {
+      MH.toast('右侧还没有导入页面 —— 先在第 1 步导入 PDF 或图片 ✓', 'warn');
+      return;
+    }
+    const area = document.querySelector('.board-area');
+    if (!area) return;
+    let layer = document.getElementById('boardCrop');
+    if (layer) layer.remove();
+    layer = document.createElement('div');
+    layer.id = 'boardCrop';
+    layer.className = 'board-crop';
+    layer.innerHTML =
+      '<div class="bc-head"><b>' + (kind === 'item' ? '截取物品图标' : '截取人物线索卡片') + '</b>' +
+      '<span class="muted">在这个页面上拖一个框 → 自动变成右侧卡片 ✓（可以连着框好几张）</span>' +
+      '<span class="grow"></span>' +
+      '<button class="ghost sm" data-act="crop-close">完成</button></div>' +
+      '<div class="bc-stage"><img class="bc-img" alt="当前导入的页面"><div class="bc-sel" hidden></div></div>';
+    area.appendChild(layer);
+    const stage = layer.querySelector('.bc-stage');
+    const im = layer.querySelector('.bc-img');
+    const sel = layer.querySelector('.bc-sel');
+    im.src = img.src || img.toDataURL && img.toDataURL('image/png') || '';
+    MH.ui.crop = { kind, layer };
+
+    const drag = { on: false, x0: 0, y0: 0 };
+    const pt = (e) => {
+      const r = im.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+    };
+    const draw = (a, b) => {
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+      sel.hidden = false;
+      sel.style.left = x + 'px'; sel.style.top = y + 'px';
+      sel.style.width = w + 'px'; sel.style.height = h + 'px';
+      return { x, y, w, h };
+    };
+    im.addEventListener('pointerdown', (e) => {
+      const q = pt(e);
+      drag.on = true; drag.x0 = q.x; drag.y0 = q.y;
+      im.setPointerCapture(e.pointerId);
+      draw({ x: q.x, y: q.y }, { x: q.x, y: q.y });
+      e.preventDefault();
+    });
+    im.addEventListener('pointermove', (e) => {
+      if (!drag.on) return;
+      const q = pt(e);
+      draw({ x: drag.x0, y: drag.y0 }, q);
+    });
+    im.addEventListener('pointerup', (e) => {
+      if (!drag.on) return;
+      drag.on = false;
+      const q = pt(e);
+      const box = draw({ x: drag.x0, y: drag.y0 }, q);
+      sel.hidden = true;
+      if (box.w < 8 || box.h < 8) return;
+      // 显示 → 源图像素的换算要用**图片的显示宽度** ✓
+      // （以前除以"拖框宽度" ✗ —— 拖 120px 会裁出 1000+px 的一大块 ✓，实测踩过）
+      const shown = im.getBoundingClientRect().width || box.w;
+      const k = img.naturalWidth / shown;
+      Sn.addPinFromSource(box.x * k, box.y * k, box.w * k, box.h * k);
+      MH.toast('已截取一张卡片 ✓ 看右侧卡片列表（' + (kind === 'item' ? '物品图标' : '人物线索') + '）', 'ok');
+    });
+    MH.toast('在棋盘区拖框截取 ✓ 截到的会出现在右侧卡片列表 ✓', 'ok');
+  }
+
+  function closeBoardCrop() {
+    const layer = document.getElementById('boardCrop');
+    if (layer) layer.remove();
+    MH.ui.crop = null;
+  }
+
   function wizardHTML(st) {
     const step = MH.ui.wizard || 1;
     const info = WIZ_STEPS[step - 1] || WIZ_STEPS[0];
@@ -296,6 +376,10 @@
         '</section>');
       body.push('<ul class="list">' + entityList('region', st) + '</ul>');
     } else if (step === 3) {
+      body.push('<section class="card"><h2>截取物品图标</h2>' +
+        '<button class="ghost block" data-act="crop-item">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
+        '<p class="hint">在棋盘区的那页图上，沿一个物品图标拖一个框 ✓ → 右侧会出现这张卡片 ✓；' +
+          '再点物品的「按样例添加」就能把同类格子找出来。</p></section>');
       body.push('<section class="card"><h2>从图例列出物品</h2>' +
         (st.bg
           ? '<button class="ghost block" data-act="legend-auto" title="从右侧图例卡片切出图标、认名字，并按图例里的说明分可占据/不可占据">🚀 从图例自动列出物品</button>' +
@@ -307,6 +391,9 @@
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
     } else {
+      body.push('<section class="card"><h2>截取人物线索卡片</h2>' +
+        '<button class="ghost block" data-act="crop-person">✂️ 在主界面上框选（自动变成右侧卡片）</button>' +
+        '<p class="hint">把写着人物线索的那张卡片框下来 ✓ → 右侧多一张卡片 ✓，再点下面的「读人物线索」 ✓。</p></section>');
       body.push('<section class="card"><h2>读人物线索</h2>' +
         '<button class="ghost block" data-act="clue-read" title="从右侧卡片读每个人物的说明（PDF 优先读文字层）">🔎 读人物线索（从卡片）</button>' +
         '<p class="hint">整句都会存下来 ✓（没解析出物品/区域关联也存）；也可以直接在下面每个人那里手打/粘贴。</p>' +
@@ -2353,6 +2440,9 @@
       MH.render();
       if (MH.ui.wizard == null) MH.toast('引导完成 ✓ 现在可以逐个人核对线索，或直接去准备/游玩 ✓', 'ok');
     },
+    'crop-item'() { startBoardCrop('item'); },
+    'crop-person'() { startBoardCrop('person'); },
+    'crop-close'() { closeBoardCrop(); },
     'clue-read'() { guard(runClueRead)(); },
     'clue-cancel'() { MH.ui.clueCands = null; MH.render(); },
     'clue-apply'() { applyClueCands(); },

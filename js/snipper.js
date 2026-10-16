@@ -401,6 +401,39 @@
     toast('已截取一张（' + ow + '×' + oh + '）', 'ok');
   }
 
+  /**
+   * **按源图像素**裁一张卡片 ✓（公开接口）
+   * 主界面的框选层用的就是这个 ✓ —— 免得把 snipper 里的舞台坐标换算重复一遍 ✓
+   */
+  function addPinFromSource(sx, sy, sw, sh) {
+    const img = S.img;
+    if (!img || !img.naturalWidth) { toast('页面还没渲染好', 'warn'); return null; }
+    const x = Math.max(0, Math.min(Math.round(sx), img.naturalWidth - 1));
+    const y = Math.max(0, Math.min(Math.round(sy), img.naturalHeight - 1));
+    const w = Math.max(1, Math.min(Math.round(sw), img.naturalWidth - x));
+    const h = Math.max(1, Math.min(Math.round(sh), img.naturalHeight - y));
+    const cv = doc.createElement('canvas');
+    const ctx = cv.getContext('2d');
+    if (!ctx) { toast('这个环境不支持画布，无法截取', 'error'); return null; }
+    const shrink = Math.min(1, MAX_SIDE / Math.max(w, h));
+    const ow = Math.max(1, Math.round(w * shrink));
+    const oh = Math.max(1, Math.round(h * shrink));
+    cv.width = ow; cv.height = oh;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, ow, oh);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, x, y, w, h, 0, 0, ow, oh);
+    let url = cv.toDataURL('image/png');
+    if (url.length > 400_000) url = cv.toDataURL('image/jpeg', 0.9);
+    const pin = { id: 'snip' + (++seq) + '-' + Date.now().toString(36), page: S.page, w: ow, h: oh, url,
+      srcX: x, srcY: y, srcW: w, srcH: h, srcPageW: img.naturalWidth, srcPageH: img.naturalHeight };
+    S.pins.push(pin);
+    savePins();
+    if (S.collapsed) { S.collapsed = false; saveUi(); }
+    render();
+    return pin;
+  }
+
   function removePin(id) {
     S.pins = S.pins.filter(p => p.id !== id);
     savePins();
@@ -591,7 +624,7 @@
     return el;
   }
 
-  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, state: S };
+  root.MurdokuSnipper = { mount, refresh, render, syncMinimap, viewRect, addPinFromSource, state: S };
 
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', mount);
   else mount();

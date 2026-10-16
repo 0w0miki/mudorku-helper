@@ -1454,6 +1454,56 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   }));
   ok(back.exited && !back.wizard && back.full, '点「完成」退出引导并恢复完整面板：' + JSON.stringify(back));
 
+  // 40) 物品/人物步：**在主界面上框选** → 自动变成右侧卡片 ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizard = 3;
+    window.MH.render();
+  });
+  ok(await p.locator('[data-act="crop-item"]').count() === 1, '物品步显示「在主界面上框选」✓');
+  await p.evaluate(() => {
+    // 没有页面时点它应给提示而不是报错 ✓
+    const b2 = document.querySelector('[data-act="crop-item"]');
+    if (b2) b2.click();
+  });
+  const cropNoPage = await p.evaluate(() => !!document.getElementById('boardCrop'));
+  ok(!cropNoPage, '没导入页面时不会强行开框选层 ✓（给出提示）');
+  // 放一个假页面图片进 snipper ✓，再从人物步框选 ✓
+  await p.evaluate(() => {
+    const Sn = window.MurdokuSnipper;
+    // 用一张真实的小图（有 naturalWidth ✓；上面那种只设 width 的假图会让换算除零 ✓）
+    const cv = document.createElement('canvas');
+    cv.width = 200; cv.height = 150;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, 200, 150);
+    cx.fillStyle = '#123'; cx.fillRect(20, 20, 60, 40);
+    const im = new Image();
+    im.src = cv.toDataURL('image/png');
+    Sn.state.img = im;
+    window.MH.ui.wizard = 4;
+    window.MH.render();
+  });
+  await p.waitForFunction(() => {
+    const im = window.MurdokuSnipper.state.img;
+    return !!(im && im.naturalWidth);
+  }, null, { timeout: 5000 });
+  const cropFromPerson = await p.locator('[data-act="crop-person"]').count();
+  ok(cropFromPerson === 1, '人物步显示「在主界面上框选」✓');
+  await p.evaluate(() => document.querySelector('[data-act="crop-person"]').click());
+  const layerOn = await p.evaluate(() => !!document.getElementById('boardCrop'));
+  ok(layerOn, '点开后主界面出现框选层 ✓');
+  await p.evaluate(() => {
+    // 直接走内部换算路径：模拟在图片上拖 100×60（1:1 显示）✓
+    const Sn = window.MurdokuSnipper;
+    const n0 = Sn.state.pins.length;
+    Sn.addPinFromSource(100, 80, 100, 60);
+    window.__cropOk = Sn.state.pins.length === n0 + 1;
+  });
+  ok(await p.evaluate(() => !!window.__cropOk), '框选后右侧卡片列表多一张 ✓');
+  await p.evaluate(() => { const b2 = document.querySelector('#boardCrop [data-act="crop-close"]'); if (b2) b2.click(); });
+  ok(!(await p.evaluate(() => !!document.getElementById('boardCrop'))), '点「完成」关闭框选层 ✓');
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));
