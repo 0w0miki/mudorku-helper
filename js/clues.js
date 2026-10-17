@@ -595,7 +595,8 @@
     if (cut >= 0) body = body.slice(0, cut).trim();
     if (!body || letters(body).length < 4) return [];
     for (const bad of NOT_CLUE) if (bad.test(body)) return [];
-    if (!hasSubject(body)) return [];
+    // **卡片模式不走主语闸门** ✓（用户框了什么就以什么为准 ✓）；整页模式仍要 ✓
+    if (!(opt.permissive && opt.permissive === true) && !hasSubject(body)) return [];
     if (/\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body)) return [];
     const neg = /\b(?:not|never|n't)\b/i.test(body);
     // 所有关系词的结束位置（按出现顺序 ✓）
@@ -662,7 +663,7 @@
         const key = norm(cl).replace(/\s+/g, ' ').toLowerCase();
         const gs = groupsAll.filter(g => key.includes(norm(g.text).toLowerCase()));
         // **一句里可能有多条关联** ✓（"…in a chair in the front area." → Chair + FRONT AREA ✓）
-        const got = clauseLinks(cl, names, { groups: gs.length ? gs : groupsAll });
+        const got = clauseLinks(cl, names, { groups: gs.length ? gs : groupsAll, permissive: !!(opts && opts.permissive) });
         for (const l of got) {
           // 先试加粗/字体组（PDF 里最准 ✓），否则用正文里就近的那个 ✓
           const g2 = (gs.length ? gs : groupsAll).map(g => findTarget(g.text, names)).find(Boolean);
