@@ -431,3 +431,18 @@ test('人名配对：**横向对齐优先** ✓（不能只看纵向最近 —�
     '横向对齐的 Seraphina 才对（Rosalind 纵向更近 ✗）');
   assert.equal(byText['She was sitting in a chair .'], 'Rosalind', '自己正下方那条仍归自己 ✓');
 });
+
+test('卡片模式（permissive）：以用户的框为准 ✓ —— 不因"句首不是人称"被丢 ✗', () => {
+  const names = [{ name: 'cart', kind: 'item' }, { name: 'tee', kind: 'item' }];
+  const lines = [{ text: 'In his hole there was a woman in a cart', x: 10, y: 20, w: 240, h: 60 }];
+  // 严格模式（整页回退）：这条会被"句首没有人称主语"拒掉 ✗
+  assert.equal(C.readItems(lines, names).clues.length, 0);
+  // 卡片模式：留下 ✓ 并解析出 in→cart ✓
+  const card = C.readCardItems(lines, names);
+  assert.equal(card.clues.length, 1, JSON.stringify(card.clues.map(c => c.text)));
+  assert.equal(card.clues[0].links[0].target, 'cart');
+  assert.equal(card.clues[0].links[0].kind, 'in');
+  // 卡片模式下"规则/署名/残句"仍然不要 ✓
+  const junk = C.readCardItems([{ text: 'Rule: One person per Row and Column', x: 0, y: 0, w: 200, h: 20 }], names);
+  assert.equal(junk.clues.length, 0, '规则文字仍被排除 ✓');
+});

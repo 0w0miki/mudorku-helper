@@ -1235,7 +1235,13 @@
         '只想读某一块就先在主界面框住它 ✓', 'warn');
     }
     let out;
-    try { out = (src.via === 'ocr' ? C.readOcrItems : C.readItems)(src.items, names); }
+    // **有卡片 → 照单全收** ✓（以用户的框为准 ✓）；整页回退 → 仍用严格判据 ✓
+    const hasCards = !src.wholePage && ((window.MurdokuSnipper && window.MurdokuSnipper.state
+      && (window.MurdokuSnipper.state.pins || []).length) > 0);
+    const callRead = hasCards ? C.readCardItems : (src.via === 'ocr' ? C.readOcrItems : C.readItems);
+    try {
+      out = callRead(src.items, names, { cuts: src.cuts || [], wordLevel: src.via === 'ocr' });
+    }
     catch (err) { MH.toast('线索解析出错：' + err.message, 'error'); return; }
     if (!out.clues.length) { MH.toast('没读出线索（卡片里可能没有人物说明，或目标物品还没建）', 'warn'); return; }
     // **给每条线索标来源卡片** ✓（用户要求：OCR 读错无法避免 ✓，但要能一眼知道"这条来自哪块" ✓）

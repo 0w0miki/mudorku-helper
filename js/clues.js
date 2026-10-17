@@ -477,6 +477,16 @@
     return extract(clusterLines(items, o), names, o);
   }
 
+  /**
+   * 卡片内的读取（**照单全收** ✓）：用户明确框了区域 ✓ → 以框为准 ✓
+   * 只保留最窄的黑名单（署名/规则文字 ✓）+ 最小长度 ✓；主语/句式判据不再当闸门 ✓
+   * （实测被它误杀过两次："In his hole, there was…" ✗ / "His hole number is…" ✗）
+   */
+  function readCardItems(items, names, opts) {
+    const o = Object.assign({}, opts || {}, { blocks: true, permissive: true });
+    return extract(clusterLines(items, o), names, o);
+  }
+
   /** 兼容旧调用：OCR 来源 = 行优先 + 逐词框阈值 ✓（与 readItems 同一套算法 ✓） */
   function readOcrItems(items, names, opts) {
     return readItems(items, names, Object.assign({}, opts || {}, { wordLevel: true }));
@@ -667,7 +677,16 @@
         continue;
       }
       // **整句留下** ✓（有关联更好，没有也留 ✓）；只有规则文字/署名/碎片才丢 ✓
-      if (looksLikeClueStatement(whole)) {
+      if (opts && opts.permissive) {
+        // 卡片模式：**以用户的框为准** ✓ → 只排除"明确不是线索"的东西 ✓
+        // （黑名单 ✓ + 太短的碎片 ✓ + 结尾是介词/冠词的残句 ✓）
+        const body = whole;
+        const bad = NOT_CLUE.some(re => re.test(body)) ||
+          letters(body).length < 6 ||
+          /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body);
+        if (!bad) rows.push({ text: whole, person: null, x: bx, y: by, links, block: b });
+        else skipped.push({ text: whole, reason: bad === true ? '规则/署名/残句' : '太短' });
+      } else if (looksLikeClueStatement(whole)) {
         rows.push({ text: whole, person: null, x: bx, y: by, links, block: b });
       } else {
         skipped.push({ text: whole, reason: links.length ? '有主语但要清理' : '规则文字/署名/没有主语' });
@@ -768,7 +787,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, clauseLinks, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, clauseLinks, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readCardItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);
