@@ -164,7 +164,9 @@
         : '') +
       '<button class="primary sm" data-act="draft-save" ' + (canSave ? '' : 'disabled') + '>保存</button>' +
       '</div>' +
-      '<p class="hint">在棋盘上单击切换格子，按住拖动可连续刷选。</p>' +
+      '<p class="hint">在棋盘上单击切换格子，按住拖动可连续刷选。' +
+        (d.kind === 'item' ? '<br><b>按住 Ctrl（Mac 用 ⌘）点一个格子 = 按样例添加</b> ✓（自动把同类格子找出来 ✓）' : '') +
+        '</p>' +
       '</div>';
   }
 

@@ -547,6 +547,16 @@
 
       if (st.phase === 'prep') {
         if (!MH.ui.draft) return;
+        // **Ctrl/Cmd + 点格子 = 按样例添加** ✓（用户要求 ✓）
+        // 新建物品时最常见的动作就是"点一个格子当样例，让程序把同类找出来" ✓ ——
+        // 以前要先点「按样例添加」按钮再点格子（两步 ✓）；现在按住 Ctrl 一步到位 ✓。
+        // 只对**物品**草稿生效 ✓（区域没有"同类"的概念 ✓）。
+        if (MH.ui.draft.kind === 'item' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (MH.panels && MH.panels.itemSample) MH.panels.itemSample(k);
+          return;
+        }
         e.preventDefault();
         this.painting = true;
         this.paintMode = MH.ui.draft.cells.has(k) ? 'remove' : 'add';

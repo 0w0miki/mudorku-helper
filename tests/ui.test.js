@@ -2037,3 +2037,32 @@ test('改名不弹 prompt ✓（界面内编辑；重复/非法被拒）', async
   assert.equal(dom.window.MH.core.person(dom.window.MH.store.state, pid).label, 'Q');
   dom.window.close();
 });
+
+test('新建物品时 **Ctrl+点格子 = 按样例添加** ✓（一步到位 ✓；区域草稿不触发 ✓）', async () => {
+  const { dom, doc } = await boot();
+  const win = dom.window;
+  // 起一个物品草稿 ✓
+  clickSel(dom, '[data-act="new-item"]');
+  assert.ok(win.MH.ui.draft && win.MH.ui.draft.kind === 'item', '应进入物品草稿 ✓');
+  const called = [];
+  win.MH.panels.itemSample = k => called.push(k);   // 替身：只验证"被调用 ✓"
+  const cell = q(doc, '.cell[data-k="1,1"]');
+  assert.ok(cell, '棋盘格子存在 ✓');
+  const pd = new win.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+  cell.dispatchEvent(pd);
+  assert.deepEqual(called, ['1,1'], 'Ctrl+点应该调用"按样例添加" ✓');
+  assert.equal(win.MH.ui.draft.cells.size, 0, '不应该同时把它当普通刷格 ✓');
+  // 不按 Ctrl → 正常刷格 ✓
+  const pd2 = new win.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+  q(doc, '.cell[data-k="2,2"]').dispatchEvent(pd2);
+  assert.ok(win.MH.ui.draft.cells.has('2,2'), '不按 Ctrl 时仍是普通刷格 ✓');
+  // 区域草稿：Ctrl 不触发 ✓
+  clickSel(dom, '[data-act="draft-cancel"]');
+  clickSel(dom, '[data-act="new-region"]');
+  called.length = 0;
+  const pd3 = new win.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+  q(doc, '.cell[data-k="3,3"]').dispatchEvent(pd3);
+  assert.deepEqual(called, [], '区域草稿不该触发"按样例添加" ✓');
+  assert.ok(win.MH.ui.draft.cells.has('3,3'), '区域草稿里 Ctrl+点仍是刷格 ✓');
+  dom.window.close();
+});
