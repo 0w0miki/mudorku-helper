@@ -135,7 +135,10 @@
     if (!MH.store.state.bg) return '';
     return '<button class="ghost sm" data-act="item-sample"' + (MH.ui.itemPicking ? ' disabled' : '') +
         ' title="点棋盘上一个格子当样例，自动把同类格子加到这件物品">' +
-        (MH.ui.itemPicking ? '🔍 请点一个格子…' : '🔍 按样例添加') + '</button>';
+        (MH.ui.itemPicking ? '🔍 请点一个格子…' : '🔍 按样例添加') + '</button>' +
+      // 快捷键说明就放在按钮旁边 ✓（用户要求 ✓；比放在草稿提示里更靠近使用位置 ✓）
+      '<span class="meta" style="margin-left:6px"' +
+      ' title="按住 Ctrl（Mac 用 ⌘）点棋盘上任意格子，等同于按样例添加">或 Ctrl/⌘ + 点格子</span>';
   }
 
   function draftHTML(st, d, opts) {
@@ -165,7 +168,6 @@
       '<button class="primary sm" data-act="draft-save" ' + (canSave ? '' : 'disabled') + '>保存</button>' +
       '</div>' +
       '<p class="hint">在棋盘上单击切换格子，按住拖动可连续刷选。' +
-    (d.kind === 'item' ? '<br><b>按住 Ctrl（Mac 用 ⌘）点一个格子 = 按样例添加</b>（自动把同类格子找出来）' : '') +
         '</p>' +
       '</div>';
   }
