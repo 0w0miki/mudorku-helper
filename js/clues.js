@@ -268,7 +268,52 @@
       if (ln) { ln.items.push(it); ln.y = Math.min(ln.y, it.y); ln.y1 = Math.max(ln.y1, it.y + it.h); }
       else lines.push({ y: it.y, y1: it.y + it.h, items: [it] });
     }
-    // ② 行内按大空隙切段 ✓
+    // ①.5 **列沟检测** ✓ —— 沟 = 跨多行重复出现的空白带 ✓（与绝对间隙大小无关 ✓）
+    // 为什么需要：用一个"绝对间隙阈值"区分"词距"和"列沟" ✗ —— 两者有重叠区 ✓：
+    //   · 调松（1.6 行高）→ 窄列沟（约 1.2~1.5 行高 ✓）会被当成词距 ✗ → 两列粘成一段 ✗
+    //   · 调紧（1.0 行高）→ 字距被拉宽的正文（两端对齐 ✓）会被切开 ✗ 且**不可逆** ✗
+    // 列沟则是"**这块 x 区间在大多数行里都没有墨**" ✓ → 用它当列分隔就两全 ✓
+    const gutters = [];
+    const lineCount = lines.length;
+    const inkCount = list.length;
+    if (lineCount >= 3 && inkCount >= 8) {
+      const gx0 = Math.min.apply(null, list.map(z => z.x));
+      const gx1 = Math.max.apply(null, list.map(z => z.x + z.w));
+      const span = Math.max(1, gx1 - gx0);
+      const N = Math.min(500, Math.max(80, Math.round(span / Math.max(2, medH * 0.2))));
+      const cw = span / N;
+      const total = new Int32Array(N), blank = new Int32Array(N);
+      for (const ln of lines) {
+        let lx0 = Infinity, lx1 = -Infinity;
+        for (const it of ln.items) { lx0 = Math.min(lx0, it.x); lx1 = Math.max(lx1, it.x + it.w); }
+        const ink = new Uint8Array(N);
+        for (const it of ln.items) {
+          const a = Math.max(0, Math.floor((it.x - gx0) / cw));
+          const b2 = Math.min(N - 1, Math.ceil((it.x + it.w - gx0) / cw));
+          for (let k = a; k <= b2; k++) ink[k] = 1;
+        }
+        const a2 = Math.max(0, Math.floor((lx0 - gx0) / cw));
+        const b3 = Math.min(N - 1, Math.ceil((lx1 - gx0) / cw));
+        for (let k = a2; k <= b3; k++) { total[k]++; if (!ink[k]) blank[k]++; }
+      }
+      const minW = Math.max(2, Math.round(medH * 0.4 / cw));   // 沟的最小宽度 ✓（≈0.4 行高 ✓）
+      let run = -1;
+      const close = (k) => {
+        if (run < 0) return;
+        const w2 = k - run;
+        if (w2 >= minW) gutters.push({ x0: gx0 + run * cw, x1: gx0 + k * cw });
+        run = -1;
+      };
+      for (let k = 0; k <= N; k++) {
+        // 这一列"在该行有字、且该列没墨"的比例 ≥ 80% 且至少 2 行参与 → 算沟 ✓
+        const ok = k < N && total[k] >= 2 && blank[k] / total[k] >= 0.8;
+        if (ok && run < 0) run = k;
+        if (!ok) close(k);
+      }
+      close(N);
+    }
+
+    // ② 行内按大空隙切段 ✓（**列沟优先** ✓：碰到沟就切 ✓，与间隙大小无关 ✓）
     const segs = [];
     for (const ln of lines) {
       ln.items.sort((a, b) => a.x - b.x);
@@ -279,24 +324,16 @@
           x: f.x, x1: la.x + la.w, items: cur.slice() });
       };
       for (let k = 1; k < ln.items.length; k++) {
-        const gap = ln.items[k].x - (cur[cur.length - 1].x + cur[cur.length - 1].w);
-        // **行内切段**的空隙阈值 ✓：段 = 同一列里的一小串词 ✓
-        //
-        // 这是个**有代价的旋钮** ✗（实测过 ✓）：
-        //   · 调松（1.6 行高）→ 窄列沟（约 1.2~1.5 行高 ✓）会把**两列粘成一段** ✗（golf 实测 ✓）
-        //   · 调紧（1.0 行高）→ 字距被拉宽的正文（两端对齐 ✓）会被**从中间切开** ✗，
-        //     而**同行的段永远不会再合回去** ✓ → 一句完整的话被拆成碎片 → **整条线索丢掉** ✗
-        //     （合成实测：词距 1.3 行高时，阈值 1.0 → 0 条 ✗、阈值 1.6 → 1 条 ✓）
-        //
-        // 因此**按来源给不同默认值** ✓：
-        //   · OCR 逐词框（wordLevel ✓）：词距小、噪声大 ✓ → 1.0（宁可切开列 ✓，避免跨列粘连 ✓）
-        //   · PDF 文字层 ✓：宽度精确、两端对齐常见 ✓ → 1.6（**别切坏句子** ✓）
-        //
-        // 真正的解法是"**按列沟检测**"（见文档 ✓）：沟是**跨多行重复出现的空白带** ✓，
-        // 与绝对间隙无关 ✓ —— 那样就能既切准列、又不切坏句子 ✓。此处先按来源取值 ✓。
-        const segGap = opt.segGap == null ? (opt.wordLevel ? 1.0 : 1.6) : opt.segGap;
-        if (gap > Math.max(8, medH * segGap)) { flush(); cur = []; }
-        cur.push(ln.items[k]);
+        const prev = cur[cur.length - 1], nxt = ln.items[k];
+        const gap = nxt.x - (prev.x + prev.w);
+        // **列沟优先** ✓：间隙区间盖住任何一条沟 → 就是换列 ✓（与间隙大小无关 ✓）
+        const prevEnd = prev.x + prev.w;
+        const crossesGutter = gutters.some(g => prevEnd <= g.x1 + 1 && nxt.x >= g.x0 - 1);
+        // 兜底：间隙大到"不可能是词距"（1.6 行高 ✓）也切 ✓
+        // （有了列沟检测，这个数字就不再是"区分词距/列沟"的关键 ✓，只防极端情况 ✓）
+        const segGap = opt.segGap == null ? 1.6 : opt.segGap;
+        if (crossesGutter || gap > Math.max(8, medH * segGap)) { flush(); cur = []; }
+        cur.push(nxt);
       }
       if (cur.length) flush();
     }
