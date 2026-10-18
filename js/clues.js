@@ -162,7 +162,7 @@
     // 先把署名截掉 ✓（切块时偶尔会把页脚署名并进线索 ✗）—— **要在"规则文字"判断之前** ✗→✓，
     // 否则"真线索 + 署名"会整块被当成说明文字丢掉 ✗（实测踩过）
     const cut = t.search(CREDIT);
-    const body = cut >= 0 ? t.slice(0, cut).trim() : t;   // 开头就是署名（cut===0）也要切 ✓
+  const body = cut >= 0 ? t.slice(0, cut).trim() : t;  // 开头就是署名（cut===0）也要切
     if (letters(body).length < 4) { out.reason = '只有署名/说明文字'; return out; }
     // **句子必须有人称主语** ✓：真线索都是"He was… / She was…" ✓，
     // 而版面碎片的句首是 "chair in the bottom row." ✗、"WHO WAS IN THE TOP ROW?" ✗
@@ -217,7 +217,7 @@
     // 有关系但没匹配到目标：**保留 kind** ✓（调用方据此提示"先补物品" ✓），但不给 target ✓
     if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
     out.kind = kind;
-    out.text = body;                       // 线索原文按"去掉署名"的版本返回 ✓
+  out.text = body;            // 线索原文按"去掉署名"的版本返回
     out.target = target;
     // 极性："不/没有"就是负相关 ✗→✓
     // （"He was **not** sitting in a chair." 以前判成正相关 ✗ —— 这是会误导游玩的错 ✓）
@@ -236,7 +236,7 @@
   function splitClauses(text) {
     let t = norm(text);
     const cut = t.search(CREDIT);
-    if (cut >= 0) t = t.slice(0, cut).trim();      // 页脚标注（clue:/puzzle by…）连尾巴一起去掉 ✓
+  if (cut >= 0) t = t.slice(0, cut).trim();   // 页脚标注（clue:/puzzle by…）连尾巴一起去掉
     if (!t) return [];
     // **逗号也切开** ✓：题面常见"介词短语开头 + 主句" ✓
     // （golf 实测："In his hole, there was a woman in a cart." ✓ ——
@@ -296,7 +296,7 @@
         const b3 = Math.min(N - 1, Math.ceil((lx1 - gx0) / cw));
         for (let k = a2; k <= b3; k++) { total[k]++; if (!ink[k]) blank[k]++; }
       }
-      const minW = Math.max(2, Math.round(medH * 0.4 / cw));   // 沟的最小宽度 ✓（≈0.4 行高 ✓）
+   const minW = Math.max(2, Math.round(medH * 0.4 / cw));  // 沟的最小宽度（≈0.4 行高）
       let run = -1;
       const close = (k) => {
         if (run < 0) return;
@@ -359,7 +359,7 @@
         const narrow = Math.min(a.x1 - a.x, b.x1 - b.x);
         if (ox < narrow * 0.4) continue;
         if (looksLikePersonName(a.items.map(z => z.text).join(' ')) !==
-            looksLikePersonName(b.items.map(z => z.text).join(' '))) continue;   // 人名单独成块 ✓
+      looksLikePersonName(b.items.map(z => z.text).join(' '))) continue;  // 人名单独成块
         union(a.i || i, b.i || j);
       }
     }
@@ -425,7 +425,7 @@
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i], b = list[j];
-        if (isName(a) || isName(b)) continue;          // 人名不参与合并 ✓
+    if (isName(a) || isName(b)) continue;     // 人名不参与合并
         // 同行的 y 容差：OCR 的词框 y 抖动更大（实测能到 10px ✗）→ 放宽到 0.95 字高 ✓
         const sameLine = Math.abs(a.y - b.y) <= Math.max(opt.wordLevel ? 5 : 3,
           Math.min(a.h, b.h) * (opt.wordLevel ? 0.95 : 0.5));
@@ -563,10 +563,10 @@
       for (let i = blocks.length - 1; i >= 0 && i >= blocks.length - 8; i--) {
         const bx = blocks[i];
         const gap = ln.y - bx.y1;
-        if (gap < -2 || gap > limit) continue;               // 必须在它下面、且不隔太远 ✓
-        if (looksLikePersonName(bx.text) && !looksLikePersonName(ln.text)) continue;   // 人名单独一块 ✓
+    if (gap < -2 || gap > limit) continue;        // 必须在它下面、且不隔太远
+    if (looksLikePersonName(bx.text) && !looksLikePersonName(ln.text)) continue;  // 人名单独一块
         const gx = xGap(bx, ln);
-        if (gx > Math.max(24, ln.h * 2)) continue;            // 横向要挨着（同一列）✓
+    if (gx > Math.max(24, ln.h * 2)) continue;      // 横向要挨着（同一列）
         if (gx < bestX) { bestX = gx; target = bx; }
       }
       if (target) {
@@ -597,10 +597,10 @@
     if (NOT_CLUE.some(re => re.test(t))) return false;
     const L = letters(t);
     if (L.length < 3) return false;
-    if (t.length > 20) return false;                         // 人名不会是一长串 ✓
+  if (t.length > 20) return false;             // 人名不会是一长串
     if (NAME_STOP.test(t)) return false;                     // He was / The Caricature / What happened ✗
-    if (L === L.toUpperCase()) return false;                 // 全大写 = 区域名 ✓
-    if (!/^[A-Z]/.test(t)) return false;                     // 名字首字母大写 ✓
+  if (L === L.toUpperCase()) return false;         // 全大写 = 区域名
+  if (!/^[A-Z]/.test(t)) return false;           // 名字首字母大写
     return true;
   }
 
@@ -737,7 +737,7 @@
     for (const r of rows) {
       let best = null, bestKey = null;
       for (const n of personNames) {
-        if (n.y > r.y + 4) continue;                       // 只看**上方**的名字 ✓
+    if (n.y > r.y + 4) continue;            // 只看**上方**的名字
         // **横向关系优先** ✓：名字与线索在同一列（框有重叠）才算"这个人的" ✓
         // 以前只看纵向最近 ✗ —— contest 实测：一条线索正上方横向对齐的是 Seraphina ✓，
         // 但左边远处的 Rosalind 纵向更近（dy 10 vs 48 ✗）→ 被错认 ✓（这就是用户说的"对应不准" ✓）
@@ -811,7 +811,7 @@
     let k = 0;
     for (const g of ordered) {
       const done = g.items.filter(x => x.c.personId);
-      if (done.length === g.items.length) continue;               // 全对上了 ✓
+   if (done.length === g.items.length) continue;        // 全对上了
       // 块里已经有人对上 → 剩下的跟着同一个人 ✓
       let person = done.length ? (people || []).find(p => p.id === done[0].c.personId) : null;
       if (!person) person = free[k++];

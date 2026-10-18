@@ -680,7 +680,7 @@
       if (ct.w < 3 || ct.h < 3 || ct.w >= cs.w || ct.h >= cs.h) continue;
       const rad = Math.max(2, Math.round(K2 / K) + 1);
       const local = [];
-      const samples = [];                     // **阈值用的样本**（多）· 候选名单只用 top perScale（少）✓
+   const samples = [];           // **阈值用的样本**（多）· 候选名单只用 top perScale（少）
       const seenSpot = new Set();
       const tryN = Math.max(16, Math.min(stage1.length, (opt.perScale || 60) * 4));
       for (const c1 of stage1.slice(0, tryN)) {
@@ -693,7 +693,7 @@
             if (seenSpot.has(key)) continue;
             seenSpot.add(key);
             let v = ct.mask ? maskedNccAt(cs.g, cs.w, x, y, ct) : -1;
-            if (v <= -1) v = nccAt(cs.g, cs.w, x, y, ct);        // 遮罩版这里算不出来 → 退回整块模板 ✓
+      if (v <= -1) v = nccAt(cs.g, cs.w, x, y, ct);    // 遮罩版这里算不出来 → 退回整块模板
             if (v > 0) { local.push({ x, y, v, sc }); samples.push(v); }
           }
         }

@@ -44,13 +44,13 @@
       '<div class="link-title">读到 ' + cc.clues.length + ' 段（候选 · ' +
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') +
       // 说清这次读的范围 ✓：没框卡片时是**整页** ✓（卡片外的句子也会进来 ✓）
-      (cc.wholePage ? ' · <b>整页</b>（还没框卡片 ✓）' : ' · 你框的卡片 ✓') +
-      '）—— 整句都会存下来 ✓，解析出的关联列在下面；文字不对可以直接改 ✓</div>' +
+   (cc.wholePage ? ' · <b>整页</b>（还没框卡片）' : ' · 你框的卡片') +
+   '）—— 整句都会存下来，解析出的关联列在下面；文字不对可以直接改</div>' +
       (cc.clues.some(c => !c.personId)
         ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
           ' 段没能按名字/首字母对上人物' +
-          ((cc.names || []).length ? '（首字母不在编号里）' : '（<b>这张卡片上没有人名</b> —— 这版题目用人像区分，请对照题面的人像用下拉框指定 ✓）') +
-          ' —— 用左边的下拉框指定一下 ✓</p>'
+     ((cc.names || []).length ? '（首字母不在编号里）' : '（<b>这张卡片上没有人名</b> —— 这版题目用人像区分，请对照题面的人像用下拉框指定）') +
+     ' —— 用左边的下拉框指定一下</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
@@ -109,7 +109,7 @@
           '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button>') +
       '</div>' +
       // ② **线索紧跟在改名下面** ✓（用户要求；它是这个人的属性 ✓）
-      '<label class="field">' + esc(p.label) + ' 的线索（可手工输入 / 粘贴 ✓ 识别出来的也能在这里改）' +
+   '<label class="field">' + esc(p.label) + ' 的线索（可手工输入 / 粘贴 识别出来的也能在这里改）' +
       '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
       'placeholder="例如：He was beside a shelf .">' + esc(p.clue || '') + '</textarea></label>' +
       // ③ 关联单独一节 ✓（标题说明这是"相关性提示"✓）
@@ -165,7 +165,7 @@
       '<button class="primary sm" data-act="draft-save" ' + (canSave ? '' : 'disabled') + '>保存</button>' +
       '</div>' +
       '<p class="hint">在棋盘上单击切换格子，按住拖动可连续刷选。' +
-        (d.kind === 'item' ? '<br><b>按住 Ctrl（Mac 用 ⌘）点一个格子 = 按样例添加</b> ✓（自动把同类格子找出来 ✓）' : '') +
+    (d.kind === 'item' ? '<br><b>按住 Ctrl（Mac 用 ⌘）点一个格子 = 按样例添加</b>（自动把同类格子找出来）' : '') +
         '</p>' +
       '</div>';
   }
@@ -189,7 +189,7 @@
     const overlap = draftOverlap(d);
     return '已选 <b>' + cells.length + '</b> 格 · ' +
       (d.kind === 'region'
-        ? (cells.length ? (connected ? '<span class="good">四连通 ✓</span>' : '<span class="bad">不连通 ✗（区域必须四连通）</span>') : '<span class="muted">请选择格子</span>')
+    ? (cells.length ? (connected ? '<span class="good">四连通</span>' : '<span class="bad">不连通 ✗（区域必须四连通）</span>') : '<span class="muted">请选择格子</span>')
         : '<span class="muted">物品格不必连通</span>') +
       (overlap ? ' · <span class="bad">其中 ' + overlap + ' 格已在其它' + kindName(d.kind) + '里，保存后归属会移过来</span>' : '');
   }
@@ -280,12 +280,12 @@
       '<button class="ghost sm" data-act="bg-region" title="拖动矩形，正好圈住地图外框；再用当前行列数算出格距与偏移">▭ 框地图外框</button>' +
       '<button class="' + (MH.ui.aligning ? 'primary sm' : 'ghost sm') + '" data-act="bg-align"' +
       ' title="拖动被对齐的网格：移动 · 右下角手柄缩放 · 方向键微调；再点一次「完成对齐」记下这次对齐">' +
-      (MH.ui.aligning ? '✓ 完成对齐' : '✥ 拖动对齐') + '</button>' +
+   (MH.ui.aligning ? '完成对齐' : '✥ 拖动对齐') + '</button>' +
       (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
       '</div>' +
       '<p class="hint">' + (MH.ui.aligning
-        ? '拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调 ✓ 对准后点「完成对齐」记下这次对齐 ✓'
-        : '框外框对不准时，用「✥ 拖动对齐」手动微调 ✓') + '</p>' +
+    ? '拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调 对准后点「完成对齐」记下这次对齐'
+    : '框外框对不准时，用「✥ 拖动对齐」手动微调') + '</p>' +
       (MH.ui.aligning
         ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
           '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
@@ -315,7 +315,7 @@
     const Sn = window.MurdokuSnipper;
     const img = Sn && Sn.state && Sn.state.img;
     if (!img || !img.naturalWidth) {
-      MH.toast('还没有可用的页面 —— 先在准备阶段导入 PDF/图片当底图 ✓（会自动带到右侧卡片 ✓）', 'warn');
+   MH.toast('还没有可用的页面 —— 先在准备阶段导入 PDF/图片当底图（会自动带到右侧卡片）', 'warn');
       return;
     }
     const area = document.querySelector('.board-area');
@@ -334,7 +334,7 @@
       // "完成"放到**下一行靠左** ✓（顶部右侧容易和右边摘录浮窗打架 ✓）
       '<div class="bc-actions">' +
       // **「完成」放最左** ✓ —— 右侧会被悬浮窗盖住 ✗（实测踩过两次 ✓）
-      '<button class="ghost sm" data-act="crop-close">完成 ✓</button>' +
+   '<button class="ghost sm" data-act="crop-close">完成</button>' +
       // **翻页**跟在后面 ✓（PDF 多页时：线索/图例可能在别的页 ✓）
       (Sn && Sn.state && Sn.state.pages > 1
         ? '<button class="ghost sm" data-act="crop-page" data-dir="-1"' +
@@ -395,9 +395,9 @@
       const k = (cur.naturalWidth || img.naturalWidth) / shown;
       Sn.addPinFromSource(box.x * k, box.y * k, box.w * k, box.h * k);
       if (MH.ui.crop) MH.ui.crop.added = (MH.ui.crop.added || 0) + 1;
-      MH.toast('已截取一张卡片 ✓ 看右侧卡片列表（' + (kind === 'item' ? '物品图标' : '人物线索') + '）', 'ok');
+   MH.toast('已截取一张卡片 看右侧卡片列表（' + (kind === 'item' ? '物品图标' : '人物线索') + '）', 'ok');
     });
-    MH.toast('在棋盘区拖框截取 ✓ 截到的会出现在右侧卡片列表 ✓', 'ok');
+  MH.toast('在棋盘区拖框截取 截到的会出现在右侧卡片列表', 'ok');
   }
 
   /**
@@ -408,12 +408,12 @@
   async function afterCropDone(kind, added) {
     if (!added) { MH.toast('这次没有框到东西 —— 拖一个框再点「完成」', 'warn'); return; }
     if (kind === 'item') {
-      MH.toast('开始按图例识别物品…（识别完会自动找位置 ✓）', 'ok');
+   MH.toast('开始按图例识别物品…（识别完会自动找位置）', 'ok');
       try { await runLegendAuto(); }
       catch (err) { MH.toast('识别出错：' + (err && err.message ? err.message : err), 'error'); return; }
       const usable = (MH.ui.legendItems || []).filter(x => x.patch && x.mask).length;
       if (!usable) {
-        MH.toast('没有可用的图标模板，先跳过"自动找地点" —— 可以用每件物品的「按样例添加」手动补 ✓', 'warn');
+    MH.toast('没有可用的图标模板，先跳过"自动找地点" —— 可以用每件物品的「按样例添加」手动补', 'warn');
         return;
       }
       try { await locateLegendItems(); }
@@ -431,7 +431,7 @@
     const layer = document.getElementById('boardCrop');
     if (layer) layer.remove();
     MH.ui.crop = null;
-    if (kind) afterCropDone(kind, added);       // 不 await ✓（内部自己 try/catch ✓）
+  if (kind) afterCropDone(kind, added);    // 不 await（内部自己 try/catch）
   }
 
   function wizardHTML(st) {
@@ -455,7 +455,7 @@
         '</div>' +
         '<button class="primary block" data-act="gen">生成地图</button>' +
         '<p class="hint">' + (bgOk
-          ? '✓ 地图框已对位（黄框贴着地图四边）· 人物数 = min(行, 列) = <b>' + Core.peopleCount(st.rows, st.cols) + '</b>'
+     ? '地图框已对位（黄框贴着地图四边）· 人物数 = min(行, 列) = <b>' + Core.peopleCount(st.rows, st.cols) + '</b>'
           : '还没框地图：生成网格后，在下面「对齐网格」里点「框地图外框」，沿地图四边拖一个框（要贴住网格）') + '</p></section>');
       body.push(bgAlignCard(st, { wizard: true }));
     } else if (step === 2) {
@@ -482,7 +482,7 @@
           '某件没找到就用它的「编辑 → 按样例添加」点地图上的格子补上。</p></section>');
       body.push('<section class="card"><h2>手动补充</h2>' +
         '<button class="ghost block" data-act="new-item" ' + (d ? 'disabled' : '') + '>＋ 手动新建物品</button>' +
-        (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +   // 编辑界面 ✓（同上 ✓）
+    (d && d.kind === 'item' && !d.editingId ? draftHTML(st, d) : '') +  // 编辑界面（同上）
         '</section>');
       body.push('<ul class="list">' + entityList('item', st) + '</ul>');
     } else {
@@ -515,7 +515,7 @@
       '<button class="ghost sm" data-act="wiz-go" data-v="' + (step - 1) + '"' + (step <= 1 ? ' disabled' : '') + '>← 上一步</button>' +
       '<button class="ghost sm" data-act="wiz-go" data-v="' + (step + 1) + '">跳过这步 →</button>' +
       '<span class="grow"></span>' +
-      '<button class="primary sm" data-act="wiz-go" data-v="' + (step + 1) + '">' + (last ? '完成 ✓' : '下一步 →') + '</button>' +
+   '<button class="primary sm" data-act="wiz-go" data-v="' + (step + 1) + '">' + (last ? '完成' : '下一步 →') + '</button>' +
       '</div></div>';
   }
 
@@ -532,7 +532,7 @@
       (!MH.store.state.bg
         ? '<section class="card wizard-entry"><h2>第一次用？</h2>' +
           '<button class="primary block" data-act="wiz-start">🧭 分步引导：导入 → 对齐 → 区域 → 物品 → 线索</button>' +
-          '<p class="hint">按顺序走四步，每一步只显示要用的东西 ✓（也可以直接用下面的完整面板 ✓）</p></section>'
+     '<p class="hint">按顺序走四步，每一步只显示要用的东西（也可以直接用下面的完整面板）</p></section>'
         : '') +
       bgCard(st) +
 
@@ -549,7 +549,7 @@
       '<p class="hint">人物数 = min(行, 列) = <b>' + n + '</b>，标签 A–Z 且跳过 X' +
       (st.people.length ? '：' + st.people.map(p => p.label).join(' ') : '') + '</p>' +
       '</section>' +
-      bgAlignCard(st) +        // 框地图外框 / 网格位置调整：放在"生成地图"后面 ✓（按使用顺序 ✓）
+   bgAlignCard(st) +    // 框地图外框 / 网格位置调整：放在"生成地图"后面（按使用顺序）
 
       '<section class="card">' +
       '<h2>人物 <span class="muted">点击选择后可设置关联</span></h2>' +
@@ -643,7 +643,7 @@
       '<ul class="issues">' +
       (issues.length
         ? issues.map(i => '<li class="issue ' + i.level + '"' + (i.key ? ' data-act="focus-issue" data-key="' + i.key + '" title="点击定位"' : '') + '>' + esc(i.text) + '</li>').join('')
-        : '<li class="issue ok">目前的标记与关联都能对上 ✓</li>') +
+    : '<li class="issue ok">目前的标记与关联都能对上</li>') +
       '</ul></section>';
   }
 
@@ -673,7 +673,7 @@
       (sel.clue
         ? '<p class="clue-text">' + esc(sel.clue) + '</p>'
         : '<p class="hint">这个人的线索还是空的 —— 在「① 地图准备 → 添加人物线索」里可以手打/粘贴，' +
-          '也可以框选线索卡片让它自动读 ✓</p>') +
+     '也可以框选线索卡片让它自动读</p>') +
       (links ? '<div class="chips">' + links + '</div>' : '') +
       '</div>';
   }
@@ -698,8 +698,8 @@
           ' data-act="select-person" data-id="' + esc(p.id) + '" data-hover-person="' + esc(p.id) + '"' +
           ' style="--pc:' + esc(p.color) + '" title="' + esc(title) + '">' +
           '<span class="pl">' + esc(p.label) + '</span>' +
-          (at ? '<span class="pb ok" title="已确定">✓</span>'
-              : (cnt ? '<span class="pb" title="' + cnt + ' 个候选">' + cnt + '</span>' : '')) +
+     // 已确定的人**不再放角标** ✓：编号本身已经填成本人颜色 ✓（那个 ✓ 角标用户不要 ✓）
+     (at ? '' : (cnt ? '<span class="pb" title="' + cnt + ' 个候选">' + cnt + '</span>' : '')) +
           '</li>';
       }).join('') +
       '</ul>' +
@@ -860,7 +860,7 @@
     const Sn = window.MurdokuSnipper;
     const pins = (Sn && Sn.state && Sn.state.pins) || [];
     if (!pins.length) return null;
-    if (pins.length === 1) return legendCardRaster();          // 只有一张：原样 ✓
+  if (pins.length === 1) return legendCardRaster();     // 只有一张：原样
     const imgs = [];
     for (const pin of pins) {
       const img = new Image();
@@ -884,13 +884,13 @@
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, W, H);
     let y = gap;
-    const cuts = [];                        // 卡片之间的分割线（y ✓）→ 聚类时禁止跨线合块 ✓
-    const spans = [];                       // **每张卡在拼图里的 y 区间** ✓ → 线索"来自哪张卡" ✓
+  const cuts = [];            // 卡片之间的分割线（y）→ 聚类时禁止跨线合块
+  const spans = [];            // **每张卡在拼图里的 y 区间** → 线索"来自哪张卡"
     for (let i = 0; i < imgs.length; i++) {
       ctx.drawImage(imgs[i].img, 0, y, imgs[i].w, imgs[i].h);
       spans.push({ pin: pins[i] && pins[i].id, y0: y, y1: y + imgs[i].h, url: pins[i] && pins[i].url });
       y += imgs[i].h;
-      cuts.push(Math.round(y + gap / 2));    // 分割线取间隔中点 ✓
+   cuts.push(Math.round(y + gap / 2));  // 分割线取间隔中点
       y += gap;
     }
     const d = ctx.getImageData(0, 0, W, H);
@@ -1088,7 +1088,7 @@
         if (Math.abs(icx - ncx) > Math.max(icon.w * 0.55, nameH * 2)) icon = null;
         else if (icon.h < nameH * 1.3) icon = null;
       }
-      if (nm.shortCaps && !icon) continue;      // 短全大写（TV 这种）要有图标才算数 ✓
+   if (nm.shortCaps && !icon) continue;   // 短全大写（TV 这种）要有图标才算数
       // 归属分两步：
       // ① 先取"名字上方最近的一**行**说明"（把 y 相近的说明合成一行 —— car-repair 两个面板
       //    的说明就在同一行 ✓）；
@@ -1160,8 +1160,8 @@
         const cr = cardRectsForPage(raster);
         const rs = cr.rects;
         if (cr.bad) {
-          MH.toast('有 ' + cr.bad + ' 张卡片缺少位置信息（旧版本留下的 ✓），这次已忽略 —— ' +
-            '重新框一下这些卡片就能用 ✓', 'warn');
+     MH.toast('有 ' + cr.bad + ' 张卡片缺少位置信息（旧版本留下的），这次已忽略 —— ' +
+      '重新框一下这些卡片就能用', 'warn');
         }
         const inCard = (x, y) => !rs.length || rs.some(r => x >= r.x - 6 && x <= r.x + r.w + 6 && y >= r.y - 6 && y <= r.y + r.h + 6);
         const tc = await page.getTextContent();
@@ -1204,7 +1204,7 @@
           const have = new Set(words.map(w => keyOf(w.text) + '@' + Math.round(w.x) + ',' + Math.round(w.y)));
           for (const w of low) {
             const k = keyOf(w.text);
-            if (!k || !(known.has(k) || known.has(k.replace(/s$/, '')))) continue;   // 只捞"已知物品/区域名" ✓
+      if (!k || !(known.has(k) || known.has(k.replace(/s$/, '')))) continue;  // 只捞"已知物品/区域名"
             const sig = k + '@' + Math.round(w.x) + ',' + Math.round(w.y);
             if (have.has(sig)) continue;
             have.add(sig);
@@ -1214,7 +1214,7 @@
       }
       return words && words.length
         ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr',
-            cuts: raster.cuts || [], spans: raster.spans || [] }         // **卡片分割线 + 每张卡的范围** ✓
+      cuts: raster.cuts || [], spans: raster.spans || [] }     // **卡片分割线 + 每张卡的范围**
         : null;
     }
     return null;
@@ -1234,13 +1234,13 @@
     catch (err) { MH.toast('读不到卡片文字：' + err.message, 'error'); return; }
     if (!src || !src.items.length) {
       MH.toast(src && src.unmappedCards
-        ? '框的 ' + src.unmappedCards + ' 张卡片没能对应到这一页（换个页面/重新框一下 ✓）—— 这次不会读整页 ✗'
+    ? '框的 ' + src.unmappedCards + ' 张卡片没能对应到这一页（换个页面/重新框一下）—— 这次不会读整页 ✗'
         : '这张卡片上没有文字（PDF 文字层或截图都试过了）', 'warn');
       return;
     }
     if (src.wholePage) {
-      MH.toast('你还没框卡片 → 这次读的是**整页** ✓（卡片外的句子也会进来 ✓）；' +
-        '只想读某一块就先在主界面框住它 ✓', 'warn');
+   MH.toast('你还没框卡片 → 这次读的是**整页**（卡片外的句子也会进来）；' +
+    '只想读某一块就先在主界面框住它', 'warn');
     }
     let out;
     // **有卡片 → 照单全收** ✓（以用户的框为准 ✓）；整页回退 → 仍用严格判据 ✓
@@ -1257,10 +1257,10 @@
     const allPins = (Sn && Sn.pins) || [];
     (out.clues || []).forEach(c => {
       const cy = (c.y || 0) + 6;
-      if (src.spans && src.spans.length) {                       // OCR：拼图里的 y 区间 ✓
+   if (src.spans && src.spans.length) {            // OCR：拼图里的 y 区间
         const hit = src.spans.find(sp => cy >= sp.y0 - 4 && cy <= sp.y1 + 4);
         if (hit) { c.cardIndex = src.spans.indexOf(hit); c.cardUrl = hit.url || ''; }
-      } else if (allPins.length) {                               // PDF：看落在哪张卡片的矩形里 ✓
+   } else if (allPins.length) {                // PDF：看落在哪张卡片的矩形里
         const kx = 1, ky = 1;
         const hit = allPins.find(pin => {
           const x0 = pin.srcX * kx, y0 = pin.srcY * ky;
@@ -1270,7 +1270,7 @@
       }
     });
     const clues = setClueCandidates(out, src.via, out.names);
-    if (MH.ui.clueCands) MH.ui.clueCands.wholePage = !!src.wholePage;   // 面板上标明"整页" ✓
+  if (MH.ui.clueCands) MH.ui.clueCands.wholePage = !!src.wholePage;  // 面板上标明"整页"
     MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
   }
 
@@ -1316,7 +1316,7 @@
         const p = Core.person(st, c.personId);
         if (!p) { skipped++; continue; }
         const text = String(c.text || '').slice(0, 300);
-        p.clue = text;                                     // **整句都存** ✓（没解析出关联也存 ✓）
+    p.clue = text;                   // **整句都存**（没解析出关联也存）
         wrote++;
         // **在这里按"当前这段文字"重新解析关联** ✓（用户要求 ✓）
         // 理由：面板里的文字是**可编辑**的 ✓ —— 用户改过之后 ✓，
@@ -1357,10 +1357,10 @@
     void reparsed;
     MH.ui.clueCands = null;
     MH.render();
-    MH.toast('已应用：' + wrote + ' 人的线索（整句 ✓，关联按**当前文字**重新解析 ✓）' + (linked ? ' · ' + linked + ' 条关联' : '') +
-      (missing ? ' · ' + missing + ' 条没找到对应物品/区域（先建好再应用 ✓）' : '') +
+  MH.toast('已应用：' + wrote + ' 人的线索（整句，关联按**当前文字**重新解析）' + (linked ? ' · ' + linked + ' 条关联' : '') +
+   (missing ? ' · ' + missing + ' 条没找到对应物品/区域（先建好再应用）' : '') +
       (skipped ? ' · ' + skipped + ' 段跳过（未指定人或被忽略）' : '') +
-      '（"在…里"和"在旁边"都建关联，只作高亮提示 ✓）', 'ok');
+   '（"在…里"和"在旁边"都建关联，只作高亮提示）', 'ok');
   }
 
   /** 批量 OCR 一批框（失败就返回空串，不抛） */
@@ -1470,7 +1470,7 @@
     const claimed = new Set();
     st.items.forEach(it => it.cells.forEach(k => claimed.add(k)));
     const report = [];
-    let LAST_MS = 0;                                // 上一件耗时（显示在进度提示里，便于看慢在哪 ✓）
+  let LAST_MS = 0;                // 上一件耗时（显示在进度提示里，便于看慢在哪）
     const yieldFrame = () => new Promise(r => setTimeout(r, 0));
     MH.ui.locating = true;
     MH.ui.locateCancel = false;
@@ -1495,7 +1495,7 @@
       // 把握不足就别乱填：宁可留空让用户手标，也不要给一堆错格子 ✗
       // （实测：大而高对比的物品峰值 ~0.64 且位置正确；找不准的物品峰值只有 ~0.5，
       //   勉强填出来的格子基本都是错的）
-      const peak = res.stats ? res.stats.maxScore : 0;   // 早退（把握不足）时也带峰值 ✓
+   const peak = res.stats ? res.stats.maxScore : 0;  // 早退（把握不足）时也带峰值
       if (res.ok && (peak < 0.55 || res.cells.length > 10)) {
         LAST_MS = Date.now() - tIt;
         report.push({ name: it.name, hits: 0, ms: LAST_MS, scale: res.stats.scale, peak,
@@ -1566,7 +1566,7 @@
           const crPage = cardRectsForPage(out.raster);
           const rects = crPage.rects;
           if (crPage.bad) {
-            MH.toast('有 ' + crPage.bad + ' 张卡片缺少位置信息（旧版本留下的 ✓），这次已忽略', 'warn');
+      MH.toast('有 ' + crPage.bad + ' 张卡片缺少位置信息（旧版本留下的），这次已忽略', 'warn');
           }
           // **用户框了什么，就只保留框里的** ✓ —— 在进入"按卡片解析"的分支之前就要做 ✓
           // （`readLegendByPdf` 在"图例没有文字名"时是按**整页**做行列切分的 ✗，
@@ -1592,8 +1592,8 @@
             // kept 为空 → 保底生效 → 等于**什么都没滤** ✗ → 框外的 ROW 照旧进来 ✗、
             // 而框里真正的可占据物品一件也没有 ✗（整页切分压根没切到那一组 ✓）
             mark('按卡片筛', out.items.length + '→' + kept.length);
-            MH.toast('按你框的卡片筛掉了 ' + (out.items.length - kept.length) + ' 件框外的图例 ✓' +
-              (kept.length ? '' : '（框里没切出物品 → 改用"按卡片切分" ✓）'), 'ok');
+      MH.toast('按你框的卡片筛掉了 ' + (out.items.length - kept.length) + ' 件框外的图例' +
+       (kept.length ? '' : '（框里没切出物品 → 改用"按卡片切分"）'), 'ok');
             out = Object.assign({}, out, { items: kept });
           }
           const whole = out;                       // 整页结果留作最后的兜底
@@ -1630,13 +1630,13 @@
               via = 'pdf+card';
               // 卡片里比整页少很多时不静默 ✗：告诉用户可以放大框 ✓
               if (wholeInCard.items.length > restricted.items.length + 1) {
-                MH.toast('卡片里解析出 ' + restricted.items.length + ' 件 ✓（按整页筛能到 ' +
-                  wholeInCard.items.length + ' 件）—— 想多要几件就把框放大一点 ✓', 'ok');
+        MH.toast('卡片里解析出 ' + restricted.items.length + ' 件（按整页筛能到 ' +
+         wholeInCard.items.length + ' 件）—— 想多要几件就把框放大一点', 'ok');
               }
             } else if (wholeInCard.items.length >= 2) {
               out = wholeInCard;
               via = 'pdf+card';
-              MH.toast('卡片里没切出成件的图例（框太小或框偏了？）→ 改用"整页解析 + 按卡片筛" ✓', 'warn');
+       MH.toast('卡片里没切出成件的图例（框太小或框偏了？）→ 改用"整页解析 + 按卡片筛"', 'warn');
             } else if (whole.items.length >= 2) {
               // 卡片里实在没有成件的图例 → 用整页并提示 ✓
               MH.toast('卡片框里没找到成件的图例（框太小或框偏了？）→ 已按整页列出', 'warn');
@@ -2058,7 +2058,7 @@
       if (!hasOwn) {
         try {
           Sn.loadFile(file);
-          MH.toast('右侧卡片也用这份文件了 ✓ 不用再导入一次', 'ok');
+     MH.toast('右侧卡片也用这份文件了 不用再导入一次', 'ok');
         } catch (err) { void err; }
       } else {
         MH.toast('右侧卡片仍是你之前导入的那份（要换的话点它右上角的导入按钮）', 'warn');
@@ -2384,7 +2384,7 @@
     const b = st.bg;
     L.push('底图：' + b.name + ' · ' + b.kind + ' · ' + b.w + '×' + b.h +
       (b.kind === 'pdf' ? '（第 ' + b.page + '/' + b.pages + ' 页）' : ''));
-    L.push('已对位（bound）：' + (b.bound ? '是 ✓' : '**否 ✗**'));
+  L.push('已对位（bound）：' + (b.bound ? '是' : '**否 ✗**'));
     if (!b.bound) {
       L.push('  → 这一步没做，点「自动识别区域」只会提示、不会动手。两条路任选：');
       L.push('    ① 点「▭ 框地图外框」，拖一个矩形正好圈住地图（最快，自动算格距）');
@@ -2396,7 +2396,7 @@
     try { geo = await regionGeometry(); } catch (err) { L.push('几何换算失败：' + err.message); }
     if (geo) {
       const ratio = gridOnBg(geo);
-      L.push('网格压在底图上的比例：' + (ratio * 100).toFixed(0) + '%' + (ratio < 0.6 ? ' ✗（要 ≥60%，说明网格基本不在图上）' : ' ✓'));
+   L.push('网格压在底图上的比例：' + (ratio * 100).toFixed(0) + '%' + (ratio < 0.6 ? ' ✗（要 ≥60%，说明网格基本不在图上）' : ''));
       L.push('格距（原图像素）：' + geo.geom.pitchX.toFixed(1) + ' × ' + geo.geom.pitchY.toFixed(1) +
         (Math.min(geo.geom.pitchX, geo.geom.pitchY) < 6 ? ' ✗（太小了，行列数是不是填多了？）' : ''));
       const cached = readLabelCache(st) || [];          // 与 resolveLabels 一致：不按框二次过滤
@@ -2407,7 +2407,7 @@
       L.push('  · 本地缓存：' + (cached.length ? cached.length + ' 个（其中种子 ' + cachedSeeds + ' 个' +
         (cachedSeeds < 2 ? ' → 不够 2 个，会被忽略、改用下面的来源' : '') + '）' : '无'));
       L.push('  · PDF 文字层句柄：' + (MH.bgPdfFile ? '有（会优先用它）' : '无（没选过 PDF 文件）'));
-      L.push('  · 截图标签徽章：' + (badges.length ? badges.length + ' 个 ✓（会自动 OCR 读名字）' : '没找到 ✗（区域名不是"白底黑字药丸"样式？）'));
+   L.push(' · 截图标签徽章：' + (badges.length ? badges.length + ' 个（会自动 OCR 读名字）' : '没找到 ✗（区域名不是"白底黑字药丸"样式？）'));
       const seeds = L2 ? L2.labelsToSeeds(cached, geo.geom) : [];
       L.push('种子（用于分区的定位点）：' + (seeds.length || badges.length) + ' 个' +
         ((seeds.length || badges.length) >= 2 ? '' : ' ✗（少于 2 个就只能靠颜色自适应，结果会很碎）'));
@@ -2419,7 +2419,7 @@
           : R2.detectRegions(geo.raster, geo.geom, badges.length >= 2
             ? { seeds: L2.labelsToSeeds(badges.map((bd, i) => ({ name: '区域 ' + (i + 1), x: bd.x + bd.w / 2, y: bd.y + bd.h / 2 })), geo.geom) }
             : {});
-        L.push('识别内核试跑：' + (dry.ok ? 'ok ✓' : '失败 ✗ 原因：' + (dry.reason || '未知')));
+    L.push('识别内核试跑：' + (dry.ok ? 'ok' : '失败 ✗ 原因：' + (dry.reason || '未知')));
         if (dry.ok) {
           L.push('  会分出 ' + dry.regions.length + ' 个候选区域，覆盖 ' + dry.stats.sampled + '/' + (st.cols * st.rows) +
             ' 格 · ' + (Date.now() - t0) + 'ms' + (dry.stats.picked ? ' · 选中 ' + dry.stats.picked : ''));
@@ -2804,8 +2804,8 @@
     'wiz-exit'() { MH.ui.wizard = null; MH.render(); },
     'wiz-go'(el) {
       const v = Number(el.dataset.v);
-      const from = MH.ui.wizard;                        // 从哪一步离开 ✓（按来源判断 ✓）
-      const leaving = (v > WIZ_STEPS.length || v < 1);   // 第 4 步再点"完成" ✓
+   const from = MH.ui.wizard;            // 从哪一步离开（按来源判断）
+   const leaving = (v > WIZ_STEPS.length || v < 1);  // 第 4 步再点"完成"
       // ① 离开第 1 步就**自动退出"对齐底图"模式** ✓ —— 免得在后面的步骤里误拖动网格 ✓
       //    同时要**记下这次对齐** ✓，否则第 2 步"自动识别区域"会报"底图未对齐" ✗（实测踩过）
       if (from === 1 && v !== 1) exitAligning();
@@ -2816,7 +2816,7 @@
         if (leaving || v !== home) {
           const what = MH.ui.draft.kind === 'region' ? '区域' : '物品';
           MH.ui.draft = null;
-          MH.toast('已退出' + what + '编辑（没保存的草稿已放弃 ✓）', 'warn');
+     MH.toast('已退出' + what + '编辑（没保存的草稿已放弃）', 'warn');
         }
       }
       MH.ui.wizard = leaving ? null : v;
@@ -2830,7 +2830,7 @@
       MH.render();
       if (leaving) {
         // 引导的收尾 = 去游玩 ✓（准备阶段只有引导这一套界面 ✓，想回来改点顶部「① 地图准备」即可 ✓）
-        MH.toast('引导完成 ✓ 已进入「② 游玩」（想改准备内容就点顶部「① 地图准备」✓）', 'ok');
+    MH.toast('引导完成 已进入「② 游玩」（想改准备内容就点顶部「① 地图准备」）', 'ok');
         const tab = document.getElementById('tabPlay');
         if (tab) tab.click();
       }
@@ -2849,7 +2849,7 @@
         const sel = layer.querySelector('.bc-sel');
         if (sel) sel.hidden = true;
         if (!im) return;
-        im.src = Sn.state.img ? Sn.state.img.src : '';       // 换成新一页的图 ✓
+    im.src = Sn.state.img ? Sn.state.img.src : '';    // 换成新一页的图
         if (title) {
           title.textContent = (MH.ui.crop && MH.ui.crop.kind === 'item' ? '框选物品图例' : '框选人物线索卡片') +
             '（第 ' + Sn.state.page + ' / ' + Sn.state.pages + ' 页）';
@@ -2903,7 +2903,7 @@
       MH.render();
       MH.toast('已只保留最大的连通块', 'ok');
     },
-    'rename-person'(el) { MH.ui.renaming = el.dataset.id; MH.render(); },   // 界面内编辑 ✓
+  'rename-person'(el) { MH.ui.renaming = el.dataset.id; MH.render(); },  // 界面内编辑
     'rename-cancel'() { MH.ui.renaming = null; MH.render(); },
     'color-region'(el) { cycleColor('region', el.dataset.id); },
     'color-item'(el) { cycleColor('item', el.dataset.id); },
@@ -3050,7 +3050,7 @@
       MH.ui.lastLegend = null;
       MH.ui.clueCands = null;
       MH.store.replace(Core.createState(st.rows, st.cols), '重置地图');
-      MH.toast('已重置：地图 + 右侧卡片 + 导入的页面 ✓', 'ok');
+   MH.toast('已重置：地图 + 右侧卡片 + 导入的页面', 'ok');
     },
     help() { MH.openModal('helpModal'); },
     'close-modal'(el) { MH.closeModal(el.dataset.modal); },
@@ -3167,7 +3167,7 @@
     if (t.dataset && t.dataset.act === 'clue-text') {
       const cc = MH.ui.clueCands;
       const i = Number(t.dataset.i);
-      if (cc && cc.clues[i]) cc.clues[i].text = t.value;      // 不重绘，避免光标跳 ✓
+   if (cc && cc.clues[i]) cc.clues[i].text = t.value;   // 不重绘，避免光标跳
       return;
     }
     if (t.dataset && t.dataset.act === 'person-clue') {
@@ -3219,7 +3219,7 @@
         MH.store.commit('写人物线索', st => { const p3 = Core.person(st, pid); if (p3) p3.clue = v; });
       }
     } else if (t.dataset && t.dataset.act === 'rename-input') {
-      renamePerson(t.dataset.id, String(t.value || '').trim());      // 失焦（change）即保存 ✓
+   renamePerson(t.dataset.id, String(t.value || '').trim());   // 失焦（change）即保存
     } else if (t.dataset && t.dataset.act === 'clue-text') {
       // **不重绘** ✗→✓：输入框失焦时的 change 若触发 render，会把按钮也换掉，
       // 紧接着的点击就落在被替换的节点上 → 点了没反应 ✓（实测踩过）
@@ -3428,7 +3428,7 @@
       document.addEventListener('input', onDocumentInput);
       document.addEventListener('change', onDocumentChange);
       document.addEventListener('focusin', onDocumentFocusIn);
-      document.addEventListener('mouseover', onCardPeek);      // 悬停缩略图 → 右边浮出大图 ✓
+   document.addEventListener('mouseover', onCardPeek);   // 悬停缩略图 → 右边浮出大图
       document.addEventListener('mouseout', onCardPeekOut);
       const sidebar = MH.els.sidebar;
       sidebar.addEventListener('pointermove', onSidebarHover);
@@ -3487,7 +3487,7 @@
           next.focus();
           try {
             if (keep.start != null && next.setSelectionRange) next.setSelectionRange(keep.start, keep.end);
-          } catch (err) { /* 非文本控件忽略 ✓ */ }
+     } catch (err) { /* 非文本控件忽略 */ }
         }
       }
       syncChrome(st);
@@ -3522,7 +3522,7 @@
     clueRead: () => guard(runClueRead)(),
     clueApply: () => applyClueCands(),
     setClueCandidates: (out, via, names) => setClueCandidates(out, via, names),
-    cardsRaster: () => cardsRaster(),      // 给探针/测试：把多张卡片拼成一张 ✓
+  cardsRaster: () => cardsRaster(),   // 给探针/测试：把多张卡片拼成一张
     /** 用图例图标逐件到地图上找地点 */
     legendLocate: () => guard(locateLegendItems)(),
   };

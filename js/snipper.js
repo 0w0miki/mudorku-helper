@@ -411,7 +411,7 @@
     // **坐标必须是有限数** ✓ —— 否则会生成一张 srcX=NaN 的卡片 ✓：
     // 它看起来存在 ✓，但映射回页面时恒不匹配 ✗（静默失效 ✓，实测踩过 ✓）
     if (![sx, sy, sw, sh].every(v => Number.isFinite(v))) {
-      toast('框选坐标异常，这次没有生成卡片 —— 再拖一次 ✓', 'error');
+   toast('框选坐标异常，这次没有生成卡片 —— 再拖一次', 'error');
       return null;
     }
     const x = Math.max(0, Math.min(Math.round(sx), img.naturalWidth - 1));
@@ -448,7 +448,7 @@
     const o = opts || {};
     S.pins = [];
     if (o.file !== false) { S.file = null; S.img = null; S.pages = 1; S.page = 1; S.doc = null; }
-    try { root.localStorage.removeItem(PINS_KEY); } catch (e) { /* 隐私模式忽略 ✓ */ }
+  try { root.localStorage.removeItem(PINS_KEY); } catch (e) { /* 隐私模式忽略 */ }
     savePins();
     S.collapsed = true;
     saveUi();

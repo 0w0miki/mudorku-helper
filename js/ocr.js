@@ -127,10 +127,10 @@
     const { M, api } = await ready(opt.onStatus);
     // **大区域要分块**：整幅放大 5 倍会超过 OCR 能处理的尺寸，结果会被悄悄截断 ✗
     // （真实图例截图 1210×772 时就漏掉了整组名字）。分块后每块也更容易识别小字 ✓
-    const maxSide = opt.maxTile || 300;   // 放 5 倍后 1500px，稳在 OCR 的舒适区 ✓
+  const maxSide = opt.maxTile || 300;  // 放 5 倍后 1500px，稳在 OCR 的舒适区
     if (box.w > maxSide * 1.6 || box.h > maxSide * 1.6) {
       const parts = [];
-      const step = Math.round(maxSide * 0.72);                // 28% 重叠：每个词至少完整落在某一块里 ✓
+   const step = Math.round(maxSide * 0.72);        // 28% 重叠：每个词至少完整落在某一块里
       for (let y = box.y; y < box.y + box.h; y += step) {
         for (let x = box.x; x < box.x + box.w; x += step) {
           const tw = Math.min(maxSide, box.x + box.w - x);

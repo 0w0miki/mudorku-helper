@@ -573,7 +573,6 @@ button.occ.blocked { border-color: #fecaca; background: #fef2f2; color: #b91c1c;
   background: #64748b; color: #fff;
   font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
 }
-.plist li .pb.ok { background: var(--pos); }
 
 /* 当前人物：详情与操作只给选中的那一个，避免每人两按钮把列表撑成两倍高 */
 .pnow {

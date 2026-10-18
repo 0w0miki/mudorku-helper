@@ -235,7 +235,7 @@
         label: labelFor(i, n),
         color: PERSON_COLORS[i % PERSON_COLORS.length],
         links: [], // {kind:'region'|'item', id, polarity:1|-1}
-        clue: '',  // 题目里这个人的说明原文（从 PDF 文字层/OCR 读出来 ✓；用于游玩时对照 ✓）
+    clue: '', // 题目里这个人的说明原文（从 PDF 文字层/OCR 读出来；用于游玩时对照）
       });
     }
     return {

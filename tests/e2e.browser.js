@@ -606,7 +606,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       clearBtns: document.querySelectorAll('[data-act="clear-person"]').length,
       badgeA: cells[0].querySelector('.pb') ? cells[0].querySelector('.pb').textContent : null,
       placedCount: cells.filter(c => c.classList.contains('placed')).length,
-      placedOk: cells.filter(c => c.classList.contains('placed')).every(c => c.querySelector('.pb') && c.querySelector('.pb').textContent === '✓'),
+      // 已确定的人不再有 ✓ 角标 ✓ → 判据改成"placed 且没有角标" ✓
+      placedOk: cells.filter(c => c.classList.contains('placed')).every(c => !c.querySelector('.pb')),
       lastLabel: cells[cells.length - 1].querySelector('.pl').textContent,
       now: document.querySelector('.pnow') ? document.querySelector('.pnow').textContent.replace(/\s+/g, ' ').trim() : '',
     };
@@ -616,7 +617,7 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(grid.h < 260, '人物区高度受控：' + grid.h + 'px（旧版一行一个 ≈ 700px+）');
   ok(grid.clearBtns === 1, '清除等操作只保留当前人物一份：' + grid.clearBtns);
   ok(grid.badgeA === '2', '有候选的人带数量角标：A=' + grid.badgeA);
-  ok(grid.placedCount === 1 && grid.placedOk, '已确定的人填本人颜色并带 ✓');
+  ok(grid.placedCount === 1 && grid.placedOk, '已确定的人填本人颜色（不再带 ✓ 角标）');
   await p.click('.plist li:nth-child(6)');
   await p.waitForTimeout(200);
   const nowRow = await p.evaluate(() => ({

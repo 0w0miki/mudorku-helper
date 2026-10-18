@@ -1441,7 +1441,8 @@ test('游玩模式：网格角标显示候选数，已确定的人填本人颜�
   assert.equal(cellB.querySelector('.pb').textContent, '1', 'B 有 1 个候选');
   assert.equal(q(doc, '.plist li:nth-child(3) .pb'), null, '没标注的人没有角标');
   assert.ok(cellF.classList.contains('placed'), 'F 已确定');
-  assert.equal(cellF.querySelector('.pb').textContent, '✓', '已确定显示 ✓');
+  assert.equal(cellF.querySelector('.pb'), null, '已确定的人不再显示角标（编号本身填本人颜色 ✓）');
+  assert.ok(cellF.classList.contains('placed'), '已确定的人有 placed 样式 ✓');
   assert.equal(cellF.style.getPropertyValue('--pc'), st.people[5].color, '填成本人颜色');
   dom.window.close();
 });
