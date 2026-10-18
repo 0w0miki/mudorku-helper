@@ -207,7 +207,7 @@
         '<h2>底图 <span class="muted">图片 / PDF 衬在网格下方</span></h2>' +
         '<button class="ghost block" data-act="bg-import" ' + (MH.ui.bgBusy ? 'disabled' : '') + '>' +
         (MH.ui.bgBusy ? '正在解析…' : '＋ 导入图片或 PDF') + '</button>' +
-        '<p class="hint">导入后会出现一个衬在网格下方的底图；打开「对齐底图」就能拖动网格、拖右下角手柄缩放，把它对准底图上的地图。</p>' +
+        '<p class="hint">导入后会出现一个衬在网格下方的底图；框完外框若还差一点，点「✥ 拖动对齐」手动微调：拖动移动网格、拖右下角手柄缩放，把它对准底图上的地图。</p>' +
         '</section>';
     }
     return '<section class="card">' +
@@ -275,11 +275,17 @@
     const pct = pctOf;
     return '<section class="card">' +
       '<h2>对齐网格 <span class="muted">框地图外框 · 再微调</span></h2>' +
+      // 两个同类操作**并排** ✓（框外框 / 手动微调 ✓）
       '<div class="row wrap">' +
       '<button class="ghost sm" data-act="bg-region" title="拖动矩形，正好圈住地图外框；再用当前行列数算出格距与偏移">▭ 框地图外框</button>' +
+      '<button class="' + (MH.ui.aligning ? 'primary sm' : 'ghost sm') + '" data-act="bg-align"' +
+      ' title="拖动被对齐的网格：移动 · 右下角手柄缩放 · 方向键微调；再点一次「完成对齐」记下这次对齐">' +
+      (MH.ui.aligning ? '✓ 完成对齐' : '✥ 拖动对齐') + '</button>' +
       (MH.ui.alignInfo ? '<span class="meta">' + esc(MH.ui.alignInfo) + '</span>' : '') +
       '</div>' +
-      '<label class="check"><input type="checkbox" data-act="bg-align" ' + (MH.ui.aligning ? 'checked' : '') + '> <b>对齐底图</b>（拖动移动网格 · 拖右下角手柄缩放 · 方向键微调）</label>' +
+      '<p class="hint">' + (MH.ui.aligning
+        ? '拖动棋盘移动网格 · 拖右下角手柄缩放 · 方向键微调 ✓ 对准后点「完成对齐」记下这次对齐 ✓'
+        : '框外框对不准时，用「✥ 拖动对齐」手动微调 ✓') + '</p>' +
       (MH.ui.aligning
         ? '<div class="row wrap"><span class="meta">网格偏移 ' + (st.grid ? st.grid.x : 0) + ', ' + (st.grid ? st.grid.y : 0) + ' px</span>' +
           '<span class="grow"></span><button class="ghost sm" data-act="bg-reset">网格归位</button></div>'
@@ -565,7 +571,7 @@
             (MH.ui.ocrBusy ? '🔍 正在识别（读区域名…）' : '🔍 自动识别区域') + '</button>' +
           '<p class="hint">PDF 读文字层；截图自动找区域名标签（白底药丸 + 黑描边 + 黑字）并用内置 OCR 读名字。名字读错点列表里的「改名」即可。</p>' +
           (MH.store.state.bg && !MH.store.state.bg.bound
-            ? '<p class="hint warn">还差一步：底图还没对位（点「自动识别区域」只会提示）。先点「▭ 框地图外框」圈住地图，或勾「对齐底图」手动对准后退出。</p>'
+            ? '<p class="hint warn">还差一步：底图还没对位（点「自动识别区域」只会提示）。先点「▭ 框地图外框」圈住地图，或用「✥ 拖动对齐」手动对准后点「完成对齐」。</p>'
             : '') +
           '<button class="ghost block" data-act="check-regions" title="点不出结果时先点这个：报告对位、网格位置、区域名来源、种子数，并让识别内核试跑一次（不改动任何数据）">🩺 识别自检</button>' +
           (readLabelCache(MH.store.state)
@@ -2059,7 +2065,7 @@
       }
     }
     if (save && save.ok === false) MH.toast(save.message, 'warn');
-    else MH.toast('底图已导入，打开「对齐底图」把它和网格对上', 'ok');
+    else MH.toast('底图已导入 → 先「▭ 框地图外框」圈住地图（不准再「✥ 拖动对齐」微调）', 'ok');
   }
 
   /** 让底图恰好铺满可视区域 */
@@ -2199,7 +2205,7 @@
   function requireAligned(st) {
     if (!st.bg.bound) {
       MH.toast('底图还没对位（区域卡里点「🩺 识别自检」能看到细节）：' +
-        '① 点「▭ 框地图外框」拖一个矩形圈住地图，或 ② 勾「对齐底图」手动对准后退出', 'warn');
+        '① 点「▭ 框地图外框」拖一个矩形圈住地图，或 ② 用「✥ 拖动对齐」手动对准后点「完成对齐」', 'warn');
       return false;
     }
     return true;
@@ -2382,7 +2388,7 @@
     if (!b.bound) {
       L.push('  → 这一步没做，点「自动识别区域」只会提示、不会动手。两条路任选：');
       L.push('    ① 点「▭ 框地图外框」，拖一个矩形正好圈住地图（最快，自动算格距）');
-      L.push('    ② 勾「对齐底图」手动把网格拖准 → **退出对齐模式即自动记录对位**');
+      L.push('    ② 点「✥ 拖动对齐」把网格拖准 → 点「完成对齐」即自动记录对位');
     }
     L.push('网格：' + st.cols + '×' + st.rows + ' · 每格 ' + st.settings.cellSize + 'px · 底图缩放 ' +
       Math.round(b.scale * 1000) / 10 + '% · 偏移 (' + (st.grid ? st.grid.x : 0) + ',' + (st.grid ? st.grid.y : 0) + ')');
