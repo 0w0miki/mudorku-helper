@@ -445,3 +445,15 @@ test('卡片模式（permissive）：以用户的框为准 ✓ —— 没有主�
   const junk = C.readCardItems([{ text: 'Rule: One person per Row and Column', x: 0, y: 0, w: 200, h: 20 }], names);
   assert.equal(junk.clues.length, 0, '规则文字仍被排除 ✓');
 });
+
+test('从线索文字推断性别 ✓（he/his → 男；she/her → 女；都有或都没有 → 未知）', () => {
+  assert.equal(C.sexOf('She was beside a shelf .'), 'f');
+  assert.equal(C.sexOf('He was in a car .'), 'm');
+  assert.equal(C.sexOf('The Victim. He was alone with the murderer.'), 'm');
+  assert.equal(C.sexOf('I didn’t do it!'), '', '没有人称代词 → 未知 ✓');
+  assert.equal(C.sexOf('She was with him .'), '', '两者都有 → 未知 ✓（交给用户）');
+  // extract 产出的候选行要带 sex ✓
+  const out = C.extract([{ text: 'He was beside a shelf .', x: 0, y: 100, h: 12, w: 200 }],
+    [{ name: 'Shelf', kind: 'item' }]);
+  assert.equal(out.clues[0].sex, 'm');
+});

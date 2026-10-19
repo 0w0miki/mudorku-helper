@@ -108,6 +108,14 @@
         : '<span class="grow"></span>' +
           '<button class="ghost sm" data-act="rename-person" data-id="' + esc(p.id) + '" title="修改这个人的编号（1–4 个字符，不含 X）">改名</button>') +
       '</div>' +
+      // ①.5 性别 ✓（识别时按 he/she 自动判断 ✓，这里可手动改 ✓；游玩时显示在格子里 ✓）
+      '<div class="row center sex-row"><span class="muted">性别</span>' +
+      [['m', '♂ 男'], ['f', '♀ 女'], ['', '未知']].map(([v, lab]) =>
+        '<button class="ghost sm' + ((p.sex || '') === v ? ' active' : '') + '"' +
+        ' data-act="person-sex" data-id="' + esc(p.id) + '" data-sex="' + v + '"' +
+        ' title="' + (v === 'm' ? '男性：游玩时格子里显示 ♂' : v === 'f' ? '女性：游玩时格子里显示 ♀' : '未知：不显示符号') + '">' +
+        lab + '</button>').join('') +
+      '</div>' +
       // ② **线索紧跟在改名下面** ✓（用户要求；它是这个人的属性 ✓）
    '<label class="field">' + esc(p.label) + ' 的线索（可手工输入 / 粘贴 识别出来的也能在这里改）' +
       '<textarea id="personClue" data-act="person-clue" data-id="' + esc(p.id) + '" rows="2" ' +
@@ -1319,6 +1327,8 @@
         if (!p) { skipped++; continue; }
         const text = String(c.text || '').slice(0, 300);
     p.clue = text;                   // **整句都存**（没解析出关联也存）
+        // 识别到的性别只在"用户还没设置"时带上 ✓（不覆盖手动设置 ✓）
+        if (!p.sex && (c.sex === 'm' || c.sex === 'f')) p.sex = c.sex;
         wrote++;
         // **在这里按"当前这段文字"重新解析关联** ✓（用户要求 ✓）
         // 理由：面板里的文字是**可编辑**的 ✓ —— 用户改过之后 ✓，
@@ -2907,6 +2917,19 @@
     },
   'rename-person'(el) { MH.ui.renaming = el.dataset.id; MH.render(); },  // 界面内编辑
     'rename-cancel'() { MH.ui.renaming = null; MH.render(); },
+    // 性别 ✓（识别时按 he/she 自动判断 ✓，这里可手动改 ✓；游玩时显示在格子里 ✓）
+    'person-sex'(el) {
+      const pid = el.dataset.id, sex = el.dataset.sex || '';
+      const res = MH.store.commit('设置性别', s2 => {
+        const p2 = Core.person(s2, pid);
+        if (!p2) return { ok: false };
+        p2.sex = (sex === 'm' || sex === 'f') ? sex : '';
+        return { ok: true };
+      });
+      if (res && res.ok !== false) {
+        MH.toast(sex === 'm' ? '已标为 ♂ 男' : sex === 'f' ? '已标为 ♀ 女' : '性别：未知', 'ok');
+      }
+    },
     'color-region'(el) { cycleColor('region', el.dataset.id); },
     'color-item'(el) { cycleColor('item', el.dataset.id); },
     'del-region'(el) { deleteEntity('region', el.dataset.id); },

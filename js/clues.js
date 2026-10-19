@@ -605,6 +605,20 @@
   }
 
   /**
+   * 从线索文字推断性别 ✓（题面普遍是 "He was…" / "She was…" ✓）
+   * 代词计数取多数 ✓；两者都有/都没有 → ''（未知 ✓，交给用户）
+   */
+  function sexOf(text) {
+    const t = norm(text);
+    if (!t) return '';
+    const m = (t.match(/\b(?:he|his|him|himself)\b/gi) || []).length;
+    const f = (t.match(/\b(?:she|her|hers|herself)\b/gi) || []).length;
+    if (m > f) return 'm';
+    if (f > m) return 'f';
+    return '';
+  }
+
+  /**
    * 这段文字**像不像线索陈述**（不要求里面有物品/区域 ✓）
    * 用户要求："整句都记录下来，不管有没有发现物品和区域的关联" ✓
    * —— 所以这里只挡"规则文字/署名/没有主语的碎片" ✓，其余（含"受害者说明"这类 ✓）都留下 ✓
@@ -722,10 +736,10 @@
         const bad = NOT_CLUE.some(re => re.test(body)) ||
           letters(body).length < 6 ||
           /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body);
-        if (!bad) rows.push({ text: whole, person: null, x: bx, y: by, links, block: b });
+        if (!bad) rows.push({ text: whole, person: null, x: bx, y: by, links, block: b, sex: sexOf(whole) });
         else skipped.push({ text: whole, reason: bad === true ? '规则/署名/残句' : '太短' });
       } else if (looksLikeClueStatement(whole)) {
-        rows.push({ text: whole, person: null, x: bx, y: by, links, block: b });
+        rows.push({ text: whole, person: null, x: bx, y: by, links, block: b, sex: sexOf(whole) });
       } else {
         skipped.push({ text: whole, reason: links.length ? '有主语但要清理' : '规则文字/署名/没有主语' });
       }
@@ -825,7 +839,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, clauseLinks, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readCardItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, clauseLinks, sexOf, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readCardItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

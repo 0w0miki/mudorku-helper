@@ -235,7 +235,8 @@
         label: labelFor(i, n),
         color: PERSON_COLORS[i % PERSON_COLORS.length],
         links: [], // {kind:'region'|'item', id, polarity:1|-1}
-    clue: '', // 题目里这个人的说明原文（从 PDF 文字层/OCR 读出来；用于游玩时对照）
+        clue: '', // 题目里这个人的说明原文（从 PDF 文字层/OCR 读出来；用于游玩时对照）
+        sex: '',  // 'm' | 'f' | ''（未知）—— 从线索的 he/she 推断 ✓，用户可改 ✓
       });
     }
     return {
@@ -1230,6 +1231,7 @@
         p.label = takeLabel(src.label, p.label);
         usedLabels.add(p.label);
         p.clue = String(src.clue || '').slice(0, 300);
+        p.sex = (src.sex === 'm' || src.sex === 'f') ? src.sex : '';
         if (Array.isArray(src.links)) {
           p.links = src.links
             .filter(l => l && (l.kind === 'region' || l.kind === 'item') && l.id)

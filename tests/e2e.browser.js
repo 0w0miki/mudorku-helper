@@ -2283,6 +2283,57 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '「在旁边」现在也会建关联 ✓（beside→water ✓）：' + JSON.stringify(besideRes));
   await p.evaluate(() => { window.MH.ui.wizardOptOut = true; window.MH.ui.wizard = null; window.MH.render(); });
 
+  // 60) 性别：识别→面板可改→应用带入→游玩格子里显示 ♂/♀ ✓
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = false;
+    window.MH.ui.wizard = 4;
+    const st = window.MH.store.state;
+    st.selectedPersonId = st.people[0].id;
+    window.MH.render();
+  });
+  const sexBtns = await p.evaluate(() => [...document.querySelectorAll('[data-act="person-sex"]')].map(b2 => b2.dataset.sex));
+  ok(sexBtns.join(',') === 'm,f,', '人物卡片里有性别按钮（男/女/未知）✓：' + JSON.stringify(sexBtns));
+  await p.evaluate(() => document.querySelector('[data-act="person-sex"][data-sex="f"]').click());
+  await p.waitForTimeout(150);
+  ok(await p.evaluate(() => window.MH.store.state.people[0].sex === 'f'), '点「♀ 女」后状态里 sex=f ✓');
+  // 应用线索时把识别到的性别带入（且不覆盖手动设置的 ✓）
+  const sexPids = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    st.people[1].sex = '';                              // B 未设置 ✓
+    window.MH.panels.setClueCandidates({ clues: [
+      { text: 'He was in a car .', person: null, personId: st.people[1].id, sex: 'm', links: [] },
+      { text: 'She was beside a shelf .', person: null, personId: st.people[0].id, sex: 'f', links: [] },
+    ] }, 'ocr', []);
+    window.MH.render();
+    return [st.people[0].id, st.people[1].id];
+  });
+  await p.evaluate(() => document.querySelector('[data-act="clue-apply"]').click());
+  await p.waitForTimeout(200);
+  const sexApplied = await p.evaluate((pids) => {
+    const st = window.MH.store.state;
+    return { a: (st.people.find(x => x.id === pids[0]) || {}).sex, b: (st.people.find(x => x.id === pids[1]) || {}).sex };
+  }, sexPids);
+  ok(sexApplied.b === 'm' && sexApplied.a === 'f',
+    '应用线索带入性别 ✓（B 未设置→m；A 手动设为 f 不被覆盖 ✓）：' + JSON.stringify(sexApplied));
+  // 游玩：格子里显示 ♂/♀ ✓
+  await p.evaluate((pids) => {
+    const st = window.MH.store.state;
+    st.play.placed[pids[0]] = '0,0';
+    st.play.placed[pids[1]] = '0,1';
+    window.MH.ui.wizard = null; window.MH.ui.wizardOptOut = true;
+    window.MH.render();
+  }, sexPids);
+  await p.click('#tabPlay');
+  const cellSex = await p.evaluate(() => ({
+    a: (document.querySelector('.cell[data-k="0,0"] .sex-mark') || {}).textContent,
+    b: (document.querySelector('.cell[data-k="0,1"] .sex-mark') || {}).textContent,
+  }));
+  ok(cellSex.a === '♀' && cellSex.b === '♂',
+    '游玩格子里显示 ♂/♀ ✓：' + JSON.stringify(cellSex));
+  await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
+
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);
   console.log('页面错误: ' + JSON.stringify(errs));

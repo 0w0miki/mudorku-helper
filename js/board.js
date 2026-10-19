@@ -359,8 +359,11 @@
       const pid = Core.personAt(st, k);
       if (pid) {
         const p = Core.person(st, pid);
+        // **性别符号 ♂/♀** ✓（用户要求：游玩时在格子里显示 ✓；未知就不显示 ✓）
+        const sexMark = p.sex === 'm' ? '<span class="sex-mark m">♂</span>'
+          : p.sex === 'f' ? '<span class="sex-mark f">♀</span>' : '';
         h += '<span class="person-chip' + this.labelClass(p.label) + '" data-person="' + esc(p.id) +
-          '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span>';
+          '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + sexMark + '</span>';
         return h;
       }
       const xs = Core.xSource(st, k);
