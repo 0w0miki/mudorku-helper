@@ -172,12 +172,17 @@
     for (const bad of NOT_CLUE) {
       if (bad.test(body)) { out.reason = '规则/说明文字，不是线索'; return out; }
     }
-    // **截断的残句不要** ✗：结尾落在介词/冠词/be 动词上，说明句子被切开了 ✓
-    // （实测 family 里 "She was sitting in a" ✗ 与完整那句 "…in a chair in the front area." ✓
-    //   重复 ✓ —— 残句被当成第二条线索 ✓）
+    // **截断的句子：保留但要标记** ✓（以前是整条丢掉 ✗）
+    // 为什么改（用户实测 ✓）：car-repair 里 "He was in a car" 的 **car 是粗体** ✗
+    // → OCR 给它 conf 0 ✗ → 被 minConf 60 滤掉 ✗ → 句子只剩 "He was in a" ✗
+    // → 旧规则"结尾是冠词就丢"✗ 把整条**吞掉** ✗ → 用户完全看不到 A 的线索 ✗
+    // 而 Brook 的 "…on an oil slic" ✗ 结尾不是禁词 ✓ → 保留 ✓
+    // → 于是出现"只看到 B 的、看不到 A 的"✓（用户观察到的现象 ✓）
+    // 现在：保留残句 ✓ + 标 `truncated` ✓（面板会提示"可能没读全、请核对"✓）；
+    // 只有在 extract 里发现它**被某条完整句覆盖**时才丢 ✓（避免 family 那种重复 ✗）
     if (/\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(body)) {
-      out.reason = '句子被截断（结尾是介词/冠词）';
-      return out;
+      out.truncated = true;
+      out.reason = '句子可能没读全（结尾是介词/冠词）';
     }
     let kind = null;
     for (const r of REL_WORDS) { if (r.re.test(body)) { kind = r.kind; break; } }
@@ -215,7 +220,11 @@
       target = { name: near[0].name, kind: near[0].kind, id: near[0].id };
     }
     // 有关系但没匹配到目标：**保留 kind** ✓（调用方据此提示"先补物品" ✓），但不给 target ✓
-    if (!target) { out.reason = '没匹配到已列出的物品/区域名'; out.kind = kind; return out; }
+    if (!target) {
+      // 残句的 reason 要保留"没读全" ✓（面板据此提示"可能没读全、请核对"✓）
+      out.reason = out.truncated ? '句子可能没读全（结尾是介词/冠词）' : '没匹配到已列出的物品/区域名';
+      out.kind = kind; return out;
+    }
     out.kind = kind;
   out.text = body;            // 线索原文按"去掉署名"的版本返回
     out.target = target;
@@ -728,7 +737,17 @@
         personNames.push({ name: b.text, x: bx, y: by, w: b.w });
         continue;
       }
+      // **"残句但确实是线索"要留下** ✓（用户实测踩过 ✗）：
+      // car-repair 的 "He was in a car" 里 car 是粗体 → OCR conf 0 → 被滤掉 →
+      // 句子只剩 "He was in a" → 旧逻辑当残句丢掉 ✗ → 用户**完全看不到 A 的线索** ✗
+      // 判据：结尾是介词/冠词 ✓ 但**有人称主语 + 有方位关系词** ✓ → 它是线索，只是没读全 ✓
+      const truncTail = /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(whole);
+      const truncClue = truncTail && hasSubject(whole) && REL_WORDS.some(r => r.re.test(whole));
       // **整句留下** ✓（有关联更好，没有也留 ✓）；只有规则文字/署名/碎片才丢 ✓
+      if (truncClue) {
+        rows.push({ text: whole, person: null, x: bx, y: by, links, block: b, sex: sexOf(whole), truncated: true });
+        continue;
+      }
       if (opts && opts.permissive) {
         // 卡片模式：**以用户的框为准** ✓ → 只排除"明确不是线索"的东西 ✓
         // （黑名单 ✓ + 太短的碎片 ✓ + 结尾是介词/冠词的残句 ✓）
@@ -743,6 +762,16 @@
       } else {
         skipped.push({ text: whole, reason: links.length ? '有主语但要清理' : '规则文字/署名/没有主语' });
       }
+    }
+    // 残句去重 ✓：若另一条线索是它的**超集**（以它开头 ✓ 且更长 ✓）→ 丢掉残句 ✓
+    // （family 实测："She was sitting in a" ✗ + "…in a chair in the front area." ✓ 重复 ✓）
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (!r.truncated) continue;
+      const t = String(r.text || '').trim();
+      const covered = rows.some((o, j) => j !== i && String(o.text || '').trim().length > t.length &&
+        String(o.text || '').trim().toLowerCase().startsWith(t.toLowerCase()));
+      if (covered) rows.splice(i, 1);
     }
     // 整段文字里提到的人名（"clue: Crystal is the only person…" ✓）→ 作为归属线索的一部分 ✓
     const allNames = new Set(personNames.map(n => n.name));

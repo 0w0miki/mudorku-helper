@@ -234,11 +234,13 @@ test('人物对应：同一个人不会被两条线索占用 ✓（先到先得�
 });
 
 test('页脚署名：混进线索里要去掉 ✓（"…in a chair in puzzle by Manuel Garand …" → 只留线索部分）', () => {
-  // 署名截掉后剩下 "She was sitting in a chair in" ✓ —— 这是**残句** ✓，现在会被拒（不再和完整那句重复 ✓）
+  // 署名截掉后剩下 "She was sitting in a chair in" ✓ —— 这是**残句** ✓，
+  // 现在**保留**（标 truncated ✓）而不是丢掉（丢掉的后果见 car-repair 的 A 线索 ✗）
   const r = C.parse('She was sitting in a chair in puzzle by Manuel Garand the front area. art by Eli Voisin graphic design by Katarzyna Kosobucka & MG',
     [{ name: 'Chair', kind: 'item' }]);
-  assert.equal(r.kind, 'none');
-  assert.match(r.reason, /截断|署名/);
+  assert.equal(r.truncated, true, '残句要标记 truncated ✓');
+  assert.match(r.reason, /没读全/);
+  assert.equal(r.target.name, 'Chair', '残句里的目标仍然要解析出来 ✓');
   // 完整那句（切块修好后就是这样 ✓）要能解析出 Chair ✓
   const full = C.parse('She was sitting in a chair in the front area.', [{ name: 'Chair', kind: 'item' }, { name: 'FRONT AREA', kind: 'region' }]);
   assert.equal(full.kind, 'in');
@@ -342,11 +344,18 @@ test('阅读顺序：同一行里 y 抖动不会打乱词序 ✓', () => {
   assert.equal(blocks[0].text, 'killer was alone', '按行内 x 排序 ✓');
 });
 
-test('截断的残句不要 ✗（"She was sitting in a" 会和完整那句重复）', () => {
+test('截断的残句：保留但标记 ✓；被完整句覆盖时才丢 ✓（car-repair 的 A 线索就吃过"全丢"的亏 ✗）', () => {
   const names = [{ name: 'Chair', kind: 'item' }, { name: 'FRONT AREA', kind: 'region' }];
   const bad = C.parse('She was sitting in a', names);
-  assert.equal(bad.kind, 'none');
-  assert.match(bad.reason, /截断/);
+  assert.equal(bad.truncated, true, '残句要保留并标记 ✓');
+  assert.match(bad.reason, /没读全/);
+  // extract 这一层：同一块里"残句 + 完整句"并存时，残句被丢掉 ✓（避免重复 ✗）
+  const out = C.extract([
+    { text: 'She was sitting in a', x: 10, y: 10, w: 200, h: 20 },
+    { text: 'She was sitting in a chair in the front area.', x: 10, y: 40, w: 300, h: 20 },
+  ], names);
+  assert.equal(out.clues.length, 1, '残句被完整句覆盖 → 只留完整那条 ✓');
+  assert.match(out.clues[0].text, /front area/);
   const good = C.parse('She was sitting in a chair in the front area.', names);
   assert.equal(good.kind, 'in');
   assert.equal(good.target.name, 'Chair', '关系词后面最近的目标 ✓');

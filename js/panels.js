@@ -63,6 +63,7 @@
               (l.kind !== 'in' ? '' : l.polarity === -1 ? '（−）' : '')).join(' ／ ')
           : '<span class="muted">无关联</span>') +
         (c.mappedBy === 'initial' || c.mappedBy === 'order' ? ' · ' + (c.mappedBy === 'order' ? '按位置' : '按首字母') : '') +
+        (c.truncated ? ' · <b style="color:#b45309">可能没读全，请核对</b>' : '') +
         '</div></div>' +
         // **来源卡片缩略图放右边** ✓（放左边会把提取出的线索文字挤掉/被放大图压住 ✗）✓
         // 点一下放大看图 ✓（不再用"悬停放大" ✗ —— 那会盖住线索 ✓）
