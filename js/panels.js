@@ -43,6 +43,7 @@
     return '<div class="clue-panel">' +
       '<div class="link-title">读到 ' + cc.clues.length + ' 段（候选 · ' +
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') +
+      (cc.lowQuality ? ' · <b style="color:#b45309">识别质量差（建议用 PDF 或手填）</b>' : '') +
       // 说清这次读的范围 ✓：没框卡片时是**整页** ✓（卡片外的句子也会进来 ✓）
    (cc.wholePage ? ' · <b>整页</b>（还没框卡片）' : ' · 你框的卡片') +
    '）—— 整句都会存下来，解析出的关联列在下面；文字不对可以直接改</div>' +
@@ -1288,6 +1289,28 @@
     });
     const clues = setClueCandidates(out, src.via, out.names);
   if (MH.ui.clueCands) MH.ui.clueCands.wholePage = !!src.wholePage;  // 面板上标明"整页"
+
+    // **质量闸**：图片/OCR 路径的识别质量可能很差（花体字、淡彩气泡、白底白字等）→ **明确告知** ✓
+    // 判据（简单、可解释 ✓）：
+    //   · 碎片行：文字不像一句完整的话（不是以"某人+在…"开头 / 没有句末标点 / 词太少）
+    //   · 没人名的行：配不到人的比例高
+    // 超阈值就说清"这次质量差、建议换 PDF 或手填"，而不是让用户以为识别成功 ✗
+    const fragile = clues.filter(c => {
+      const t = String(c.text || '');
+      const words = t.split(/\s+/).filter(Boolean);
+      return !/^(She|He|They|It|The\s+\w+|Someone)\b/i.test(t) || words.length < 4 || !/[.!?]\s*$/.test(t);
+    }).length;
+    const noName = clues.filter(c => !c.personId).length;
+    const bad = clues.length >= 3 && (fragile / clues.length >= 0.6 || noName === clues.length);
+    if (bad) {
+      MH.toast('这次识别质量很差（' + fragile + '/' + clues.length + ' 条是碎片' +
+        (noName ? '、' + noName + ' 条没配上人' : '') + '）—— 这张图的字体/底色对 OCR 不友好。' +
+        '建议：① 有 PDF 就用 PDF（文字层 100% 准确）；② 或直接在「人物 → 线索」里手填。' +
+        '候选仍列在面板里，可核对修改。', 'warn');
+      if (MH.ui.clueCands) MH.ui.clueCands.lowQuality = true;
+      if (MH.ui.clueCands) MH.render();
+      return;
+    }
     MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
   }
 

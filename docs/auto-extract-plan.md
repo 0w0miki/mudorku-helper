@@ -2526,6 +2526,37 @@ pnpm test 287/287 ✓、e2e 287 项 0 失败 ✓
 `.person-chip .sex-mark`、`.cands i .sex-mark` 样式全部删除 ✓（不留死代码 ✓）。
 e2e 改为断言"地图上 0 个性别标记 ✓ + 面板里 ≥2 个 ✓"。
 pnpm test 287/287 ✓、e2e 287 项 0 失败 ✓
+
+**car-repair 图片路径读不出 A 的线索 —— 结论：这张图 OCR 不了（2026-10-20，用户报告）✓**
+
+用户截了 4 张卡（PNG，图片/OCR 路径 ✓；其中 snip4/snip5 是 snip2 的**重复子区域** ✓）。
+现象：A（Anthony）的线索没识别出来 ✓。
+
+复现（按用户坐标裁卡 ✓）：
+```
+5 段：[Breck] "She was sitting in a chail chair"（其实是 Crystal 的 ✗）
+     [Breck] "He was in a car"（其实是 Anthony 的 ✗ → 于是 A 没有线索 ✗）
+     [Diane] "Va The Vict He was alone with the mu" ✗
+     [Diane] "She was alone in the Waiting Area" ✓
+     [Oll S] "He was beside a S shelf"（Emilio ✗）
+```
+块 dump 显示 OCR 在 snip2 上只读出 **1 个名字**（"Breck" ✗，Brook 的误读 ✓）+
+碎片句（"A" / "am" / "she was sit In a chai" ✗）✓
+
+**试了 5 组 OCR 参数**（zoom 4/6/8、psm 11/6、minConf 40/60、限定字符集 ✓）：
+**"Anthony" / "Crystal" / "car" 在任何组合下都没读出来** ✗ ——
+这张图是"白色花体字名牌 + 淡彩气泡 + 深色斜体"✗，tesseract 拿它没办法 ✓。
+→ **图片路径对这类题目不可用** ✗，不是参数能救的 ✓。
+
+**加了一道质量闸（本次）** ✓：识别完后评估质量 ✓
+（碎片行比例 ≥ 60% 或全部配不到人 ✓）→ 明确提示 ✓：
+"这次识别质量很差（5/5 条是碎片）—— 这张图的字体/底色对 OCR 不友好。
+ 建议：① 有 PDF 就用 PDF（文字层 100% 准确）；② 或直接在「人物 → 线索」里手填。"
+并且候选面板标题也会标"识别质量差（建议用 PDF 或手填）" ✓
+
+**给用户的结论** ✓：同一份题用 **PDF** 走文字层 → 4 条线索 + 4 个人名全对 ✓
+（本会话早前已验证 ✓，含 Diane 那条 ✓）；这张 PNG 建议改用 PDF 或手填 ✓。
+pnpm test 287/287 ✓、e2e 271 项 0 失败 ✓
 ## P3 线索与人物关联（①②③ 已完成 ✓）
 
 **③ 应用：已接线 ✓**（2026-10-15）
