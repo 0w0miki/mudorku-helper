@@ -1307,8 +1307,26 @@
         (noName ? '、' + noName + ' 条没配上人' : '') + '）—— 这张图的字体/底色对 OCR 不友好。' +
         '建议：① 有 PDF 就用 PDF（文字层 100% 准确）；② 或直接在「人物 → 线索」里手填。' +
         '候选仍列在面板里，可核对修改。', 'warn');
-      if (MH.ui.clueCands) MH.ui.clueCands.lowQuality = true;
-      if (MH.ui.clueCands) MH.render();
+      MH.ui.clueCands.lowQuality = true;
+      // **质量差时不要"位置推定"** ✗→✓：
+      // 位置推定会把每条线索强行派给某个人（为了省事、默认全填 ✓），
+      // 这在识别质量差时就变成**错派** ✗ —— 面板看起来"全都有人在管"✓，
+      // 用户根本看不出哪些是猜的 ✓（用户实测反馈："也没有显示未指定人"✓）。
+      // → 把位置推定的那些**清空** ✓，让它们显示"（未指定人）"✓，用户一眼知道要手填 ✓
+      // **连"首字母匹配"也清掉** ✗→✓：质量差时人名常被读成碎片 ✗
+      // （实测 "Area" 这种碎片首字母是 A → 被当成 Anthony 派了 A ✓）
+      // 只保留 `label`（编号同名，精确匹配 ✓）—— 其余一律留空让用户选 ✓
+      let cleared = 0;
+      for (const c of MH.ui.clueCands.clues) {
+        if (c.mappedBy === 'order' || c.mappedBy === 'initial') {
+          c.personId = ''; c.mappedBy = ''; cleared++;
+        }
+      }
+      MH.render();
+      if (cleared) {
+        MH.toast('已把 ' + cleared + ' 条"推定"的对应清空（识别质量差，推定不可信）' +
+          '—— 请在左边下拉框里手动指定 ✓', 'warn');
+      }
       return;
     }
     MH.toast('读到 ' + clues.length + ' 条线索（候选）· 请核对' + (clues.some(c => !c.personId) ? '并指定是哪个人' : '') + '，再点「应用」', 'ok');
