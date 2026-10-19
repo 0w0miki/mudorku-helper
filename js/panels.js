@@ -1301,6 +1301,7 @@
       return !/^(She|He|They|It|The\s+\w+|Someone)\b/i.test(t) || words.length < 4 || !/[.!?]\s*$/.test(t);
     }).length;
     const noName = clues.filter(c => !c.personId).length;
+    const st0 = MH.store.state;
     const bad = clues.length >= 3 && (fragile / clues.length >= 0.6 || noName === clues.length);
     if (bad) {
       MH.toast('这次识别质量很差（' + fragile + '/' + clues.length + ' 条是碎片' +
@@ -1313,12 +1314,28 @@
       // 这在识别质量差时就变成**错派** ✗ —— 面板看起来"全都有人在管"✓，
       // 用户根本看不出哪些是猜的 ✓（用户实测反馈："也没有显示未指定人"✓）。
       // → 把位置推定的那些**清空** ✓，让它们显示"（未指定人）"✓，用户一眼知道要手填 ✓
-      // **连"首字母匹配"也清掉** ✗→✓：质量差时人名常被读成碎片 ✗
-      // （实测 "Area" 这种碎片首字母是 A → 被当成 Anthony 派了 A ✓）
-      // 只保留 `label`（编号同名，精确匹配 ✓）—— 其余一律留空让用户选 ✓
+      // 清哪些推定 ✓（用户质询过"为什么要清首字母匹配" ✓ —— 结论：**不能一刀切** ✗）
+      // · `order`（位置推定）：纯按顺序派 ✓ 质量差时毫无依据 ✗ → 全清 ✓
+      // · `initial`（首字母）：**只清可疑的人名** ✓
+      //   可靠的人名（如 "Diane" → D ✓）要保留 ✓，否则等于把正确信息也扔了 ✗
+      //   可疑的判据（可解释、不用词典 ✓）：
+      //     ① 太短（< 4 个字母 ✓）→ 多半是碎片 ✗
+      //     ② 是**某个物品/区域名里的词** ✗ —— 实测碎片 "Area"
+      //        其实是 "WAITING AREA" 的后半截 ✓ → 首字母 A 被错派给 Anthony ✗
+      const nameWords = new Set();
+      for (const t of (st0.items || []).concat(st0.regions || [])) {
+        for (const w of String(t.name || '').toLowerCase().split(/\s+/)) if (w) nameWords.add(w);
+      }
+      const suspectName = (nm) => {
+        const w = String(nm || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+        if (!w) return true;
+        if (w.length < 4) return true;                 // 太短 ✓
+        if (nameWords.has(w)) return true;             // 是物品/区域名里的词 ✓
+        return false;
+      };
       let cleared = 0;
       for (const c of MH.ui.clueCands.clues) {
-        if (c.mappedBy === 'order' || c.mappedBy === 'initial') {
+        if (c.mappedBy === 'order' || (c.mappedBy === 'initial' && suspectName(c.person))) {
           c.personId = ''; c.mappedBy = ''; cleared++;
         }
       }
