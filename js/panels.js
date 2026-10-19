@@ -708,6 +708,9 @@
           ' data-act="select-person" data-id="' + esc(p.id) + '" data-hover-person="' + esc(p.id) + '"' +
           ' style="--pc:' + esc(p.color) + '" title="' + esc(title) + '">' +
           '<span class="pl">' + esc(p.label) + '</span>' +
+          // **性别角标** ✓（用户要求：左边人物面板里直接能看到 ✓）
+          (p.sex === 'm' ? '<span class="sex-dot m" title="男">♂</span>'
+            : p.sex === 'f' ? '<span class="sex-dot f" title="女">♀</span>' : '') +
      // 已确定的人**不再放角标** ✓：编号本身已经填成本人颜色 ✓（那个 ✓ 角标用户不要 ✓）
      (at ? '' : (cnt ? '<span class="pb" title="' + cnt + ' 个候选">' + cnt + '</span>' : '')) +
           '</li>';
@@ -718,6 +721,10 @@
       (sel
         ? '<div class="pnow-row">' +
             '<span class="chip sm" style="--pc:' + esc(sel.color) + '">' + esc(sel.label) + '</span>' +
+            // **性别徽章** ✓（用户要求：左边人物面板里能显示性别 ✓；未知也给个说明 ✓）
+            (sel.sex === 'm' ? '<span class="sex-badge m" title="男性">♂ 男</span>'
+              : sel.sex === 'f' ? '<span class="sex-badge f" title="女性">♀ 女</span>'
+                : '<span class="sex-badge unknown" title="还没设置 —— 在「① 地图准备 → 添加人物线索」里点一下即可">性别未知</span>') +
             '<span class="muted">' + esc(stateOf(st, sel)) + '</span>' +
             '<span class="grow"></span>' +
             (st.play.placed[sel.id] ? '<button class="ghost sm" data-act="unplace-person" data-id="' + esc(sel.id) + '">取消确定</button>' : '') +

@@ -359,11 +359,11 @@
       const pid = Core.personAt(st, k);
       if (pid) {
         const p = Core.person(st, pid);
-        // **性别符号 ♂/♀** ✓（用户要求：游玩时在格子里显示 ✓；未知就不显示 ✓）
-        const sexMark = p.sex === 'm' ? '<span class="sex-mark m">♂</span>'
-          : p.sex === 'f' ? '<span class="sex-mark f">♀</span>' : '';
+        // **地图上不显示性别标记** ✓（用户明确要求 ✓）
+        // 性别只显示在左边「人物」面板里 ✓（列表角标 + 选中行徽章 ✓）——
+        // 格子里的圆点保持"只有一个编号" ✓，最干净好认 ✓
         h += '<span class="person-chip' + this.labelClass(p.label) + '" data-person="' + esc(p.id) +
-          '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + sexMark + '</span>';
+          '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</span>';
         return h;
       }
       const xs = Core.xSource(st, k);
@@ -375,6 +375,8 @@
       if (cands.length) {
         const shown = cands.slice(0, CAND_SHOW_MAX).map(id => {
           const p = Core.person(st, id);
+          // **候选格不带性别标记** ✓（用户明确要求："地图中选中后不显示性别标记" ✓）
+          // 出生时只有字母 ✓，干净好认 ✓；性别标记只在「已确定」的圆点上 ✓
           return '<i class="' + this.labelClass(p.label).trim() + '" data-person="' + esc(p.id) +
             '" style="--pc:' + esc(p.color) + '">' + esc(p.label) + '</i>';
         }).join('');

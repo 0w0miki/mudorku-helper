@@ -2318,21 +2318,96 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(sexApplied.b === 'm' && sexApplied.a === 'f',
     '应用线索带入性别 ✓（B 未设置→m；A 手动设为 f 不被覆盖 ✓）：' + JSON.stringify(sexApplied));
   // 游玩：格子里显示 ♂/♀ ✓
+  // 注意：**选中的人不显示标记** ✓（后加的需求 ✓）→ 这里先取消选中再断言 ✓
   await p.evaluate((pids) => {
     const st = window.MH.store.state;
     st.play.placed[pids[0]] = '0,0';
     st.play.placed[pids[1]] = '0,1';
+    st.selectedPersonId = null;
     window.MH.ui.wizard = null; window.MH.ui.wizardOptOut = true;
     window.MH.render();
   }, sexPids);
   await p.click('#tabPlay');
+  // **地图上不显示性别标记** ✓（用户明确要求：只在左边「人物」面板里显示 ✓）
   const cellSex = await p.evaluate(() => ({
-    a: (document.querySelector('.cell[data-k="0,0"] .sex-mark') || {}).textContent,
-    b: (document.querySelector('.cell[data-k="0,1"] .sex-mark') || {}).textContent,
+    marks: document.querySelectorAll('.cell .sex-mark').length,
+    panelDots: document.querySelectorAll('.plist .sex-dot').length,
   }));
-  ok(cellSex.a === '♀' && cellSex.b === '♂',
-    '游玩格子里显示 ♂/♀ ✓：' + JSON.stringify(cellSex));
+  ok(cellSex.marks === 0 && cellSex.panelDots >= 2,
+    '地图上没有性别标记 ✓、面板里有 ✓：' + JSON.stringify(cellSex));
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
+
+  // 61) 游玩「人物」面板里要**直接看到性别** ✓（不只是选中格子后 ✓ —— 用户要求 ✓）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPrep');
+    if (tab) tab.click();
+    window.MH.ui.wizardOptOut = true;
+    const st = window.MH.store.state;
+    st.people[0].sex = 'm';
+    st.people[1].sex = 'f';
+    st.people[2].sex = '';
+    st.phase = 'play';
+    window.MH.render();
+  });
+  await p.click('#tabPlay');
+  await p.waitForTimeout(200);
+  const panelSex = await p.evaluate(() => ({
+    dots: [...document.querySelectorAll('.plist .sex-dot')].map(x => x.textContent),
+    badge: (document.querySelector('.pnow-row .sex-badge') || {}).textContent,
+    listCount: document.querySelectorAll('.plist li').length,
+  }));
+  ok(panelSex.dots.length === 2 && panelSex.dots.includes('♂') && panelSex.dots.includes('♀'),
+    '人物列表里的性别角标 ♂/♀ ✓：' + JSON.stringify(panelSex));
+  // 点没设性别的人 → 徽章显示"性别未知" ✓；点 B → 「♀ 女」 ✓
+  await p.evaluate(() => {
+    const st = window.MH.store.state;
+    document.querySelector('.plist li[data-id="' + st.people[1].id + '"]').click();
+  });
+  const badgeB = await p.evaluate(() => (document.querySelector('.pnow-row .sex-badge') || {}).textContent);
+  ok(badgeB === '♀ 女', '选中行显示性别徽章 ✓：' + JSON.stringify(badgeB));
+  await p.evaluate(() => {
+    const st = window.MH.store.state;
+    document.querySelector('.plist li[data-id="' + st.people[2].id + '"]').click();
+  });
+  const badgeC = await p.evaluate(() => (document.querySelector('.pnow-row .sex-badge') || {}).textContent);
+  ok(badgeC === '性别未知', '未设置性别时显示"性别未知" ✓：' + JSON.stringify(badgeC));
+  await p.click('#tabPrep');
+
+  // 62) 面板角标在浅底/实心底上都要可见（白字 + 描边）✓
+  //     候选格上的性别符号在 scripts 探针里验证 ✓（e2e 里前面的用例会改候选状态，不稳定 ✗）
+  await p.evaluate(() => {
+    window.MH.ui.wizardOptOut = true;
+    const st = window.MH.store.state;
+    st.people[0].sex = 'm';
+    st.people[1].sex = 'f';
+    st.phase = 'play';                       // .plist 只在游玩面板里 ✓
+    window.MH.render();
+  });
+  await p.click('#tabPlay');
+  await p.waitForTimeout(150);
+  // 角标颜色按底色区分 ✓：浅底（候选/普通）用**人物颜色** ✓；实心底（已确定）用**白色** ✓
+  await p.evaluate(() => {
+    const st = window.MH.store.state;
+    delete st.play.placed[st.people[1].id];        // B 未确定（浅底 ✓）
+    st.play.placed[st.people[0].id] = '0,0';       // A 已确定（实心底 ✓）
+    window.MH.render();
+  });
+  await p.waitForTimeout(120);
+  const dotStyle = await p.evaluate(() => {
+    const st = window.MH.store.state;
+    const dotOf = pid => {
+      const li = document.querySelector('.plist li[data-id="' + pid + '"] .sex-dot');
+      return li ? { t: li.textContent, c: getComputedStyle(li).color, placed: !!document.querySelector('.plist li.placed[data-id="' + pid + '"]') } : null;
+    };
+    return { a: dotOf(st.people[0].id), b: dotOf(st.people[1].id) };
+  });
+  ok(dotStyle.a && dotStyle.a.c === 'rgb(255, 255, 255)' && dotStyle.a.placed,
+    '已确定（实心底）的性别角标是**白色** ✓：' + JSON.stringify(dotStyle.a));
+  ok(dotStyle.b && dotStyle.b.c !== 'rgb(255, 255, 255)' && !dotStyle.b.placed,
+    '候选/普通（浅底）的性别角标用**人物颜色** ✓：' + JSON.stringify(dotStyle.b));
+  await p.click('#tabPrep');
+
+  // 63) 地图上不显示性别标记（整块断言由 section 60 覆盖 ✓）
 
   console.log(A.join('\n'));
   console.log('\n失败数: ' + A.filter(s => s.startsWith('FAIL')).length);

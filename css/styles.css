@@ -953,5 +953,18 @@ body.picking #board { cursor: crosshair; }
 /* 人物性别：设置按钮高亮 ✓ + 棋盘标记上的 ♂/♀ ✓ */
 .sex-row { gap: 4px; margin: 2px 0 4px; }
 .sex-row button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.person-chip .sex-mark { font-size: .74em; line-height: 1; margin-left: 1px; vertical-align: super;
-  font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+
+/* 游玩「人物」面板里的性别显示 ✓ */
+/* 放**左下角** ✓：右上角是"候选数"角标的位置 ✓，避免重叠 ✓ */
+.plist .sex-dot { position: absolute; bottom: 2px; left: 5px; font-size: 11px; line-height: 1; font-weight: 700;
+  /* **按底色决定颜色** ✓（用户要求 ✓）：
+     · 浅底（普通 / 有候选 / 选中但未确定 ✓）→ 用**人物颜色** ✓
+     · 实心底（已确定 placed ✓）→ 用**白色** ✓
+     之前用"白字+描边" ✗ 两种底色上都发灰、看着糊 ✗ */
+  color: var(--pc, #0f172a); }
+.plist li.placed .sex-dot { color: #fff; }
+.plist li { position: relative; }
+.sex-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
+.sex-badge.m { color: #1d6fd8; border-color: #b9d2f5; background: #eef5ff; }
+.sex-badge.f { color: #d81d6f; border-color: #f5b9d2; background: #fff0f6; }
+.sex-badge.unknown { color: #889; }
