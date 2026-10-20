@@ -1944,7 +1944,8 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(/整页/.test(wholeHead), '没框卡片时面板标明"整页" ✓：' + wholeHead);
   await p.evaluate(() => { window.MH.ui.clueCands.wholePage = false; window.MH.render(); });
   const cardHead = await p.evaluate(() => (document.querySelector('.clue-panel .link-title') || {}).textContent || '');
-  ok(/你框的卡片/.test(cardHead) && !/整页/.test(cardHead), '框了卡片时标明"你框的卡片" ✓：' + cardHead);
+  // 用户要求精简 ✗：框卡片是默认情形 ✓ 不再重复写"你框的卡片"✓（"卡片 OCR"已经说明了来源 ✓）
+  ok(!/整页/.test(cardHead) && !/你框的卡片/.test(cardHead), '框了卡片时不再重复标注来源 ✓：' + cardHead);
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
 
   // 52) 旧卡片（缺 srcX 等源坐标）必须**被忽略并告知** ✓（以前算出 NaN → 静默失效 ✗）

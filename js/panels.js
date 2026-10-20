@@ -43,15 +43,13 @@
     return '<div class="clue-panel">' +
       '<div class="link-title">读到 ' + cc.clues.length + ' 段（候选 · ' +
       (cc.via === 'pdf' ? 'PDF 文字层' : cc.via === 'ocr' ? '卡片 OCR' : 'JSON') +
-      (cc.lowQuality ? ' · <b style="color:#b45309">识别质量差（建议用 PDF 或手填）</b>' : '') +
-      // 说清这次读的范围 ✓：没框卡片时是**整页** ✓（卡片外的句子也会进来 ✓）
-   (cc.wholePage ? ' · <b>整页</b>（还没框卡片）' : ' · 你框的卡片') +
-   '）—— 整句都会存下来，解析出的关联列在下面；文字不对可以直接改</div>' +
+      (cc.lowQuality ? ' · <b style="color:#b45309">识别质量差</b>' : '') +
+      // **只有"整页"才需要提示** ✓：框了卡片是默认情形 ✓ 不必再说一遍（用户指出重复 ✗）
+      (cc.wholePage ? ' · <b>整页</b>' : '') +
+      '）—— 已列出识别到的人物线索，可以手动调整</div>' +
       (cc.clues.some(c => !c.personId)
-        ? '<p class="hint">有 ' + cc.clues.filter(c => !c.personId).length +
-          ' 段没能按名字/首字母对上人物' +
-     ((cc.names || []).length ? '（首字母不在编号里）' : '（<b>这张卡片上没有人名</b> —— 这版题目用人像区分，请对照题面的人像用下拉框指定）') +
-     ' —— 用左边的下拉框指定一下</p>'
+        ? '<p class="hint">' + cc.clues.filter(c => !c.personId).length +
+          ' 段未指定人 —— 用左边的下拉框选一下</p>'
         : '') +
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
@@ -1315,12 +1313,7 @@
     const bad = clues.length >= 3 &&
       ((q && q.meanConf > 0 && q.meanConf < 70) || fragile / clues.length >= 0.5);
     if (bad) {
-      MH.toast('这次识别质量很差（' + (q && q.meanConf ? '平均置信 ' + q.meanConf + ' ✓ ' : '') +
-        fragile + '/' + clues.length + ' 条是碎片' +
-        (q && q.lowShare ? '、' + Math.round(q.lowShare * 100) + '% 的词置信 <60' : '') +
-        '）—— 这张图的字体/底色对 OCR 不友好。' +
-        '建议：① 有 PDF 就用 PDF（文字层 100% 准确）；② 或直接在「人物 → 线索」里手填。' +
-        '候选仍列在面板里，可核对修改。', 'warn');
+      // 用户要求：**不要弹警告** ✗ → 只在面板标题里标"识别质量差" ✓
       MH.ui.clueCands.lowQuality = true;
       // **质量差时不要"位置推定"** ✗→✓：
       // 位置推定会把每条线索强行派给某个人（为了省事、默认全填 ✓），
