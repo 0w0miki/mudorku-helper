@@ -47,10 +47,7 @@
       // **只有"整页"才需要提示** ✓：框了卡片是默认情形 ✓ 不必再说一遍（用户指出重复 ✗）
       (cc.wholePage ? ' · <b>整页</b>' : '') +
       '）—— 已列出识别到的人物线索，可以手动调整</div>' +
-      (cc.clues.some(c => !c.personId)
-        ? '<p class="hint">' + cc.clues.filter(c => !c.personId).length +
-          ' 段未指定人 —— 用左边的下拉框选一下</p>'
-        : '') +
+      // 用户要求：这句去掉 ✓（下拉框本来就显示"（未指定人）"✓，不必再提示一遍 ✗）
       cc.clues.map((c, i) => '<div class="clue-row' + (c.skip ? ' skipped' : '') + '">' +
         '<select data-act="clue-map" data-i="' + i + '">' + opts(c.personId) + '</select>' +
         '<div class="grow">' +
