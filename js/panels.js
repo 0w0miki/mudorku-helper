@@ -1305,12 +1305,11 @@
     //   辅信号 = 行形状 ✓：开头没人称主语 ✓ 或 词太少 ✓ 或 **结尾是介词/冠词**（真残句 ✓）
     //   ✗ 已删掉两个误判源：① "结尾没有句号"（OCR 常丢标点 ✓，正常句子被误判 ✗）
     //                        ② "全部行没配上人"（**没有名字的题目**是合法的 ✓，如 family/golf ✗）
-    const fragile = clues.filter(c => {
-      const t = String(c.text || '');
-      const words = t.split(/\s+/).filter(Boolean);
-      return !/^(She|He|They|It|The\s+\w+|Someone)\b/i.test(t) || words.length < 4 ||
-        /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(t);
-    }).length;
+    // 碎片判定统一交给 clues.looksFragmentary ✓（去掉"开头必须是人称"✗ —— 真实线索开头不一定 ✓；
+    // 用户给的三个反例见 clues.js 里那条注释 ✓）
+    const fragile = clues.filter(c => (window.MurdokuClues && window.MurdokuClues.looksFragmentary
+      ? window.MurdokuClues.looksFragmentary(c.text)
+      : false)).length;
     const q = src.quality || null;
     const st0 = MH.store.state;
     const bad = clues.length >= 3 &&

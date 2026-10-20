@@ -632,6 +632,26 @@
    * 用户要求："整句都记录下来，不管有没有发现物品和区域的关联" ✓
    * —— 所以这里只挡"规则文字/署名/没有主语的碎片" ✓，其余（含"受害者说明"这类 ✓）都留下 ✓
    */
+  /**
+   * 这一行是不是"被切碎了"（质量闸用 ✓，**只用于提示/联动清空推定** ✓）
+   *
+   * 判据（用户 2026-10-20 校准过 ✓）：
+   *   ① 词数 < 4 ✓
+   *   ② 结尾是介词/冠词/be 动词 ✓（"He was in a" ✗、"He was beside a" ✗）
+   * **去掉**了原来那条"开头必须是人称主语" ✗ —— 真实线索的开头**不一定是人称** ✓：
+   *   "The Victim. He was alone with the murderer." ✓
+   *   "In his hole, there was a woman in a cart." ✓
+   *   "His hole number is greater than Naomi's hole number." ✓
+   *   （原规则会把这三条**误判成碎片** ✗）
+   */
+  function looksFragmentary(text) {
+    const t = norm(text);
+    if (!t) return true;
+    const words = t.split(/\s+/).filter(Boolean);
+    if (words.length < 4) return true;
+    return /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(t);
+  }
+
   function looksLikeClueStatement(text) {
     const t = norm(text);
     if (!t || letters(t).length < 6) return false;
@@ -868,7 +888,7 @@
     return out;
   }
 
-  const api = { parse, findTarget, findTargets, clauseLinks, sexOf, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readCardItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE };
+  const api = { parse, findTarget, findTargets, clauseLinks, sexOf, looksLikeClueStatement, clusterLines, splitClauses, mapByInitial, mergeBlocks, cluster, readItems, readCardItems, readOcrItems, looksLikePersonName, extract, readRuns, norm, REL_WORDS, NOT_CLUE, looksFragmentary};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MurdokuClues = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -466,3 +466,19 @@ test('从线索文字推断性别 ✓（he/his → 男；she/her → 女；都�
     [{ name: 'Shelf', kind: 'item' }]);
   assert.equal(out.clues[0].sex, 'm');
 });
+
+test('碎片判定（质量闸）：只按"词数<4"与"结尾是介词/冠词" ✓ —— **不按开头是不是人称** ✓', () => {
+  // 用户给的真实反例 ✓：开头都不是 She/He ✓，但都是**正常线索** ✓，不能被判碎片 ✗
+  for (const t of [
+    'The Victim. He was alone with the murderer.',
+    'In his hole, there was a woman in a cart.',
+    "His hole number is greater than Naomi's hole number.",
+  ]) assert.equal(C.looksFragmentary(t), false, '真实线索不该被判碎片 ✗：' + t);
+  // 真正被切碎的 ✓
+  for (const t of ['He was in a', 'He was beside a', 'He was on an', 'He was in']) {
+    assert.equal(C.looksFragmentary(t), true, '残句应判碎片 ✓：' + t);
+  }
+  // 完整的同类句子 ✓
+  assert.equal(C.looksFragmentary('He was in a car.'), false);
+  assert.equal(C.looksFragmentary('He was beside a shelf.'), false);
+});
