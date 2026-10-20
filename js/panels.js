@@ -1231,9 +1231,13 @@
           }
         } catch (err) { void err; }
       }
+      // 置信度统计 ✓（质量闸用 ✓）：平均 conf + conf<60 的占比
+      const confs = words.map(w => (w.conf == null ? 85 : w.conf));
+      const meanConf = confs.length ? Math.round(confs.reduce((a, b2) => a + b2, 0) / confs.length) : 0;
+      const lowShare = confs.length ? +(confs.filter(c => c < 60).length / confs.length).toFixed(2) : 0;
       return words && words.length
         ? { items: words.map(w => ({ text: w.text, x: w.x, y: w.y, w: w.w, h: w.h })), via: 'ocr',
-      cuts: raster.cuts || [], spans: raster.spans || [] }     // **卡片分割线 + 每张卡的范围**
+      cuts: raster.cuts || [], spans: raster.spans || [], quality: { meanConf, lowShare } }  // 分割线 + 置信度
         : null;
     }
     return null;
@@ -1296,17 +1300,26 @@
     //   · 碎片行：文字不像一句完整的话（不是以"某人+在…"开头 / 没有句末标点 / 词太少）
     //   · 没人名的行：配不到人的比例高
     // 超阈值就说清"这次质量差、建议换 PDF 或手填"，而不是让用户以为识别成功 ✗
+    // 判据（v2 ✓ 2026-10-20 用户质询后重写 ✓）：
+    //   主信号 = **OCR 置信度** ✓（平均 conf、conf<60 占比 ✓ —— 文本层没有这个信号 → 不参与 ✓）
+    //   辅信号 = 行形状 ✓：开头没人称主语 ✓ 或 词太少 ✓ 或 **结尾是介词/冠词**（真残句 ✓）
+    //   ✗ 已删掉两个误判源：① "结尾没有句号"（OCR 常丢标点 ✓，正常句子被误判 ✗）
+    //                        ② "全部行没配上人"（**没有名字的题目**是合法的 ✓，如 family/golf ✗）
     const fragile = clues.filter(c => {
       const t = String(c.text || '');
       const words = t.split(/\s+/).filter(Boolean);
-      return !/^(She|He|They|It|The\s+\w+|Someone)\b/i.test(t) || words.length < 4 || !/[.!?]\s*$/.test(t);
+      return !/^(She|He|They|It|The\s+\w+|Someone)\b/i.test(t) || words.length < 4 ||
+        /\b(?:a|an|the|in|on|at|beside|of|to|with|by|and|or|is|was|were|are|be)\s*[.!?]?$/i.test(t);
     }).length;
-    const noName = clues.filter(c => !c.personId).length;
+    const q = src.quality || null;
     const st0 = MH.store.state;
-    const bad = clues.length >= 3 && (fragile / clues.length >= 0.6 || noName === clues.length);
+    const bad = clues.length >= 3 &&
+      ((q && q.meanConf > 0 && q.meanConf < 70) || fragile / clues.length >= 0.5);
     if (bad) {
-      MH.toast('这次识别质量很差（' + fragile + '/' + clues.length + ' 条是碎片' +
-        (noName ? '、' + noName + ' 条没配上人' : '') + '）—— 这张图的字体/底色对 OCR 不友好。' +
+      MH.toast('这次识别质量很差（' + (q && q.meanConf ? '平均置信 ' + q.meanConf + ' ✓ ' : '') +
+        fragile + '/' + clues.length + ' 条是碎片' +
+        (q && q.lowShare ? '、' + Math.round(q.lowShare * 100) + '% 的词置信 <60' : '') +
+        '）—— 这张图的字体/底色对 OCR 不友好。' +
         '建议：① 有 PDF 就用 PDF（文字层 100% 准确）；② 或直接在「人物 → 线索」里手填。' +
         '候选仍列在面板里，可核对修改。', 'warn');
       MH.ui.clueCands.lowQuality = true;
