@@ -1930,6 +1930,36 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     '一句话的两条关联都在应用时建好（并用改名后的名字对上 ✓）：' + JSON.stringify(applied2));
   await p.evaluate(() => { window.MH.ui.clueCands = null; window.MH.render(); });
 
+  // 50.5) 「左键＝标 X」模式：悬停格子上浮一个 ✕ ✓（用户要求：让人看得出现在是在标 X）
+  await p.evaluate(() => {
+    const tab = document.getElementById('tabPlay'); if (tab) tab.click();
+  });
+  await p.waitForTimeout(200);
+  await p.evaluate(() => {
+    const b2 = [...document.querySelectorAll('[data-act="left-mode"]')].find(x => x.dataset.mode === 'x');
+    if (b2) b2.click();
+  });
+  await p.waitForTimeout(200);
+  const xState = await p.evaluate(() => {
+    const c = document.querySelector('.cell');
+    const after = c ? getComputedStyle(c, '::after') : null;
+    return { body: document.body.classList.contains('left-x'), mode: window.MH.store.state.settings.leftMode };
+  });
+  ok(xState.mode === 'x' && xState.body, '标 X 模式下 body 带 left-x（悬停预览 ✕ 的开关）✓：' + JSON.stringify(xState));
+  await p.hover('.cell');
+  await p.waitForTimeout(120);
+  const xAfter = await p.evaluate(() => {
+    const c = document.querySelector('.cell');
+    return c ? getComputedStyle(c, '::after').content : '';
+  });
+  ok(/✕/.test(xAfter), '标 X 模式悬停时格子上浮出 ✕ ✓：' + xAfter);
+  await p.evaluate(() => {
+    const b2 = [...document.querySelectorAll('[data-act="left-mode"]')].find(x => x.dataset.mode === 'candidate');
+    if (b2) b2.click();
+    const tab = document.getElementById('tabPrep'); if (tab) tab.click();
+  });
+  await p.waitForTimeout(200);
+
   // 51) 候选面板要说清"这次读的是整页还是你框的卡片" ✓（用户被卡片外的句子困惑过 ✓）
   await p.evaluate(() => {
     const tab = document.getElementById('tabPrep');

@@ -2716,6 +2716,28 @@ v2（现在 ✓）：
 强制 lowQuality：标题 = 读到 3 段（候选 · 卡片 OCR · **识别质量差**）—— 已列出… ✓ 无弹窗 ✓
 ```
 e2e 相应断言已改（"框了卡片时不再标注来源"✓）；pnpm test 288/288 ✓、e2e 271 项 0 失败 ✓
+
+**标 X 模式：悬停格子上浮 ✕ 预览（2026-10-21，用户要求）✓**
+
+用户："标X的时候，在网格上悬浮时能悬浮一个X遮挡格子，表明现在是在标X" ✓
+
+实现（纯 CSS + 一个 body 类 ✓，不动棋盘逻辑 ✓）：
+```
+· app.js 的 render()：游玩阶段且 settings.leftMode === 'x' 时给 body 加 `left-x` ✓
+· styles.css：
+    body.left-x .cell { cursor: crosshair }
+    body.left-x .cell:hover::after { content:'✕'; 铺满格子; 红字 + 淡红底; pointer-events:none }
+```
+为什么用 ::after ✓：`.cell::before` 已被"草稿格"占用 ✓，`::after` 空闲 ✓；
+`pointer-events: none` 保证不影响点击/拖动 ✓。
+
+实测（真实点击「左键＝标 X」）：
+```
+body.className = "left-x" ✓
+悬停 → ::after content="✕" ✓ color rgba(220,38,38,.78) ✓ 背景淡红 ✓ 字号 22.9px ✓
+切回「左键＝候选」→ content: none ✓ body 无 left-x ✓
+```
+e2e 新增 2 条断言 ✓（左侧开关类 ✓ + 悬停出 ✕ ✓）；pnpm test 288/288 ✓、e2e 273 项 0 失败 ✓
 ## P3 线索与人物关联（①②③ 已完成 ✓）
 
 **③ 应用：已接线 ✓**（2026-10-15）

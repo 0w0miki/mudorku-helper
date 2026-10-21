@@ -39,6 +39,10 @@
     render() {
       const st = MH.store.state;
       document.body.dataset.phase = st.phase;
+      // **「左键＝标 X」模式** ✓：给 body 加类 ✓ → CSS 就能在悬停格子上浮一个 ✕ ✓
+      // （用户要求："标 X 的时候，在网格上悬浮时能悬浮一个 X 遮挡格子，表明现在是在标 X" ✓）
+      document.body.classList.toggle('left-x',
+        st.phase === 'play' && !!(st.settings && st.settings.leftMode === 'x'));
       if (MH.board) { MH.board.rebuildIfNeeded(); MH.board.paint(); }
       for (const fn of MH.renderers) fn(st);
       if (MH.board) MH.board.applyHover();

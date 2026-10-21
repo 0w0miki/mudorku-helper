@@ -331,6 +331,20 @@ button.hi:active { background: var(--accent); color: #fff; }
 }
 
 .cell:hover { outline: 2px solid rgba(37, 99, 235, .75); outline-offset: -2px; z-index: 3; }
+
+/* **「左键＝标 X」模式**：悬停的格子上浮一个 ✕ ✓（用户要求：一眼看出"现在是在标 X"✓）
+   只在游玩阶段生效 ✓（准备阶段没有这个模式 ✓）—— body 上的 left-x 由 app.js 的 render 开关 ✓ */
+body.left-x .cell { cursor: crosshair; }
+body.left-x .cell:hover { outline-color: rgba(220, 38, 38, .8); }
+body.left-x .cell:hover::after {
+  content: '✕';
+  position: absolute; inset: 0; z-index: 4;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--cell) * 0.52); font-weight: 700; line-height: 1;
+  color: rgba(220, 38, 38, .78);
+  background: rgba(220, 38, 38, .10);
+  pointer-events: none;
+}
 .cell.hl-pos { outline: 2px solid var(--pos); outline-offset: -2px; z-index: 2; }
 .cell.hl-neg { outline: 2px solid var(--neg); outline-offset: -2px; z-index: 2; }
 .cell.draft-cell::before {
