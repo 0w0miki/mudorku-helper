@@ -338,11 +338,15 @@ body.left-x .cell { cursor: crosshair; }
 body.left-x .cell:hover { outline-color: rgba(220, 38, 38, .8); }
 body.left-x .cell:hover::after {
   content: '✕';
-  position: absolute; inset: 0; z-index: 4;
+  position: absolute; inset: 0;
+  /* **必须盖住候选字母** ✓（用户要求"挡住候选"✓）：
+     `.cands` 是 z-index:5 ✓ —— 原来这里 z-index:4 ✗ → 候选画在 ✕ 上层 ✗ → 看起来"挡不住" ✗
+     现在提到 9 ✓，底色也改成**近乎不透明** ✓（原来 .10 太透 ✗，候选会透出来 ✗） */
+  z-index: 9;
   display: flex; align-items: center; justify-content: center;
   font-size: calc(var(--cell) * 0.52); font-weight: 700; line-height: 1;
-  color: rgba(220, 38, 38, .78);
-  background: rgba(220, 38, 38, .10);
+  color: rgba(220, 38, 38, .9);
+  background: rgba(254, 226, 226, .97);
   pointer-events: none;
 }
 .cell.hl-pos { outline: 2px solid var(--pos); outline-offset: -2px; z-index: 2; }
