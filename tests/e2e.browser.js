@@ -1979,9 +1979,10 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
       candsOpacity: parseFloat(getComputedStyle(cands).opacity) };   // 悬停时应为 0 ✓
   });
   // 用户后续要求：底色**半透明** ✓（格子的底色/候选隐约可见 ✓），但层级仍要在候选之上 ✓
+  // 用户确认要"半透明底把候选压淡、但候选仍可见"✓
   ok(xLayer.skip || (xLayer.afterZ > xLayer.candsZ && xLayer.bgAlpha > 0.2 && xLayer.bgAlpha < 0.9 &&
-      xLayer.candsOpacity === 0),
-    '✕ 半透明背景 + 悬停时候选淡出（既透出格子底色、又不和 ✕ 叠字）✓：' + JSON.stringify(xLayer));
+      xLayer.candsOpacity === 1),
+    '✕ 半透明背景、候选仍保留（被压淡但仍可见）✓：' + JSON.stringify(xLayer));
   await p.evaluate(() => {
     const b2 = [...document.querySelectorAll('[data-act="left-mode"]')].find(x => x.dataset.mode === 'candidate');
     if (b2) b2.click();

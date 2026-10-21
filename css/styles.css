@@ -336,10 +336,8 @@ button.hi:active { background: var(--accent); color: #fff; }
    只在游玩阶段生效 ✓（准备阶段没有这个模式 ✓）—— body 上的 left-x 由 app.js 的 render 开关 ✓ */
 body.left-x .cell { cursor: crosshair; }
 body.left-x .cell:hover { outline-color: rgba(220, 38, 38, .8); }
-/* **悬停时把候选字母藏起来** ✓：背景是半透明的 ✓（格子底色能透出来 ✓），
-   若候选还挂着就会和 ✕ 叠在一起看不清 ✗ → 悬停时淡出 ✓（等价于"挡住候选"✓） */
-body.left-x .cell:hover .cands { opacity: 0; }
-body.left-x .cands { transition: opacity .06s linear; }
+/* 悬停时**保留候选** ✓（用户确认："那是我想要的"✓）——
+   半透明底会把候选**压淡** ✓，但还能看见有哪些人 ✓（不是完全挡掉 ✗） */
 body.left-x .cell:hover::after {
   content: '✕';
   position: absolute; inset: 0;
