@@ -336,6 +336,10 @@ button.hi:active { background: var(--accent); color: #fff; }
    只在游玩阶段生效 ✓（准备阶段没有这个模式 ✓）—— body 上的 left-x 由 app.js 的 render 开关 ✓ */
 body.left-x .cell { cursor: crosshair; }
 body.left-x .cell:hover { outline-color: rgba(220, 38, 38, .8); }
+/* **悬停时把候选字母藏起来** ✓：背景是半透明的 ✓（格子底色能透出来 ✓），
+   若候选还挂着就会和 ✕ 叠在一起看不清 ✗ → 悬停时淡出 ✓（等价于"挡住候选"✓） */
+body.left-x .cell:hover .cands { opacity: 0; }
+body.left-x .cands { transition: opacity .06s linear; }
 body.left-x .cell:hover::after {
   content: '✕';
   position: absolute; inset: 0;
@@ -345,8 +349,11 @@ body.left-x .cell:hover::after {
   z-index: 9;
   display: flex; align-items: center; justify-content: center;
   font-size: calc(var(--cell) * 0.52); font-weight: 700; line-height: 1;
-  color: rgba(220, 38, 38, .9);
-  background: rgba(254, 226, 226, .97);
+  color: rgba(220, 38, 38, .95);
+  /* **半透明** ✓（用户要求 ✓）：格子的底色/候选隐约可见 ✓，但 ✕ 仍在最上层 ✓
+     （0.55 左右：既不像 .10 那样"挡不住候选"✗，也不至于把格子糊死 ✓） */
+  background: rgba(254, 226, 226, .55);
+  backdrop-filter: saturate(1.15);
   pointer-events: none;
 }
 .cell.hl-pos { outline: 2px solid var(--pos); outline-offset: -2px; z-index: 2; }

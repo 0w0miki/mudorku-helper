@@ -1975,10 +1975,13 @@ const ok = (c, m) => A.push((c ? 'PASS ' : 'FAIL ') + m);
     const m = /rgba?\(([^)]+)\)/.exec(a.backgroundColor) || [];
     const alpha = m[1] ? parseFloat(m[1].split(',')[3]) : 0;
     return { skip: false, afterZ: parseInt(a.zIndex, 10) || 0, bgAlpha: alpha,
-      candsZ: parseInt(getComputedStyle(cands).zIndex, 10) || 0 };
+      candsZ: parseInt(getComputedStyle(cands).zIndex, 10) || 0,
+      candsOpacity: parseFloat(getComputedStyle(cands).opacity) };   // 悬停时应为 0 ✓
   });
-  ok(xLayer.skip || (xLayer.afterZ > xLayer.candsZ && xLayer.bgAlpha >= 0.9),
-    '✕ 的层级要高于候选字母、且底色不透明（好盖住候选）✓：' + JSON.stringify(xLayer));
+  // 用户后续要求：底色**半透明** ✓（格子的底色/候选隐约可见 ✓），但层级仍要在候选之上 ✓
+  ok(xLayer.skip || (xLayer.afterZ > xLayer.candsZ && xLayer.bgAlpha > 0.2 && xLayer.bgAlpha < 0.9 &&
+      xLayer.candsOpacity === 0),
+    '✕ 半透明背景 + 悬停时候选淡出（既透出格子底色、又不和 ✕ 叠字）✓：' + JSON.stringify(xLayer));
   await p.evaluate(() => {
     const b2 = [...document.querySelectorAll('[data-act="left-mode"]')].find(x => x.dataset.mode === 'candidate');
     if (b2) b2.click();
